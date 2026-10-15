@@ -1,0 +1,21 @@
+# 依赖
+node_modules/
+
+# HBuilderX 编译产物（各平台打包输出）
+unpackage/
+
+# HBuilderX 本地个人配置
+.hbuilderx/
+
+# 编辑器
+.idea/
+.vscode/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+npm-debug.log*
+yarn-error.log*
