@@ -1,0 +1,602 @@
+<template>
+	<view class="page">
+		<!-- 状态栏底色与顶部栏同色，让头部整块连贯 -->
+		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
+
+		<!-- 顶部返回与标题 -->
+		<view class="topbar">
+			<view class="back" :class="entered ? '' : 'back-pre'" @click="goBack">
+				<text class="back-arrow">‹</text>
+			</view>
+			<text class="topbar-title" :class="entered ? '' : 'topbar-title-pre'">创建账号</text>
+			<view class="topbar-holder"></view>
+		</view>
+
+		<view class="intro">
+			<text class="intro-title" :class="entered ? '' : 'intro-title-pre'">加入校园食堂</text>
+			<text class="intro-desc" :class="entered ? '' : 'intro-desc-pre'">注册后即可浏览档口菜单、下单并查看订单进度</text>
+		</view>
+
+		<view class="panel" :class="entered ? '' : 'panel-pre'">
+			<view class="panel-rule" :class="entered ? '' : 'panel-rule-pre'"></view>
+			<view class="field" :class="focusedField == 'username' ? 'field-focused' : ''">
+				<text class="field-label">用户名</text>
+				<input
+					class="field-input"
+					type="text"
+					v-model="username"
+					placeholder="2-64 个字符"
+					placeholder-class="field-placeholder"
+					:maxlength="64"
+					confirm-type="next"
+					@focus="onFieldFocus('username')"
+					@blur="onFieldBlur"
+				/>
+				<view class="field-rule" :class="focusedField == 'username' ? 'field-rule-on' : ''"></view>
+			</view>
+			<text v-if="usernameError.length > 0" class="field-error">{{ usernameError }}</text>
+
+			<view class="field" :class="focusedField == 'phone' ? 'field-focused' : ''">
+				<text class="field-label">手机号</text>
+				<input
+					class="field-input"
+					type="number"
+					v-model="phone"
+					placeholder="11 位手机号，用于找回账号"
+					placeholder-class="field-placeholder"
+					:maxlength="11"
+					confirm-type="next"
+					@focus="onFieldFocus('phone')"
+					@blur="onFieldBlur"
+				/>
+				<view class="field-rule" :class="focusedField == 'phone' ? 'field-rule-on' : ''"></view>
+			</view>
+			<text v-if="phoneError.length > 0" class="field-error">{{ phoneError }}</text>
+
+			<view class="field" :class="focusedField == 'password' ? 'field-focused' : ''">
+				<text class="field-label">登录密码</text>
+				<input
+					class="field-input"
+					type="text"
+					:password="!showPassword"
+					v-model="password"
+					placeholder="6-64 个字符"
+					placeholder-class="field-placeholder"
+					:maxlength="64"
+					confirm-type="next"
+					@focus="onFieldFocus('password')"
+					@blur="onFieldBlur"
+				/>
+				<text class="field-action" @click="togglePassword">{{ showPassword ? '隐藏' : '显示' }}</text>
+				<view class="field-rule" :class="focusedField == 'password' ? 'field-rule-on' : ''"></view>
+			</view>
+			<text v-if="passwordError.length > 0" class="field-error">{{ passwordError }}</text>
+
+			<view class="field" :class="focusedField == 'confirm' ? 'field-focused' : ''">
+				<text class="field-label">确认密码</text>
+				<input
+					class="field-input"
+					type="text"
+					:password="!showPassword"
+					v-model="confirmPassword"
+					placeholder="再次输入登录密码"
+					placeholder-class="field-placeholder"
+					:maxlength="64"
+					confirm-type="done"
+					@focus="onFieldFocus('confirm')"
+					@blur="onFieldBlur"
+					@confirm="submit"
+				/>
+				<view class="field-rule" :class="focusedField == 'confirm' ? 'field-rule-on' : ''"></view>
+			</view>
+			<text v-if="confirmError.length > 0" class="field-error">{{ confirmError }}</text>
+
+			<!-- 按钮不单独做入场：卡片整体淡入时已带着它一起出现，此处只负责按压反馈 -->
+			<view
+				class="submit"
+				:class="submitting ? 'submit-busy' : ''"
+				hover-class="submit-hover"
+				@click="submit"
+			>
+				<text class="submit-text">{{ submitting ? '提交中…' : '注 册' }}</text>
+			</view>
+
+			<view class="login-row" @click="goBack">
+				<text class="login-hint">已有账号？</text>
+				<text class="login-link">返回登录</text>
+			</view>
+		</view>
+
+		<view class="footer">
+			<text class="footer-text">湖北经济学院 · 食堂管理中心</text>
+		</view>
+	</view>
+</template>
+
+<script lang="uts">
+	// 导入轻量提示：普通提示与成功提示。
+	import { toast, toastSuccess } from '../../common/feedback.uts'
+	// 导入注册动作：注册成功后引导用户回登录页手动登录。
+	import { register as doRegister } from '../../store/auth.uts'
+
+	/**
+	 * 校验手机号。
+	 *
+	 * 与后端 RegisterRequest 的约束保持一致（^1[3-9]\d{9}$），
+	 * 这里手写逐位判断而非正则，避免不同平台正则实现差异。
+	 *
+	 * @param phone 手机号
+	 * @return 合法返回空字符串，否则为错误提示
+	 */
+	function validatePhone(phone: string): string {
+		// 空值优先拦截，避免后续按位判断时下标越界。
+		if (phone.length == 0) {
+			return '请输入手机号'
+		}
+		// 中国大陆手机号固定 11 位。
+		if (phone.length != 11) {
+			return '手机号应为 11 位数字'
+		}
+		// 首位必须是 1。
+		if (phone.charAt(0) != '1') {
+			return '手机号应以 1 开头'
+		}
+		// 取出第二位，用于校验号段。
+		const second = phone.charAt(1)
+		// 第二位需落在 3-9，对应有效号段。
+		if (second < '3' || second > '9') {
+			return '手机号格式不正确'
+		}
+		// 逐位校验余下字符均为数字字符（从下标 1 开始，首位已单独校验）。
+		for (let i = 1; i < phone.length; i++) {
+			// 取字符编码；数字字符的 ASCII 区间为 48-57。
+			const code = phone.charCodeAt(i)
+			// 超出数字区间说明混入了非数字字符。
+			if (code < 48 || code > 57) {
+				return '手机号只能包含数字'
+			}
+		}
+		// 全部校验通过，返回空串表示合法。
+		return ''
+	}
+
+	export default {
+		data() {
+			return {
+				// 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
+				statusBarHeight: 0,
+				// 用户名输入框绑定值。
+				username: '',
+				// 手机号输入框绑定值。
+				phone: '',
+				// 登录密码输入框绑定值。
+				password: '',
+				// 确认密码输入框绑定值，用于与密码比对。
+				confirmPassword: '',
+				// 密码是否明文显示，控制两个密码框的 password 属性。
+				showPassword: false,
+				// 当前聚焦的字段名，用于驱动聚焦样式。
+				focusedField: '',
+				// 用户名校验错误提示，非空时模板展示红字。
+				usernameError: '',
+				// 手机号校验错误提示。
+				phoneError: '',
+				// 密码校验错误提示。
+				passwordError: '',
+				// 确认密码校验错误提示。
+				confirmError: '',
+				// 是否正在提交注册，用于置灰按钮并拦截重复点击。
+				submitting: false,
+				// 是否已进入入场动画终态，切换后驱动各元素的过渡。
+				entered: false
+			}
+		},
+		onLoad() {
+			// 状态栏高度取不到时用 24px 兜底，避免顶部内容被系统栏遮挡。
+			const info = uni.getWindowInfo()
+			this.statusBarHeight = info.statusBarHeight > 0 ? info.statusBarHeight : 24
+		},
+		onReady() {
+			// 页面渲染完成后窗口信息才准确（app-android 尤其如此），此处再同步一次状态栏高度。
+			const readyInfo = uni.getWindowInfo()
+			this.statusBarHeight = readyInfo.statusBarHeight > 0 ? readyInfo.statusBarHeight : 24
+
+			// 首帧绘制完成后再切到「已入场」状态，属性变化才会驱动入场过渡动画。
+			setTimeout(() => {
+				this.entered = true
+			}, 60)
+		},
+		methods: {
+			onFieldFocus(field: string) {
+				// 记录当前聚焦字段，驱动对应输入框的聚焦样式。
+				this.focusedField = field
+				// 重新输入时清掉旧的错误提示，避免一直挂着红字。
+				if (field == 'username') {
+					this.usernameError = ''
+				} else if (field == 'phone') {
+					this.phoneError = ''
+				} else if (field == 'password') {
+					this.passwordError = ''
+				} else {
+					this.confirmError = ''
+				}
+			},
+			onFieldBlur() {
+				// 任意字段失焦即清除聚焦标记，收回高亮动画。
+				this.focusedField = ''
+			},
+			togglePassword() {
+				// 在明文与密文之间切换两个密码框的显示。
+				this.showPassword = !this.showPassword
+			},
+			validateForm(): boolean {
+				// 逐项校验并把结果写入错误字段，返回整体是否通过。
+				const username = this.username.trim()
+				// 用户名长度需与后端约束一致，避免提交后才被后端拒绝。
+				if (username.length < 2 || username.length > 64) {
+					this.usernameError = '用户名长度需在 2 到 64 个字符之间'
+					return false
+				}
+				// 该项通过，清掉可能残留的错误提示。
+				this.usernameError = ''
+
+				// 手机号交给独立的校验函数处理，保证与后端规则一致。
+				const phoneMessage = validatePhone(this.phone.trim())
+				// 校验不通过时记录提示并终止后续校验。
+				if (phoneMessage.length > 0) {
+					this.phoneError = phoneMessage
+					return false
+				}
+				// 手机号通过，清掉错误提示。
+				this.phoneError = ''
+
+				// 登录密码长度需在 6 到 64 个字符之间。
+				if (this.password.length < 6 || this.password.length > 64) {
+					this.passwordError = '密码长度需在 6 到 64 个字符之间'
+					return false
+				}
+				// 密码通过，清掉错误提示。
+				this.passwordError = ''
+
+				// 两次输入的密码必须完全一致。
+				if (this.confirmPassword != this.password) {
+					this.confirmError = '两次输入的密码不一致'
+					return false
+				}
+				// 确认密码通过，清掉错误提示。
+				this.confirmError = ''
+				// 全部校验项通过，允许提交。
+				return true
+			},
+			submit() {
+				// 提交中忽略重复点击，避免并发请求触发网关限流。
+				if (this.submitting) {
+					return
+				}
+				// 表单校验不通过时直接返回，由各错误字段驱动页面提示。
+				if (!this.validateForm()) {
+					return
+				}
+
+				// 置为提交中，按钮进入忙碌态并拦截重复点击。
+				this.submitting = true
+				// 调用注册流程，返回空串表示成功，否则为错误提示。
+				doRegister(this.username.trim(), this.phone.trim(), this.password).then((message: string) => {
+					// 请求结束，无论成败都先解除忙碌态。
+					this.submitting = false
+					// 有错误提示说明注册失败（如用户名或手机号已占用），toast 后结束。
+					if (message.length > 0) {
+						toast(message)
+						return
+					}
+					// 注册成功后不自动登录，清掉密码并回到登录页手动登录。
+					this.password = ''
+					// 确认密码同步清空，避免返回后再进入时残留。
+					this.confirmPassword = ''
+					// 给出成功提示。
+					toastSuccess('注册成功')
+					// 返回上一页（登录页）。
+					uni.navigateBack()
+				})
+			},
+			goBack() {
+				// 返回上一页：从注册页回到登录页。
+				uni.navigateBack()
+			}
+		}
+	}
+</script>
+
+<style>
+	.page {
+		flex: 1;
+		background-color: #FDF6F0;
+	}
+
+	/* ---------- 顶部栏 ---------- */
+
+	/* 状态栏底色：与顶部栏同色，让头部整块连贯 */
+	.statusfill {
+		background-color: #E4572E;
+	}
+
+	.topbar {
+		background-color: #E4572E;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 10px 20px 18px 20px;
+	}
+
+	.back {
+		width: 36px;
+		height: 36px;
+		border-radius: 12px;
+		background-color: rgba(255, 255, 255, 0.18);
+		align-items: center;
+		justify-content: center;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.45s;
+		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+		transition-delay: 0.06s;
+	}
+
+	.back-pre {
+		opacity: 0;
+		transform: translateY(-10px);
+	}
+
+	.back-arrow {
+		font-size: 24px;
+		color: #FFFFFF;
+		line-height: 26px;
+	}
+
+	.topbar-title {
+		font-size: 16px;
+		font-weight: bold;
+		color: #FFFFFF;
+		letter-spacing: 2px;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.45s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.1s;
+	}
+
+	.topbar-title-pre {
+		opacity: 0;
+		transform: translateY(-10px);
+	}
+
+	.topbar-holder {
+		width: 36px;
+		height: 36px;
+	}
+
+	/* ---------- 引导文案 ---------- */
+
+	.intro {
+		padding: 22px 28px 0 28px;
+	}
+
+	.intro-title {
+		font-size: 26px;
+		font-weight: bold;
+		color: #211C18;
+		letter-spacing: 1px;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.14s;
+	}
+
+	.intro-title-pre {
+		opacity: 0;
+		transform: translateY(16px);
+	}
+
+	.intro-desc {
+		margin-top: 8px;
+		font-size: 13px;
+		color: #6B5F56;
+		line-height: 19px;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.2s;
+	}
+
+	.intro-desc-pre {
+		opacity: 0;
+		transform: translateY(14px);
+	}
+
+	/* ---------- 表单卡 ---------- */
+
+	/* 卡片自下方浮入，顶部短线随后由中间向两侧展开 */
+	.panel {
+		position: relative;
+		background-color: #FFFFFF;
+		margin-left: 20px;
+		margin-right: 20px;
+		margin-top: 18px;
+		padding: 22px 22px 24px 22px;
+		border-radius: 24px;
+		box-shadow: 0 10px 26px rgba(180, 120, 90, 0.14);
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.6s;
+		/* 卡片上浮到位时略过冲再回落，避免机械的匀速滑入 */
+		transition-timing-function: cubic-bezier(0.22, 1.3, 0.36, 1);
+		transition-delay: 0.26s;
+	}
+
+	.panel-pre {
+		opacity: 0;
+		transform: translateY(34px);
+	}
+
+	/* 顶部琥珀短线：入场时从中心展开，替代原先的静态描边 */
+	.panel-rule {
+		position: absolute;
+		left: 22px;
+		right: 22px;
+		top: 0;
+		height: 3px;
+		border-radius: 2px;
+		background-color: #F2A93B;
+		transform: scaleX(1);
+		transition-property: transform;
+		transition-duration: 0.5s;
+		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+		transition-delay: 0.52s;
+	}
+
+	.panel-rule-pre {
+		transform: scaleX(0);
+	}
+
+	.field {
+		position: relative;
+		flex-direction: column;
+		margin-top: 16px;
+		padding-bottom: 8px;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-color: #EFE1D6;
+		transition-property: border-bottom-color;
+		transition-duration: 0.28s;
+		transition-timing-function: ease-out;
+	}
+
+	.field-focused {
+		border-bottom-color: #E4572E;
+	}
+
+	/* 聚焦时橙色短线由中心向两侧扫出，比单纯变色更有「对上了」的反馈 */
+	.field-rule {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		height: 2px;
+		border-radius: 2px;
+		background-color: #E4572E;
+		transform: scaleX(0);
+		transition-property: transform;
+		transition-duration: 0.34s;
+		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	.field-rule-on {
+		transform: scaleX(1);
+	}
+
+	.field-label {
+		font-size: 11px;
+		color: #A2968B;
+		letter-spacing: 1px;
+	}
+
+	.field-input {
+		margin-top: 6px;
+		height: 30px;
+		font-size: 16px;
+		color: #211C18;
+	}
+
+	.field-placeholder {
+		color: #C9BDB2;
+		font-size: 15px;
+	}
+
+	.field-action {
+		position: absolute;
+		right: 0;
+		bottom: 10px;
+		font-size: 12px;
+		color: #C2410C;
+		padding: 4px 2px;
+	}
+
+	.field-error {
+		margin-top: 6px;
+		font-size: 12px;
+		color: #C0392B;
+	}
+
+	/* ---------- 主按钮 ---------- */
+
+	/* 按钮不单独做入场：卡片整体淡入时已带着它一起出现；此处只保留按压回落反馈，延迟归零 */
+	.submit {
+		margin-top: 26px;
+		height: 50px;
+		border-radius: 14px;
+		background-color: #E4572E;
+		align-items: center;
+		justify-content: center;
+		transform: scale(1);
+		transition-property: transform, background-color;
+		transition-duration: 0.2s;
+		transition-timing-function: ease-out;
+	}
+
+	.submit-hover {
+		background-color: #C2410C;
+		transform: scale(0.97);
+	}
+
+	.submit-busy {
+		background-color: #EFA184;
+	}
+
+	.submit-text {
+		font-size: 17px;
+		font-weight: bold;
+		color: #FFFFFF;
+		letter-spacing: 4px;
+	}
+
+	/* ---------- 返回登录 ---------- */
+
+	.login-row {
+		margin-top: 18px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.login-hint {
+		font-size: 13px;
+		color: #A2968B;
+	}
+
+	.login-link {
+		font-size: 13px;
+		font-weight: bold;
+		color: #C2410C;
+	}
+
+	/* ---------- 页脚 ---------- */
+
+	.footer {
+		margin-top: auto;
+		padding-bottom: 26px;
+		align-items: center;
+	}
+
+	.footer-text {
+		font-size: 11px;
+		color: #C9BDB2;
+		letter-spacing: 1px;
+	}
+</style>

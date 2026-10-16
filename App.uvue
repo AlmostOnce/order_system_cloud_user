@@ -1,45 +1,87 @@
 <script lang="uts">
+	/**
+	 * App 级生命周期与全局状态。
+	 *
+	 * firstBackTime 仅用于 Android「再按一次退出」的防误触判定：
+	 * 保存上一次按下物理返回键的毫秒时间戳，0 表示当前不在等待第二次按键。
+	 */
 	let firstBackTime = 0
+
 	export default {
+		/**
+		 * 应用启动时触发一次。
+		 *
+		 * 用于放置只执行一次的全局初始化逻辑（当前仅打印日志）。
+		 */
 		onLaunch: function () {
+			// 打印启动日志，便于在控制台确认应用已进入启动流程。
 			console.log('App Launch')
 		},
+		/**
+		 * 应用从后台切回前台时触发。
+		 *
+		 * 用于恢复需要在回到前台时刷新的全局状态（当前仅打印日志）。
+		 */
 		onShow: function () {
+			// 打印日志，便于确认前后台切换时机符合预期。
 			console.log('App Show')
 		},
+		/**
+		 * 应用退到后台时触发。
+		 *
+		 * 用于暂停轮询、释放资源等（当前仅打印日志）。
+		 */
 		onHide: function () {
+			// 打印日志，便于确认前后台切换时机符合预期。
 			console.log('App Hide')
 		},
 		// #ifdef APP-ANDROID
+		/**
+		 * Android 专属：监听物理返回键，实现首页「再按一次退出」的防误触逻辑。
+		 */
 		onLastPageBackPress: function () {
+			// 打印日志，便于确认返回键事件已被正确捕获。
 			console.log('App LastPageBackPress')
+			// 首次按下：给出提示并记录时间戳，进入 2 秒等待窗口。
 			if (firstBackTime == 0) {
+				// 底部轻提示，避免遮挡页面内容。
 				uni.showToast({
 					title: '再按一次退出应用',
 					position: 'bottom',
 				})
+				// 记录本次按下的时间，供下一次按键判断是否落在 2 秒内。
 				firstBackTime = Date.now()
+				// 2 秒内未再次按下则视为放弃退出，把时间戳复位。
 				setTimeout(() => {
 					firstBackTime = 0
 				}, 2000)
 			} else if (Date.now() - firstBackTime < 2000) {
+				// 第二次按下且间隔小于 2 秒：确认退出，直接结束应用。
 				firstBackTime = Date.now()
 				uni.exit()
 			}
 		},
 		// #endif
+		/**
+		 * 应用退出前触发。
+		 *
+		 * 用于做最终的数据落盘或资源清理（当前仅打印日志）。
+		 */
 		onExit: function () {
+			// 打印日志，便于确认退出流程已执行。
 			console.log('App Exit')
 		},
 	}
 </script>
 
 <style>
-	/*每个页面公共css */
+	/* 每个页面公共 css */
+	/* 横向排列工具类：供需要把子元素排成一行的容器直接套用 */
 	.uni-row {
 		flex-direction: row;
 	}
 
+	/* 纵向排列工具类：供需要把子元素竖向堆叠的容器直接套用 */
 	.uni-column {
 		flex-direction: column;
 	}

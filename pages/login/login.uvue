@@ -1,0 +1,655 @@
+<template>
+	<view class="page">
+		<!-- 状态栏底色与品牌区同色，避免顶部出现米色缝隙 -->
+		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
+
+		<!-- 品牌区：柿子橙实色块 + 半透明几何圆，几何圆在入场时逐个缩放出场 -->
+		<view class="brand">
+			<view class="shape shape-1" :class="entered ? '' : 'shape-1-pre'"></view>
+			<view class="shape shape-2" :class="entered ? '' : 'shape-2-pre'"></view>
+			<view class="shape shape-3" :class="entered ? '' : 'shape-3-pre'"></view>
+			<view class="brand-body">
+				<text class="brand-eyebrow" :class="entered ? '' : 'brand-eyebrow-pre'">CAMPUS CANTEEN</text>
+				<!-- 主标题拆成单个字，逐字带上浮与旋转弹入，落位后回正 -->
+				<view class="brand-title">
+					<view
+						class="brand-char"
+						:class="entered ? '' : 'brand-char-pre'"
+						:style="titleCharDelay(index)"
+						v-for="(word, index) in titleChars"
+						:key="index"
+					>
+						<text class="brand-char-text">{{ word }}</text>
+					</view>
+				</view>
+				<text class="brand-tagline" :class="entered ? '' : 'brand-tagline-pre'">让每一餐都吃得从容</text>
+			</view>
+		</view>
+
+		<!-- 表单卡：上移与品牌区重叠；顶部琥珀短线在入场时由中间向两侧展开 -->
+		<view class="panel" :class="entered ? '' : 'panel-pre'">
+			<view class="panel-rule" :class="entered ? '' : 'panel-rule-pre'"></view>
+			<text class="panel-title">欢迎回来</text>
+			<text class="panel-desc">登录后浏览档口菜单、下单并查询订单</text>
+
+			<view class="field" :class="focusedField == 'username' ? 'field-focused' : ''">
+				<text class="field-label">账号</text>
+				<input
+					class="field-input"
+					type="text"
+					v-model="username"
+					placeholder="请输入用户名"
+					placeholder-class="field-placeholder"
+					:maxlength="64"
+					confirm-type="next"
+					@focus="onUsernameFocus"
+					@blur="onFieldBlur"
+				/>
+				<view class="field-rule" :class="focusedField == 'username' ? 'field-rule-on' : ''"></view>
+			</view>
+
+			<view class="field" :class="focusedField == 'password' ? 'field-focused' : ''">
+				<text class="field-label">密码</text>
+				<input
+					class="field-input"
+					type="text"
+					:password="!showPassword"
+					v-model="password"
+					placeholder="请输入登录密码"
+					placeholder-class="field-placeholder"
+					:maxlength="64"
+					confirm-type="go"
+					@focus="onPasswordFocus"
+					@blur="onFieldBlur"
+					@confirm="onPasswordConfirm"
+				/>
+				<text class="field-action" @click="togglePassword">{{ showPassword ? '隐藏' : '显示' }}</text>
+				<view class="field-rule" :class="focusedField == 'password' ? 'field-rule-on' : ''"></view>
+			</view>
+
+			<view class="options">
+				<view class="remember" @click="toggleRemember">
+					<view class="remember-box" :class="rememberUsername ? 'remember-box-on' : ''">
+						<text class="remember-tick" :class="rememberUsername ? 'remember-tick-on' : 'remember-tick-off'">✓</text>
+					</view>
+					<text class="remember-text">记住账号</text>
+				</view>
+				<text class="options-hint">登录即表示同意校园食堂服务条款</text>
+			</view>
+
+			<!-- 按钮不单独做入场：卡片整体淡入时已带着它一起出现，此处只负责按压反馈 -->
+			<view
+				class="submit"
+				:class="submitting ? 'submit-busy' : ''"
+				hover-class="submit-hover"
+				@click="submit"
+			>
+				<text class="submit-text">{{ submitting ? '登录中…' : '登 录' }}</text>
+			</view>
+
+			<view class="register-row" @click="toRegister">
+				<text class="register-hint">还没有账号？</text>
+				<text class="register-link">立即注册</text>
+			</view>
+		</view>
+
+		<view class="footer">
+			<text class="footer-text">湖北经济学院 · 食堂管理中心</text>
+		</view>
+	</view>
+</template>
+
+<script lang="uts">
+	// 导入本地存储读取：取上次「记住账号」保存的用户名。
+	import { getRememberedUsername } from '../../common/storage.uts'
+	// 导入轻量提示：普通提示与成功提示。
+	import { toastSuccess, toast } from '../../common/feedback.uts'
+	// 导入登录态：登录动作与是否已登录判断。
+	import { login as doLogin, isLoggedIn } from '../../store/auth.uts'
+
+	export default {
+		data() {
+			// 品牌主标题按字拆分，便于逐字错峰入场（直接写死，避免运行时切分字符串）。
+			const titleChars: string[] = ['校', '园', '食', '堂']
+
+			return {
+				// 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
+				statusBarHeight: 0,
+				// 账号输入框绑定值。
+				username: '',
+				// 密码输入框绑定值。
+				password: '',
+				// 密码是否明文显示，控制 input 的 password 属性。
+				showPassword: false,
+				// 是否勾选「记住账号」。
+				rememberUsername: false,
+				// 当前聚焦的字段名，用于驱动聚焦样式：''/username/password。
+				focusedField: '',
+				// 是否正在提交登录，用于置灰按钮并拦截重复点击。
+				submitting: false,
+				// 品牌标题的逐字数组，供模板 v-for 渲染。
+				titleChars: titleChars,
+				// 是否已进入入场动画终态，切换后驱动各元素的过渡。
+				entered: false
+			}
+		},
+		onLoad() {
+			// 状态栏高度取不到时用 24px 兜底，避免顶部内容被系统栏遮挡。
+			const info = uni.getWindowInfo()
+			this.statusBarHeight = info.statusBarHeight > 0 ? info.statusBarHeight : 24
+
+			// 已登录用户直接进入首页；onLoad 先于渲染执行，因此不会出现登录页闪现。
+			if (isLoggedIn()) {
+				uni.reLaunch({ url: '/pages/home/home' })
+				return
+			}
+
+			// 回填上次记住的账号，密码一律不落盘，需用户重新输入。
+			const remembered = getRememberedUsername()
+			if (remembered.length > 0) {
+				this.username = remembered
+				this.rememberUsername = true
+			}
+		},
+		onReady() {
+			// 页面渲染完成后窗口信息才准确（app-android 尤其如此），此处再同步一次状态栏高度。
+			const readyInfo = uni.getWindowInfo()
+			this.statusBarHeight = readyInfo.statusBarHeight > 0 ? readyInfo.statusBarHeight : 24
+
+			// 首帧绘制完成后再切到「已入场」状态，属性变化才会驱动入场过渡动画。
+			setTimeout(() => {
+				this.entered = true
+			}, 60)
+		},
+		methods: {
+			/**
+			 * 计算品牌标题每个字的入场延迟，让四个字依次弹入。
+			 *
+			 * 直接给出各档位秒数，避免浮点运算产生冗长的小数文本。
+			 *
+			 * @param index 字符下标
+			 * @return 内联的 transition-delay 声明
+			 */
+			titleCharDelay(index: number): string {
+				const delays: string[] = ['0.12s', '0.18s', '0.24s', '0.30s']
+				if (index < 0 || index >= delays.length) {
+					return 'transition-delay: 0.12s'
+				}
+				return 'transition-delay: ' + delays[index]
+			},
+			onUsernameFocus() {
+				// 标记账号字段为聚焦，驱动其底线扫出动画与高亮。
+				this.focusedField = 'username'
+			},
+			onPasswordFocus() {
+				// 标记密码字段为聚焦，驱动其底线扫出动画与高亮。
+				this.focusedField = 'password'
+			},
+			onFieldBlur() {
+				// 任意字段失焦即清除聚焦标记，收回高亮动画。
+				this.focusedField = ''
+			},
+			onPasswordConfirm() {
+				// 键盘回车即提交，减少一步点击。
+				this.submit()
+			},
+			togglePassword() {
+				// 在明文与密文之间切换密码显示。
+				this.showPassword = !this.showPassword
+			},
+			toggleRemember() {
+				// 切换「记住账号」勾选状态，决定登录成功后是否记住用户名。
+				this.rememberUsername = !this.rememberUsername
+			},
+			submit() {
+				// 提交中忽略重复点击，避免并发请求触发网关限流。
+				if (this.submitting) {
+					return
+				}
+
+				// 去掉首尾空格后再校验，避免把纯空白当成有效用户名。
+				const username = this.username.trim()
+				// 用户名为空：提示后直接返回，不发起请求。
+				if (username.length == 0) {
+					toast('请输入用户名')
+					return
+				}
+				// 密码为空：提示后直接返回。
+				if (this.password.length == 0) {
+					toast('请输入登录密码')
+					return
+				}
+
+				// 置为提交中，按钮进入忙碌态并拦截重复点击。
+				this.submitting = true
+				// 调用登录流程，返回空串表示成功，否则为错误提示。
+				doLogin(username, this.password, this.rememberUsername).then((message: string) => {
+					// 请求结束，无论成败都先解除忙碌态。
+					this.submitting = false
+					// 有错误提示说明登录失败，直接 toast 后结束。
+					if (message.length > 0) {
+						toast(message)
+						return
+					}
+					// 登录后清空密码，避免残留在页面状态里。
+					this.password = ''
+					// 给出成功提示。
+					toastSuccess('登录成功')
+					// 用 reLaunch 进入首页，重置页面栈避免返回登录页。
+					uni.reLaunch({ url: '/pages/home/home' })
+				})
+			},
+			toRegister() {
+				// 跳转到注册页；用 navigateTo 保留返回栈以便返回登录。
+				uni.navigateTo({ url: '/pages/register/register' })
+			}
+		}
+	}
+</script>
+
+<style>
+	.page {
+		flex: 1;
+		background-color: #FDF6F0;
+	}
+
+	/* ---------- 品牌区 ---------- */
+
+	/* 状态栏底色：与品牌区同色，让头部整块连贯 */
+	.statusfill {
+		background-color: #E4572E;
+	}
+
+	.brand {
+		position: relative;
+		background-color: #E4572E;
+		padding-top: 30px;
+		padding-bottom: 76px;
+		overflow: hidden;
+	}
+
+	/* 装饰几何圆：不用位图图标，用半透明圆形在橙色底上构建品牌记忆点。
+	   三个圆的时长与延迟不同，入场时形成错峰的缩放出场。 */
+	.shape {
+		position: absolute;
+		border-radius: 999px;
+		transition-property: opacity, transform;
+		/* 带回弹的缓动曲线：放大到终值前先冲过头再收回，形成弹性出场 */
+		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	.shape-1 {
+		width: 168px;
+		height: 168px;
+		right: -48px;
+		top: 12px;
+		background-color: #FFFFFF;
+		opacity: 0.14;
+		transform: scale(1);
+		transition-duration: 0.7s;
+	}
+
+	.shape-1-pre {
+		opacity: 0;
+		transform: scale(0.5);
+	}
+
+	.shape-2 {
+		width: 92px;
+		height: 92px;
+		right: 44px;
+		top: 108px;
+		background-color: #FFFFFF;
+		opacity: 0.2;
+		transform: scale(1);
+		transition-duration: 0.6s;
+		transition-delay: 0.08s;
+	}
+
+	.shape-2-pre {
+		opacity: 0;
+		transform: scale(0.4);
+	}
+
+	/* 琥珀色实心小圆作为点睛，避免整块纯橙过于单调 */
+	.shape-3 {
+		width: 26px;
+		height: 26px;
+		right: 22px;
+		top: 62px;
+		background-color: #F2A93B;
+		opacity: 1;
+		transform: scale(1);
+		transition-duration: 0.5s;
+		transition-delay: 0.16s;
+	}
+
+	.shape-3-pre {
+		opacity: 0;
+		transform: scale(0);
+	}
+
+	.brand-body {
+		padding-left: 28px;
+		padding-right: 28px;
+	}
+
+	/* 三行文字以 60ms 间隔依次上浮淡入 */
+	.brand-eyebrow {
+		font-size: 11px;
+		color: #FFD9C7;
+		letter-spacing: 3px;
+		font-weight: bold;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.06s;
+	}
+
+	.brand-eyebrow-pre {
+		opacity: 0;
+		transform: translateY(14px);
+	}
+
+	/* 品牌主标题：每个字由一个可变换的容器包住文字，
+	   App 端对容器做 rotate/scale/translate 更稳妥；逐字延迟由 titleCharDelay 给出 */
+	.brand-title {
+		margin-top: 10px;
+		flex-direction: row;
+		align-items: flex-end;
+	}
+
+	.brand-char {
+		margin-right: 3px;
+		opacity: 1;
+		transform: translateY(0) rotate(0deg) scale(1);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		/* 轻微回弹：字落位前会略微超出再收回，像被按进画面 */
+		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	.brand-char-pre {
+		opacity: 0;
+		transform: translateY(24px) rotate(-16deg) scale(0.7);
+	}
+
+	.brand-char-text {
+		font-size: 40px;
+		font-weight: bold;
+		color: #FFFFFF;
+		line-height: 48px;
+	}
+
+	.brand-tagline {
+		margin-top: 8px;
+		font-size: 13px;
+		color: #FFE3D6;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.55s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.36s;
+	}
+
+	.brand-tagline-pre {
+		opacity: 0;
+		transform: translateY(16px);
+	}
+
+	/* ---------- 表单卡 ---------- */
+
+	/* 卡片自下方浮入，顶部短线随后由中间向两侧展开 */
+	.panel {
+		position: relative;
+		background-color: #FFFFFF;
+		margin-left: 20px;
+		margin-right: 20px;
+		margin-top: -52px;
+		padding: 26px 22px 24px 22px;
+		border-radius: 24px;
+		box-shadow: 0 10px 26px rgba(180, 120, 90, 0.14);
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.6s;
+		/* 卡片上浮到位时略过冲再回落，避免机械的匀速滑入 */
+		transition-timing-function: cubic-bezier(0.22, 1.3, 0.36, 1);
+		transition-delay: 0.34s;
+	}
+
+	.panel-pre {
+		opacity: 0;
+		transform: translateY(34px);
+	}
+
+	/* 顶部琥珀短线：入场时从中心展开，替代原先的静态描边 */
+	.panel-rule {
+		position: absolute;
+		left: 22px;
+		right: 22px;
+		top: 0;
+		height: 3px;
+		border-radius: 2px;
+		background-color: #F2A93B;
+		transform: scaleX(1);
+		transition-property: transform;
+		transition-duration: 0.5s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.58s;
+	}
+
+	.panel-rule-pre {
+		transform: scaleX(0);
+	}
+
+	.panel-title {
+		font-size: 22px;
+		font-weight: bold;
+		color: #211C18;
+	}
+
+	.panel-desc {
+		margin-top: 6px;
+		font-size: 12px;
+		color: #A2968B;
+		line-height: 18px;
+	}
+
+	.field {
+		position: relative;
+		flex-direction: column;
+		margin-top: 20px;
+		padding-bottom: 8px;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-color: #EFE1D6;
+		transition-property: border-bottom-color;
+		transition-duration: 0.28s;
+		transition-timing-function: ease-out;
+	}
+
+	.field-focused {
+		border-bottom-color: #E4572E;
+	}
+
+	/* 聚焦时橙色短线由中心向两侧扫出，比单纯变色更有「对上了」的反馈 */
+	.field-rule {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		height: 2px;
+		border-radius: 2px;
+		background-color: #E4572E;
+		transform: scaleX(0);
+		transition-property: transform;
+		transition-duration: 0.34s;
+		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	.field-rule-on {
+		transform: scaleX(1);
+	}
+
+	.field-label {
+		font-size: 11px;
+		color: #A2968B;
+		letter-spacing: 1px;
+	}
+
+	.field-input {
+		margin-top: 6px;
+		height: 30px;
+		font-size: 16px;
+		color: #211C18;
+	}
+
+	.field-placeholder {
+		color: #C9BDB2;
+		font-size: 15px;
+	}
+
+	.field-action {
+		position: absolute;
+		right: 0;
+		bottom: 10px;
+		font-size: 12px;
+		color: #C2410C;
+		padding: 4px 2px;
+	}
+
+	/* ---------- 选项行 ---------- */
+
+	.options {
+		margin-top: 20px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.remember {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.remember-box {
+		width: 18px;
+		height: 18px;
+		border-radius: 5px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #D8C7B8;
+		align-items: center;
+		justify-content: center;
+		transition-property: background-color, border-color;
+		transition-duration: 0.22s;
+		transition-timing-function: ease-out;
+	}
+
+	.remember-box-on {
+		background-color: #E4572E;
+		border-color: #E4572E;
+	}
+
+	/* 勾选时对勾由小放大并淡入，取消勾选时反向收回 */
+	.remember-tick {
+		font-size: 12px;
+		color: #FFFFFF;
+		font-weight: bold;
+		transition-property: opacity, transform;
+		transition-duration: 0.22s;
+		/* 弹一下再落定，让勾选动作有反馈感 */
+		transition-timing-function: cubic-bezier(0.34, 1.8, 0.64, 1);
+	}
+
+	.remember-tick-on {
+		opacity: 1;
+		transform: scale(1);
+	}
+
+	.remember-tick-off {
+		opacity: 0;
+		transform: scale(0);
+	}
+
+	.remember-text {
+		margin-left: 8px;
+		font-size: 13px;
+		color: #6B5F56;
+	}
+
+	.options-hint {
+		font-size: 10px;
+		color: #C9BDB2;
+	}
+
+	/* ---------- 主按钮 ---------- */
+
+	/* 按钮只负责按压反馈：卡片整体淡入时已带着它一起出现 */
+	.submit {
+		margin-top: 26px;
+		height: 50px;
+		border-radius: 14px;
+		background-color: #E4572E;
+		align-items: center;
+		justify-content: center;
+		transform: scale(1);
+		transition-property: transform, background-color;
+		transition-duration: 0.2s;
+		transition-timing-function: ease-out;
+	}
+
+	.submit-hover {
+		background-color: #C2410C;
+		transform: scale(0.97);
+	}
+
+	.submit-busy {
+		background-color: #EFA184;
+	}
+
+	.submit-text {
+		font-size: 17px;
+		font-weight: bold;
+		color: #FFFFFF;
+		letter-spacing: 4px;
+	}
+
+	/* ---------- 注册入口 ---------- */
+
+	.register-row {
+		margin-top: 18px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.register-hint {
+		font-size: 13px;
+		color: #A2968B;
+	}
+
+	.register-link {
+		font-size: 13px;
+		font-weight: bold;
+		color: #C2410C;
+	}
+
+	/* ---------- 页脚 ---------- */
+
+	.footer {
+		margin-top: auto;
+		padding-bottom: 26px;
+		align-items: center;
+	}
+
+	.footer-text {
+		font-size: 11px;
+		color: #C9BDB2;
+		letter-spacing: 1px;
+	}
+</style>

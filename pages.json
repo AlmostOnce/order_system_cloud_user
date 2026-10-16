@@ -1,17 +1,30 @@
 {
 	"pages": [ //pages数组中第一项表示应用启动页，参考：https://uniapp.dcloud.io/collocation/pages
 		{
-			"path": "pages/index/index",
+			"path": "pages/login/login",
 			"style": {
-				"navigationBarTitleText": "uni-app x"
+				// 登录页使用自定义导航栏，由页面自行绘制品牌区并避开状态栏
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/home/home",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/register/register",
+			"style": {
+				"navigationStyle": "custom"
 			}
 		}
 	],
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
-		"navigationBarTitleText": "uni-app x",
-		"navigationBarBackgroundColor": "#F8F8F8",
-		"backgroundColor": "#F8F8F8"
+		"navigationBarTitleText": "校园食堂",
+		"navigationBarBackgroundColor": "#FDF6F0",
+		"backgroundColor": "#FDF6F0"
 	},
 	"uniIdRouter": {}
 }
