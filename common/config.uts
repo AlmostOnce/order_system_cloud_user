@@ -1,0 +1,44 @@
+/**
+ * 全局环境配置。
+ *
+ * 这是唯一需要按环境改动的文件：页面与业务层一律通过本文件提供的常量与
+ * 后端通信，不得在其它位置硬编码地址、超时或状态码。
+ */
+
+/**
+ * 后端网关地址（可变量，便于按平台改写）。
+ *
+ * 对外地址 = 网关地址 + /api + 服务自身路径，
+ * 例如认证服务的 /auth/login 对外即 {API_BASE_URL}/auth/login。
+ */
+let apiBaseUrl = 'http://localhost:9090/api'
+
+// #ifdef APP-ANDROID
+// Android 模拟器（AVD）通过 10.0.2.2 回环访问开发机；如用真机调试，请改成开发机局域网 IP，
+// 例如 'http://192.168.1.10:9090/api'，并确保手机与开发机在同一网段。
+apiBaseUrl = 'http://10.0.2.2:9090/api'
+// #endif
+
+/**
+ * 网关统一入口地址。
+ *
+ * - 微信小程序：开发者工具运行在开发机上，保持 localhost 即可，
+ *   但需在开发者工具中勾选「不校验合法域名」。
+ * - Android 模拟器：已自动切换为 10.0.2.2。
+ */
+// 固化为常量对外导出，页面与业务层只读该常量，不得再用可变量 apiBaseUrl。
+export const API_BASE_URL: string = apiBaseUrl
+
+/**
+ * 网络请求超时时间，单位毫秒。
+ */
+// 统一超时口径：过长会让弱网下界面长时间空等，过短会误伤正常慢请求。
+export const API_TIMEOUT: number = 10000
+
+/**
+ * 后端统一响应体中的成功状态码，取值自 common-response 的 CommonErrorCode.SUCCESS。
+ *
+ * 注意：后端 code 是字符串而非数字，页面判断成功必须与常量比较，不能写 code == 200。
+ */
+// 成功码集中在此定义，避免各页面各写一份字符串常量。
+export const SUCCESS_CODE: string = 'COMMON_000'

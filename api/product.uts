@@ -1,0 +1,196 @@
+/**
+ * 商品（餐厅与档口）服务接口定义。
+ *
+ * 路径与后端 product-service 的 ProductMenuController 一一对应。对外统一经网关
+ * /api 前缀访问，因此这里只写服务自身路径。
+ *
+ * 注意：后端该 Controller 标注了 @PreAuthorize("hasRole('CUSTOMER')")，只有顾客角色可查；
+ * 其它角色会收到 403，页面需按失败结果做降级展示。
+ */
+
+// 导入统一请求入口：商品接口均为鉴权的 GET 查询。
+import { httpGet, HttpResult } from '../common/http.uts'
+
+/**
+ * 档口摘要，对应后端 WindowSummaryVO。
+ */
+export type WindowItem = {
+	/** 档口 ID。 */
+	windowId: number
+	/** 所属餐厅 ID，用于按餐厅筛选档口。 */
+	restaurantId: number
+	/** 档口编码。 */
+	windowCode: string
+	/** 档口名称。 */
+	windowName: string
+	/** 档口位置。 */
+	location: string
+}
+
+/**
+ * 档口列表查询结果。
+ *
+ * 把「失败提示」与「空列表」区分开，页面才能分别给出重试入口与空态文案。
+ */
+export type WindowListResult = {
+	/** 是否查询成功。 */
+	ok: boolean
+	/** 失败时的提示文案，可直接展示给用户。 */
+	message: string
+	/** 成功时的档口列表。 */
+	items: Array<WindowItem>
+}
+
+/**
+ * 查询所有当前启用的档口。
+ *
+ * @return 查询结果
+ */
+export function listActiveWindows(): Promise<WindowListResult> {
+	// 把请求结果转换为区分「失败提示」与「空列表」的结构化结果。
+	return new Promise<WindowListResult>((resolve) => {
+		httpGet('/products/windows', true).then((result: HttpResult) => {
+			// 请求整体失败（网络、401、403 等）：原样透传后端提示并返回空列表。
+			if (!result.ok) {
+				const failed: WindowListResult = { ok: false, message: result.message, items: [] }
+				resolve(failed)
+				return
+			}
+
+			// 成功时需要从统一响应体中取出 data 字段。
+			const envelope = result.data
+			// 成功却没有响应体属于异常响应，给出可重试的提示。
+			if (envelope == null) {
+				const abnormal: WindowListResult = { ok: false, message: '档口列表响应异常，请稍后重试', items: [] }
+				resolve(abnormal)
+				return
+			}
+
+			// 后端 data 字段是一个数组，取出来后逐项按对象读取。
+			const rawList = envelope.getArray('data')
+			// data 不存在等价于没有启用中的档口，按成功 + 空列表返回。
+			if (rawList == null) {
+				const empty: WindowListResult = { ok: true, message: '', items: [] }
+				resolve(empty)
+				return
+			}
+
+			// 累积转换后的档口列表。
+			const items: Array<WindowItem> = []
+			// 逐个把 any 元素转换为强类型 WindowItem。
+			for (let i = 0; i < rawList.length; i++) {
+				// 数组元素是 any，先断言为对象再按字段读取。
+				const raw = rawList[i] as UTSJSONObject
+				// 按后端字段名取值，缺失字段用默认值兜底，避免展示出 undefined。
+				const item: WindowItem = {
+					// 档口 ID，缺失时按 0 处理。
+					windowId: raw.getNumber('windowId') ?? 0,
+					// 所属餐厅 ID，用于本地按餐厅筛选。
+					restaurantId: raw.getNumber('restaurantId') ?? 0,
+					// 档口编码。
+					windowCode: raw.getString('windowCode') ?? '',
+					// 档口名称。
+					windowName: raw.getString('windowName') ?? '',
+					// 档口位置。
+					location: raw.getString('location') ?? ''
+				}
+				// 收集到结果列表。
+				items.push(item)
+			}
+
+			// 全部转换完成，返回成功结果。
+			const success: WindowListResult = { ok: true, message: '', items: items }
+			resolve(success)
+		})
+	})
+}
+
+/**
+ * 餐厅摘要，对应后端 RestaurantSummaryVO。
+ */
+export type RestaurantItem = {
+	/** 餐厅 ID。 */
+	restaurantId: number
+	/** 餐厅编码。 */
+	restaurantCode: string
+	/** 餐厅名称。 */
+	restaurantName: string
+	/** 餐厅位置。 */
+	location: string
+}
+
+/**
+ * 餐厅列表查询结果。
+ */
+export type RestaurantListResult = {
+	/** 是否查询成功。 */
+	ok: boolean
+	/** 失败时的提示文案，可直接展示给用户。 */
+	message: string
+	/** 成功时的餐厅列表，已按后端展示排序值升序。 */
+	items: Array<RestaurantItem>
+}
+
+/**
+ * 查询所有当前启用的餐厅。
+ *
+ * 返回顺序即后端按 sort_order、restaurant_id 排好的展示顺序，调用方直接渲染即可。
+ *
+ * @return 查询结果
+ */
+export function listActiveRestaurants(): Promise<RestaurantListResult> {
+	// 把请求结果转换为区分「失败提示」与「空列表」的结构化结果。
+	return new Promise<RestaurantListResult>((resolve) => {
+		httpGet('/products/restaurants', true).then((result: HttpResult) => {
+			// 请求整体失败（网络、401、403 等）：原样透传后端提示并返回空列表。
+			if (!result.ok) {
+				const failed: RestaurantListResult = { ok: false, message: result.message, items: [] }
+				resolve(failed)
+				return
+			}
+
+			// 成功时需要从统一响应体中取出 data 字段。
+			const envelope = result.data
+			// 成功却没有响应体属于异常响应，给出可重试的提示。
+			if (envelope == null) {
+				const abnormal: RestaurantListResult = { ok: false, message: '餐厅列表响应异常，请稍后重试', items: [] }
+				resolve(abnormal)
+				return
+			}
+
+			// 取出 data 数组，保持后端返回的展示顺序。
+			const rawList = envelope.getArray('data')
+			// data 不存在等价于没有启用中的餐厅，按成功 + 空列表返回。
+			if (rawList == null) {
+				const empty: RestaurantListResult = { ok: true, message: '', items: [] }
+				resolve(empty)
+				return
+			}
+
+			// 累积转换后的餐厅列表。
+			const items: Array<RestaurantItem> = []
+			// 逐个把 any 元素转换为强类型 RestaurantItem。
+			for (let i = 0; i < rawList.length; i++) {
+				// 数组元素是 any，先断言为对象再按字段读取。
+				const raw = rawList[i] as UTSJSONObject
+				// 按后端字段名取值，缺失字段用默认值兜底。
+				const item: RestaurantItem = {
+					// 餐厅 ID，用于与档口的 restaurantId 比对筛选。
+					restaurantId: raw.getNumber('restaurantId') ?? 0,
+					// 餐厅编码。
+					restaurantCode: raw.getString('restaurantCode') ?? '',
+					// 餐厅名称，展示在选择面板与区头标题。
+					restaurantName: raw.getString('restaurantName') ?? '',
+					// 餐厅位置，缺失时面板不展示位置行。
+					location: raw.getString('location') ?? ''
+				}
+				// 收集到结果列表。
+				items.push(item)
+			}
+
+			// 全部转换完成，返回成功结果。
+			const success: RestaurantListResult = { ok: true, message: '', items: items }
+			resolve(success)
+		})
+	})
+}

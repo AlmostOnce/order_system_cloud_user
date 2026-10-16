@@ -1,0 +1,65 @@
+/**
+ * 轻量交互反馈封装。
+ *
+ * 统一 toast 与 loading 的调用方式，避免各页面重复书写图标、时长等参数。
+ */
+
+/**
+ * 显示普通提示。
+ *
+ * 全部使用无图标模式：uni-app x 的 success 图标在部分平台样式不可控，
+ * 且与「暖食」主题的视觉语言不一致。
+ *
+ * @param title 提示文案
+ */
+export function toast(title: string): void {
+	// 调用系统轻提示：无图标文本样式，2 秒后自动消失。
+	uni.showToast({
+		// 提示文案由调用方传入，本层不做加工。
+		title: title,
+		// 使用 none 图标：部分平台上 success/loading 图标样式不可控。
+		icon: 'none',
+		// 展示时长固定 2 秒，保证文案能被看完又不至于滞留。
+		duration: 2000
+	})
+}
+
+/**
+ * 显示带成功图标的提示。
+ *
+ * @param title 提示文案
+ */
+export function toastSuccess(title: string): void {
+	// 调用系统轻提示：成功图标样式，1.5 秒后自动消失。
+	uni.showToast({
+		// 提示文案由调用方传入。
+		title: title,
+		// 成功图标用于强化「操作已完成」的正反馈。
+		icon: 'success',
+		// 成功提示无需久留，时长略短于普通提示。
+		duration: 1500
+	})
+}
+
+/**
+ * 显示带遮罩的加载提示。
+ *
+ * @param title 加载文案
+ */
+export function showLoading(title: string): void {
+	// 调用系统加载提示：加遮罩以阻断加载期间的重复操作。
+	uni.showLoading({
+		// 加载文案由调用方传入。
+		title: title,
+		// 开启遮罩，避免用户在请求未完成时重复点击。
+		mask: true
+	})
+}
+
+/**
+ * 关闭加载提示。
+ */
+export function hideLoading(): void {
+	// 关闭由 showLoading 打开的加载提示；必须成对调用，否则遮罩会一直停留。
+	uni.hideLoading()
+}

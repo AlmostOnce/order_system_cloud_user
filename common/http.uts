@@ -1,0 +1,403 @@
+/**
+ * HTTP 请求底座。
+ *
+ * uni-app x 的 uni.request 不支持 request 拦截器（uni.addInterceptor 只覆盖路由类 API），
+ * 因此这里自建统一入口：拼装网关地址、注入 Bearer 令牌、解析后端统一响应体。
+ *
+ * 约定：本层不抛异常也不 reject，一律以 HttpResult 结构返回结果，调用方判断 ok 即可。
+ * 这样页面与业务层完全不必处理异常类型，也避免 UTS 中异常捕获的类型约束差异。
+ */
+
+// 导入网关地址、超时与成功码常量；本层不硬编码这些配置值。
+import { API_BASE_URL, API_TIMEOUT, SUCCESS_CODE } from './config.uts'
+// 导入本地凭据读写：发请求时注入令牌、续期成功后落盘新令牌、会话失效时清空。
+import { getAccessToken, getRefreshToken, saveTokens, clearTokens } from './storage.uts'
+
+/**
+ * 请求结果。
+ */
+export type HttpResult = {
+	/**
+	 * 请求是否成功，成功需同时满足 HTTP 200 与业务码为成功码。
+	 */
+	ok: boolean
+
+	/**
+	 * 失败时的提示文案，可直接展示给用户。
+	 */
+	message: string
+
+	/**
+	 * 成功时的后端统一响应体，结构为 { code, message, data }。
+	 */
+	data: UTSJSONObject | null
+
+	/**
+	 * HTTP 状态码；请求未到达服务端（网络层失败）时为 0。
+	 *
+	 * 续期逻辑据此识别 401，调用方通常无需关心。
+	 */
+	statusCode: number
+}
+
+/**
+ * 构造成功结果。
+ *
+ * @param envelope 后端统一响应体
+ * @return 成功结果
+ */
+function successResult(envelope: UTSJSONObject, statusCode: number): HttpResult {
+	// 成功结果的 message 固定为空串，调用方只判断 ok 即可。
+	const result: HttpResult = { ok: true, message: '', data: envelope, statusCode: statusCode }
+	// 返回组装好的成功结果。
+	return result
+}
+
+/**
+ * 构造失败结果。
+ *
+ * @param message 错误提示
+ * @return 失败结果
+ */
+function failureResult(message: string, statusCode: number): HttpResult {
+	// 失败结果不带响应体，data 置空，由 message 承载可展示的提示。
+	const result: HttpResult = { ok: false, message: message, data: null, statusCode: statusCode }
+	// 返回组装好的失败结果。
+	return result
+}
+
+/**
+ * 生成传输层失败的提示文案。
+ *
+ * 请求没有正常返回统一响应体时使用，按 HTTP 状态码区分常见情况。
+ *
+ * @param statusCode HTTP 状态码
+ * @return 错误提示
+ */
+function transportErrorMessage(statusCode: number): string {
+	// 网关对登录接口配置了令牌桶限流，超限返回 429，单独给出更准确的提示。
+	if (statusCode == 429) {
+		return '操作过于频繁，请稍后再试'
+	}
+	// 401 且拿不到响应体，说明凭据已被拒绝，提示重新登录。
+	if (statusCode == 401) {
+		return '登录状态已失效，请重新登录'
+	}
+	// 403 表示身份有效但角色无权限访问该资源。
+	if (statusCode == 403) {
+		return '没有访问该资源的权限'
+	}
+	// 其余状态码统一给出通用的服务不可用提示。
+	return '服务暂不可用，请稍后重试'
+}
+
+/**
+ * 解析后端返回的统一响应体。
+ *
+ * GET 与 POST 共用，避免两处重复判断状态码与业务码。
+ *
+ * @param statusCode HTTP 状态码
+ * @param raw 平台解析后的响应数据，类型不确定，需按对象读取
+ * @return 请求结果
+ */
+function parseResponse(statusCode: number, raw: any): HttpResult {
+	// 拿不到响应体时读不到业务文案，只能按 HTTP 状态码给出通用提示。
+	if (raw == null) {
+		return failureResult(transportErrorMessage(statusCode), statusCode)
+	}
+
+	// 平台返回的是 any，需显式断言为对象后才能按字段读取。
+	const envelope = raw as UTSJSONObject
+	// 取统一响应体的业务码；字段缺失时按空串处理。
+	const code = envelope.getString('code') ?? ''
+	// 业务码等于成功码才算真正成功，不单看 HTTP 状态。
+	if (code == SUCCESS_CODE) {
+		return successResult(envelope, statusCode)
+	}
+
+	// 业务失败时后端都会带统一响应体，message 已是可直接展示的文案
+	// （如账密错误返回「用户名或密码错误」）。必须先取后端 message，
+	// 否则会被 401 等状态码的通用提示覆盖，把登录失败误报成登录过期。
+	const businessMessage = envelope.getString('message')
+	// 后端给出了非空文案时优先透传，保留最准确的错误语义。
+	if (businessMessage != null && businessMessage.length > 0) {
+		return failureResult(businessMessage, statusCode)
+	}
+
+	// 响应体不含可用文案（如网关直接拒绝）时才退回状态码通用提示。
+	return failureResult(transportErrorMessage(statusCode), statusCode)
+}
+
+/**
+ * 按需鉴权拼装请求头。
+ *
+ * @param needAuth 是否需要携带 Bearer 令牌
+ * @return 请求头
+ */
+function buildHeader(needAuth: boolean): UTSJSONObject {
+	// 请求一律按 JSON 提交，后端接口均以 JSON 作为请求体格式。
+	const header: UTSJSONObject = { 'Content-Type': 'application/json' }
+	// 仅需要鉴权的请求才注入令牌，免登录接口不携带过期令牌。
+	if (needAuth) {
+		// 读取本地访问令牌。
+		const accessToken = getAccessToken()
+		// 有令牌时才拼装 Authorization 头，避免发送空 Bearer。
+		if (accessToken.length > 0) {
+			header.set('Authorization', 'Bearer ' + accessToken)
+		}
+	}
+	// 返回最终请求头。
+	return header
+}
+
+/**
+ * 发送一次 POST 请求，不带任何续期逻辑。
+ *
+ * @param path 业务路径
+ * @param body 请求体，无请求体时传 null
+ * @param needAuth 是否需要携带 Bearer 令牌
+ * @return 请求结果
+ */
+function postOnce(
+	path: string,
+	body: UTSJSONObject | null,
+	needAuth: boolean
+): Promise<HttpResult> {
+	// 用 Promise 包住回调式请求，把 uni.request 的回调结果统一为 Promise 结果。
+	return new Promise<HttpResult>((resolve) => {
+		uni.request({
+			// 网关地址与业务路径拼接，调用方只传服务自身路径。
+			url: API_BASE_URL + path,
+			// 固定使用 POST 字面量，避免把 method 作为字符串参数带来的类型问题。
+			method: 'POST',
+			// 请求头按是否需要鉴权动态拼装。
+			header: buildHeader(needAuth),
+			// POST 请求体，允许为空对象以外的 null（如无请求体接口）。
+			data: body,
+			// 使用全局统一超时时间。
+			timeout: API_TIMEOUT,
+			// 声明为 json 后由 uni 完成一次 JSON.parse，小程序与 App 行为一致。
+			dataType: 'json',
+			success: (res) => {
+				// 请求已到达服务端，按状态码与业务码解析统一响应体。
+				resolve(parseResponse(res.statusCode, res.data))
+			},
+			fail: (err) => {
+				// 网络层失败（超时、断网、地址不可达）不会返回 HTTP 状态码。
+				resolve(failureResult('网络连接失败，请检查网络后重试', 0))
+			}
+		})
+	})
+}
+
+/**
+ * 发送一次 GET 请求，不带任何续期逻辑。
+ *
+ * @param path 业务路径
+ * @param needAuth 是否需要携带 Bearer 令牌
+ * @return 请求结果
+ */
+function getOnce(path: string, needAuth: boolean): Promise<HttpResult> {
+	// 用 Promise 包住回调式请求，把 uni.request 的回调结果统一为 Promise 结果。
+	return new Promise<HttpResult>((resolve) => {
+		uni.request({
+			// 网关地址与业务路径拼接，调用方只传服务自身路径。
+			url: API_BASE_URL + path,
+			// 固定使用 GET 字面量，避免把 method 作为字符串参数带来的类型问题。
+			method: 'GET',
+			// 请求头按是否需要鉴权动态拼装。
+			header: buildHeader(needAuth),
+			// 使用全局统一超时时间。
+			timeout: API_TIMEOUT,
+			// 声明为 json 后由 uni 完成一次 JSON.parse，小程序与 App 行为一致。
+			dataType: 'json',
+			success: (res) => {
+				// 请求已到达服务端，按状态码与业务码解析统一响应体。
+				resolve(parseResponse(res.statusCode, res.data))
+			},
+			fail: (err) => {
+				// 网络层失败（超时、断网、地址不可达）不会返回 HTTP 状态码。
+				resolve(failureResult('网络连接失败，请检查网络后重试', 0))
+			}
+		})
+	})
+}
+
+/**
+ * 发送请求，并在需要鉴权的请求收到 401 时尝试自动续期。
+ *
+ * <p>这是 httpPost 与 httpGet 共用的外层。收到 401 且允许续期时，先走一次
+ * 单飞刷新拿到新令牌，再带上新令牌把原请求重试一次；刷新失败则清空本地
+ * 凭据并回到登录页。重试时 allowRefresh 置为 false，避免刷新成功后仍失败
+ * 时无限循环。</p>
+ *
+ * <p>只重试一次是安全的：401 表示请求在鉴权阶段就被拒绝，业务尚未执行，
+ * 不会产生重复副作用。</p>
+ *
+ * @param send 实际发送一次请求的函数
+ * @param needAuth 该请求是否需要鉴权
+ * @param allowRefresh 收到 401 时是否允许自动续期
+ * @return 请求结果
+ */
+function sendWithRefresh(
+	send: () => Promise<HttpResult>,
+	needAuth: boolean,
+	allowRefresh: boolean
+): Promise<HttpResult> {
+	// 用 Promise 包住整段续期流程，调用方只关心最终结果。
+	return new Promise<HttpResult>((resolve) => {
+		// 先发送一次原请求，再根据其结果决定是否续期重试。
+		send().then((result: HttpResult) => {
+			// 非「鉴权失败」的情况一律直接返回：成功、非 401、免鉴权请求或已重试过。
+			if (result.ok || result.statusCode != 401 || !needAuth || !allowRefresh) {
+				resolve(result)
+				return
+			}
+
+			// 鉴权失败时先尝试续期：成功则带新令牌重试，失败则判定会话失效。
+			refreshSession().then((refreshed: boolean) => {
+				// 续期失败（无刷新令牌、已过期或被消费）：清凭据回登录页，返回原始 401。
+				if (!refreshed) {
+					handleSessionExpired()
+					resolve(result)
+					return
+				}
+				// 续期成功：带着新访问令牌重试一次原请求，allowRefresh 置 false 防止无限循环。
+				sendWithRefresh(send, needAuth, false).then((retryResult: HttpResult) => {
+					resolve(retryResult)
+				})
+			})
+		})
+	})
+}
+
+/** 进行中的刷新请求；非空表示已有请求在续期，其它 401 请求复用它而不重复刷新。 */
+let refreshingPromise: Promise<boolean> | null = null
+
+/**
+ * 单飞刷新令牌：并发多个 401 只发起一次刷新，其余请求等待同一结果。
+ *
+ * <p>后端刷新是「令牌轮换 + 一次性消费」，同一枚旧 Refresh Token 只能成功
+ * 刷新一次；若并发请求各自刷新，第二个必然拿到「Refresh Token 无效或已过期」。
+ * 同一客户端内部合并为一次刷新，是后端并发保护配套的前端逻辑。</p>
+ *
+ * @return 刷新成功返回 true
+ */
+function refreshSession(): Promise<boolean> {
+	// 已有刷新在进行中：直接复用同一个 Promise，调用方各自等待其最终结果。
+	if (refreshingPromise != null) {
+		return refreshingPromise
+	}
+
+	// 首次触发：真正发起一次刷新请求。
+	const current: Promise<boolean> = performRefresh()
+	// 立即占位，使后续并发 401 都指向这次刷新。
+	refreshingPromise = current
+	// 刷新结束后释放单飞占位，后续再次过期时仍可重新续期。
+	current.then((refreshed: boolean) => {
+		refreshingPromise = null
+	})
+	// 返回本次刷新结果给当前调用方。
+	return current
+}
+
+/**
+ * 使用本地 Refresh Token 换取新的双令牌。
+ *
+ * @return 刷新成功返回 true
+ */
+function performRefresh(): Promise<boolean> {
+	// 把刷新结果统一收敛为布尔值：true 表示已换到并落盘新双令牌。
+	return new Promise<boolean>((resolve) => {
+		// 读取本地刷新令牌，作为换取新令牌的凭据。
+		const refreshToken = getRefreshToken()
+		// 没有刷新令牌（未登录或已登出）时直接判定刷新失败，不请求后端。
+		if (refreshToken.length == 0) {
+			resolve(false)
+			return
+		}
+
+		// 按后端 RefreshTokenRequest 的契约组装请求体。
+		const body: UTSJSONObject = { refreshToken: refreshToken }
+		// 刷新接口免鉴权，且直接调用 postOnce，天然不会再触发续期。
+		postOnce('/auth/refresh', body, false).then((result: HttpResult) => {
+			// 刷新请求本身失败（如旧令牌已被消费）时判定刷新失败。
+			if (!result.ok) {
+				resolve(false)
+				return
+			}
+
+			// 取统一响应体，理论上成功时必不为空。
+			const envelope = result.data
+			// 响应体缺失属于异常响应，按失败处理。
+			if (envelope == null) {
+				resolve(false)
+				return
+			}
+
+			// 取 data 字段（登录 VO），缺令牌说明响应异常。
+			const rawPayload = envelope.getJSON('data')
+			// 缺 data 时无法取出令牌，按失败处理。
+			if (rawPayload == null) {
+				resolve(false)
+				return
+			}
+
+			// 平台返回的 data 是 any，需断言为对象后按字段读取。
+			const payload = rawPayload as UTSJSONObject
+			// 取出新访问令牌。
+			const accessToken = payload.getString('accessToken') ?? ''
+			// 取出新刷新令牌（后端采用轮换策略，会返回新的一枚）。
+			const newRefreshToken = payload.getString('refreshToken') ?? ''
+			// 任一令牌缺失都说明响应不完整，按失败处理且不落盘。
+			if (accessToken.length == 0 || newRefreshToken.length == 0) {
+				resolve(false)
+				return
+			}
+
+			// 轮换后的新双令牌必须立刻落盘，后续重试才会带上新的访问令牌。
+			saveTokens(accessToken, newRefreshToken)
+			// 告知调用方刷新成功，可以带新令牌重试原请求。
+			resolve(true)
+		})
+	})
+}
+
+/**
+ * 处理会话失效：清空本地凭据并回到登录页。
+ */
+function handleSessionExpired(): void {
+	// 清空双令牌，避免残留的失效凭据被后续请求继续携带。
+	clearTokens()
+	// 用 reLaunch 重置页面栈，防止用户用返回键退回需要登录的页面。
+	uni.reLaunch({ url: '/pages/login/login' })
+}
+
+/**
+ * 以 POST 方式请求后端，收到 401 时自动续期并重试一次。
+ *
+ * @param path 业务路径，如 '/auth/login'
+ * @param body 请求体，无请求体时传 null
+ * @param needAuth 是否需要携带 Bearer 令牌
+ * @return 请求结果
+ */
+export function httpPost(path: string, body: UTSJSONObject | null, needAuth: boolean): Promise<HttpResult> {
+	// 以闭包传入一次性的 POST 发送动作，由 sendWithRefresh 决定是否续期重试。
+	return sendWithRefresh(() => {
+		return postOnce(path, body, needAuth)
+	}, needAuth, true)
+}
+
+/**
+ * 以 GET 方式请求后端，收到 401 时自动续期并重试一次。
+ *
+ * @param path 业务路径，如 '/products/windows'
+ * @param needAuth 是否需要携带 Bearer 令牌
+ * @return 请求结果
+ */
+export function httpGet(path: string, needAuth: boolean): Promise<HttpResult> {
+	// 以闭包传入一次性的 GET 发送动作，由 sendWithRefresh 决定是否续期重试。
+	return sendWithRefresh(() => {
+		return getOnce(path, needAuth)
+	}, needAuth, true)
+}

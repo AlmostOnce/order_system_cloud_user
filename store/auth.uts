@@ -1,0 +1,165 @@
+/**
+ * 登录态管理。
+ *
+ * 负责编排「调用接口—解析令牌—落盘凭据」的完整流程，页面只与这里交互，
+ * 不直接接触令牌与存储细节。
+ *
+ * 约定：需要提示错误的函数以 Promise<string> 返回提示文案，空字符串表示成功。
+ */
+
+// 导入认证接口：本层在其之上编排「取令牌—落盘—记住账号」的完整流程。
+import { login as loginApi, register as registerApi, logout as logoutApi } from '../api/auth.uts'
+// 导入统一请求结果类型，用于标注接口返回值。
+import { HttpResult } from '../common/http.uts'
+// 导入本地凭据读写：保存/清除双令牌，以及「记住账号」的读写。
+import { saveTokens, clearTokens, getAccessToken, getRefreshToken, setRememberedUsername, clearRememberedUsername } from '../common/storage.uts'
+// 导入 JWT 载荷解析，用于在不请求后端的情况下读取当前登录身份。
+import { parseTokenPayload, TokenPayload } from '../common/jwt.uts'
+
+/**
+ * 账号密码登录。
+ *
+ * 登录成功后写入双令牌；「记住账号」只保存用户名，不保存密码。
+ *
+ * @param username 用户名
+ * @param password 密码
+ * @param rememberUsername 是否记住用户名
+ * @return 空字符串表示登录成功，否则为需要展示的错误提示
+ */
+export function login(username: string, password: string, rememberUsername: boolean): Promise<string> {
+	// 用 Promise<string> 收敛结果：空串表示成功，非空串为可直接 toast 的提示。
+	return new Promise<string>((resolve) => {
+		// 调用认证接口发起登录。
+		loginApi(username, password).then((result: HttpResult) => {
+			// 请求失败：后端 message 已可直接展示，原样返回给页面。
+			if (!result.ok) {
+				resolve(result.message)
+				return
+			}
+
+			// 取统一响应体。
+			const envelope = result.data
+			// 成功却没有响应体属于异常响应。
+			if (envelope == null) {
+				resolve('登录响应异常，请稍后重试')
+				return
+			}
+
+			// 取 data 字段（登录 VO），其中应包含双令牌。
+			const rawPayload = envelope.getJSON('data')
+			// 缺 data 时无法落盘凭据，按失败提示。
+			if (rawPayload == null) {
+				resolve('登录响应缺少令牌，请稍后重试')
+				return
+			}
+
+			// data 是 any，断言为对象后按字段读取。
+			const payload = rawPayload as UTSJSONObject
+			// 取出访问令牌。
+			const accessToken = payload.getString('accessToken') ?? ''
+			// 取出刷新令牌。
+			const refreshToken = payload.getString('refreshToken') ?? ''
+			// 任一令牌缺失都说明登录未真正完成，不能落盘。
+			if (accessToken.length == 0 || refreshToken.length == 0) {
+				resolve('登录响应缺少令牌，请稍后重试')
+				return
+			}
+
+			// 双令牌齐全，写入本地存储，后续请求即携带该访问令牌。
+			saveTokens(accessToken, refreshToken)
+			// 勾选「记住账号」：只记用户名，不落盘密码。
+			if (rememberUsername) {
+				setRememberedUsername(username)
+			} else {
+				// 未勾选：清掉历史记住的用户名，避免下次误回填。
+				clearRememberedUsername()
+			}
+			// 返回空串表示登录成功。
+			resolve('')
+		})
+	})
+}
+
+/**
+ * 注册新用户。
+ *
+ * 注册成功后不自动登录，由调用方引导用户回到登录页手动登录，
+ * 与后端「注册只创建账号」的语义保持一致。
+ *
+ * @param username 用户名
+ * @param phone 手机号
+ * @param password 密码
+ * @return 空字符串表示注册成功，否则为需要展示的错误提示
+ */
+export function register(username: string, phone: string, password: string): Promise<string> {
+	// 用 Promise<string> 收敛结果：空串表示注册成功，非空串为错误提示。
+	return new Promise<string>((resolve) => {
+		// 调用注册接口创建账号。
+		registerApi(username, phone, password).then((result: HttpResult) => {
+			// 注册失败（如用户名或手机号已被占用）：透传后端提示。
+			if (!result.ok) {
+				resolve(result.message)
+				return
+			}
+
+			// 注册成功时把用户名记下来，方便登录页直接回填。
+			setRememberedUsername(username)
+			// 返回空串表示注册成功。
+			resolve('')
+		})
+	})
+}
+
+/**
+ * 退出登录。
+ *
+ * 先通知服务端失效刷新令牌，无论结果如何都清空本地凭据——本地退出必须成功，
+ * 否则用户会卡在「退不出去」的状态。
+ */
+export function logout(): Promise<void> {
+	// 用 Promise<void> 表达「退出动作已完成」，页面只关心何时可以跳回登录页。
+	return new Promise<void>((resolve) => {
+		// 读取刷新令牌：注销接口需要它来定位并失效服务端会话。
+		const refreshToken = getRefreshToken()
+		// 本地已无刷新令牌：无需请求后端，直接清凭据并结束。
+		if (refreshToken.length == 0) {
+			clearTokens()
+			resolve()
+			return
+		}
+		// 通知服务端失效刷新令牌与访问令牌。
+		logoutApi(refreshToken).then((result: HttpResult) => {
+			// 无论后端成功与否都清空本地凭据，保证本地一定能退出。
+			clearTokens()
+			resolve()
+		})
+	})
+}
+
+/**
+ * 判断本地是否存在登录凭据。
+ *
+ * @return 已登录返回 true
+ */
+export function isLoggedIn(): boolean {
+	// 以访问令牌是否存在作为登录判据：令牌由 http 层统一注入请求。
+	return getAccessToken().length > 0
+}
+
+/**
+ * 读取当前登录用户的身份信息。
+ *
+ * 身份信息直接取自访问令牌载荷，不额外请求后端。
+ *
+ * @return 身份信息，未登录或令牌非法时返回 null
+ */
+export function currentUser(): TokenPayload | null {
+	// 读取本地访问令牌。
+	const accessToken = getAccessToken()
+	// 无令牌说明未登录，直接返回空。
+	if (accessToken.length == 0) {
+		return null
+	}
+	// 解析令牌载荷得到身份信息；令牌非法时解析函数返回 null。
+	return parseTokenPayload(accessToken)
+}
