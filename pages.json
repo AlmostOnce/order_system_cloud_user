@@ -18,8 +18,43 @@
 			"style": {
 				"navigationStyle": "custom"
 			}
+		},
+		{
+			// 底部导航的「我的」页：承载个人信息与退出登录，首页不再展示这些内容
+			"path": "pages/mine/mine",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			// 档口点餐详情页：由首页档口列表跳转进入，非 tab 页，使用自定义导航栏
+			"path": "pages/menu/menu",
+			"style": {
+				"navigationStyle": "custom"
+			}
 		}
 	],
+	"tabBar": {
+		// 未选中态使用暖灰，选中态使用项目主色柿子橙
+		"color": "#A2968B",
+		"selectedColor": "#E4572E",
+		"backgroundColor": "#FFFFFF",
+		"borderStyle": "white",
+		"list": [
+			{
+				"pagePath": "pages/home/home",
+				"text": "首页",
+				"iconPath": "static/tabbar/home.png",
+				"selectedIconPath": "static/tabbar/home-active.png"
+			},
+			{
+				"pagePath": "pages/mine/mine",
+				"text": "我的",
+				"iconPath": "static/tabbar/mine.png",
+				"selectedIconPath": "static/tabbar/mine-active.png"
+			}
+		]
+	},
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
 		"navigationBarTitleText": "校园食堂",

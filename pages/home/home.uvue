@@ -26,20 +26,6 @@
 			</view>
 		</view>
 
-		<!-- 用户条：白卡上移与品牌区重叠，右侧直接给出退出入口，省掉页面底部单独一个按钮 -->
-		<view class="userbar" :class="entered ? '' : 'userbar-pre'">
-			<view class="user-avatar">
-				<text class="user-avatar-text">{{ avatarText }}</text>
-			</view>
-			<view class="user-body">
-				<text class="user-name">{{ username }}</text>
-				<text class="user-meta">{{ roleName }} · ID {{ userId }}</text>
-			</view>
-			<view class="user-exit" hover-class="user-exit-hover" @click="confirmSignOut">
-				<text class="user-exit-text">退出</text>
-			</view>
-		</view>
-
 		<!-- 档口列表：区头先入场，卡片等数据到位后依次浮入 -->
 		<view class="section">
 			<view class="section-head" :class="entered ? '' : 'section-head-pre'">
@@ -63,7 +49,7 @@
 
 			<view v-else-if="roleCode != 'CUSTOMER'" class="state" :class="entered ? '' : 'state-pre'">
 				<text class="state-text">档口展示面向学生用户开放</text>
-				<text class="state-hint">当前账号为「{{ roleName }}」，请用顾客账号登录查看</text>
+				<text class="state-hint">请用学生账号登录查看</text>
 			</view>
 
 			<view v-else-if="visibleWindows.length == 0" class="state" :class="entered ? '' : 'state-pre'">
@@ -138,10 +124,8 @@
 </template>
 
 <script lang="uts">
-	// 导入轻量提示：用于档口菜单未落地时的占位反馈。
-	import { toast } from '../../common/feedback.uts'
-	// 导入登录态：退出动作、登录判断与当前身份读取。
-	import { logout as doLogout, isLoggedIn, currentUser } from '../../store/auth.uts'
+	// 导入登录态：登录判断与当前身份读取（退出入口已迁到「我的」页）。
+	import { isLoggedIn, currentUser } from '../../store/auth.uts'
 	// 导入商品查询与结果类型：档口列表、餐厅列表及其返回结构。
 	import { listActiveWindows, listActiveRestaurants, WindowItem, WindowListResult, RestaurantItem, RestaurantListResult } from '../../api/product.uts'
 
@@ -152,39 +136,13 @@
 	const ALL_RESTAURANTS_NAME: string = '全部餐厅'
 
 	/**
-	 * 把后端角色编码转换为可展示的中文名称。
+	 * 按当前时刻生成问候语。
 	 *
-	 * @param roleCode 角色编码
-	 * @return 角色中文名
-	 */
-	function roleLabel(roleCode: string): string {
-		// 按角色编码逐一映射为中文名称，顺序即优先级。
-		if (roleCode == 'SYSTEM_ADMIN') {
-			return '系统管理员'
-		}
-		if (roleCode == 'GENERAL_MANAGER') {
-			return '食堂总经理'
-		}
-		if (roleCode == 'RESTAURANT_MANAGER') {
-			return '餐厅经理'
-		}
-		if (roleCode == 'STALL_MANAGER') {
-			return '档口管理员'
-		}
-		if (roleCode == 'CUSTOMER') {
-			return '学生用户'
-		}
-		// 未匹配到已知编码时的兜底文案。
-		return '未分配角色'
-	}
-
-	/**
-	 * 按当前时刻与用户名生成问候语。
+	 * 首页不再展示任何个人信息，问候语只按时段变化，不拼用户名。
 	 *
-	 * @param username 当前登录用户名
-	 * @return 问候语
+	 * @return 纯时段问候语
 	 */
-	function buildGreeting(username: string): string {
+	function buildGreeting(): string {
 		// 取本机当前小时数，用于选择时段问候语。
 		const hour = new Date().getHours()
 		// 默认按晚间问候，再由时段判断覆盖。
@@ -202,14 +160,8 @@
 			// 下午 14-17 点。
 			prefix = '下午好'
 		}
-		// 没有用户名时只返回时段问候语。
-		if (username.length == 0) {
-			return prefix
-		}
-		// 用户名可能很长，标题只取前 8 个字符，避免撑破品牌区。
-		const shown = username.length > 8 ? username.substring(0, 8) + '…' : username
-		// 拼接为「问候语，用户名」的完整文案。
-		return prefix + '，' + shown
+		// 直接返回时段问候，不拼接用户名等个人信息。
+		return prefix
 	}
 
 	/**
@@ -237,18 +189,12 @@
 			return {
 				// 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
 				statusBarHeight: 0,
-				// 顶部问候语，初始未拿到用户名时只显示时段问候。
-				greeting: buildGreeting(''),
-				// 当前登录用户名。
-				username: '',
+				// 顶部问候语：初值必须保持为空字符串，不能在此调用依赖当前时间的函数。
+				// H5 端首屏会先做服务端预渲染再在客户端 hydrate，data() 里的 new Date()
+				// 在两端取值可能不一致，会触发 hydration mismatch 警告。
+				greeting: '',
 				// 当前角色编码，用于模板判断是否展示档口列表。
 				roleCode: '',
-				// 当前角色中文名，用于用户条展示。
-				roleName: '',
-				// 当前用户 ID，用于用户条展示。
-				userId: 0,
-				// 头像占位文字，取用户名首字，缺省为「食」。
-				avatarText: '食',
 				// 后端返回的档口全量列表。
 				windows: emptyWindows,
 				// 按当前选中餐厅筛选后、供页面渲染的档口列表。
@@ -398,18 +344,10 @@
 					uni.reLaunch({ url: '/pages/login/login' })
 					return
 				}
-				// 用户名缺失时用「校园用户」兜底。
-				this.username = profile.username.length > 0 ? profile.username : '校园用户'
-				// 写入角色编码，供模板判断。
+				// 只保留角色编码用于判断是否展示档口列表，其余个人信息不在首页展示。
 				this.roleCode = profile.roleCode
-				// 角色编码转中文名后展示。
-				this.roleName = roleLabel(profile.roleCode)
-				// 写入用户 ID。
-				this.userId = profile.userId
-				// 头像文字取用户名首字，缺省为「食」。
-				this.avatarText = profile.username.length > 0 ? profile.username.substring(0, 1) : '食'
-				// 按用户名重新生成问候语。
-				this.greeting = buildGreeting(this.username)
+				// 每次进入页面按时段刷新问候语。
+				this.greeting = buildGreeting()
 
 				// 仅顾客角色需要拉取档口与餐厅数据。
 				if (this.roleCode == 'CUSTOMER') {
@@ -546,30 +484,8 @@
 				}, 60)
 			},
 			openWindow(item: WindowItem) {
-				// 菜单页尚未落地，先给出明确反馈，避免点了没反应。
-				toast(item.windowName + ' 的菜单即将上线')
-			},
-			confirmSignOut() {
-				uni.showModal({
-					// 弹窗标题。
-					title: '退出登录',
-					// 弹窗正文：说明退出的后果。
-					content: '退出后需要重新输入账号密码，确定要退出吗？',
-					// 确认按钮文案。
-					confirmText: '退出',
-					// 取消按钮文案。
-					cancelText: '再想想',
-					success: (res) => {
-						// 选择取消时直接返回，不做任何处理。
-						if (!res.confirm) {
-							return
-						}
-						// 确认退出后调用注销流程，成功后回到登录页。
-						doLogout().then(() => {
-							uni.reLaunch({ url: '/pages/login/login' })
-						})
-					}
-				})
+				// 进入该档口的点餐详情页，由菜单页负责拉取菜单与购物车。
+				uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId })
 			}
 		}
 	}
@@ -592,8 +508,8 @@
 		position: relative;
 		background-color: #E4572E;
 		padding-top: 22px;
-		/* 多留一段底部内边距，给下方白卡上移叠压的空间 */
-		padding-bottom: 44px;
+		/* 首页已移除重叠的用户信息卡，底部只留常规留白 */
+		padding-bottom: 24px;
 		overflow: hidden;
 	}
 
@@ -741,85 +657,6 @@
 	.hero-desc-pre {
 		opacity: 0;
 		transform: translateY(14px);
-	}
-
-	/* ---------- 用户条 ---------- */
-
-	.userbar {
-		position: relative;
-		flex-direction: row;
-		align-items: center;
-		background-color: #FFFFFF;
-		margin-left: 20px;
-		margin-right: 20px;
-		margin-top: -26px;
-		padding: 14px;
-		border-radius: 20px;
-		box-shadow: 0 8px 22px rgba(180, 120, 90, 0.12);
-		opacity: 1;
-		transform: translateY(0);
-		transition-property: opacity, transform;
-		transition-duration: 0.6s;
-		/* 白卡上浮到位时略过冲再回落 */
-		transition-timing-function: cubic-bezier(0.22, 1.3, 0.36, 1);
-		transition-delay: 0.26s;
-	}
-
-	.userbar-pre {
-		opacity: 0;
-		transform: translateY(26px);
-	}
-
-	.user-avatar {
-		width: 42px;
-		height: 42px;
-		border-radius: 14px;
-		background-color: #E4572E;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.user-avatar-text {
-		font-size: 18px;
-		font-weight: bold;
-		color: #FFFFFF;
-	}
-
-	.user-body {
-		flex: 1;
-		margin-left: 12px;
-	}
-
-	.user-name {
-		font-size: 16px;
-		font-weight: bold;
-		color: #211C18;
-	}
-
-	.user-meta {
-		margin-top: 4px;
-		font-size: 11px;
-		color: #A2968B;
-	}
-
-	/* 退出入口：只负责按压反馈，底色不在过渡列表内，按下立即变色 */
-	.user-exit {
-		padding-left: 14px;
-		padding-right: 14px;
-		padding-top: 7px;
-		padding-bottom: 7px;
-		border-radius: 999px;
-		background-color: #FDF6F0;
-	}
-
-	.user-exit-hover {
-		background-color: #F6E7DC;
-	}
-
-	.user-exit-text {
-		font-size: 12px;
-		font-weight: bold;
-		color: #C2410C;
 	}
 
 	/* ---------- 档口列表 ---------- */
@@ -999,6 +836,9 @@
 		right: 0;
 		top: 0;
 		bottom: 0;
+		/* 原生 tabBar 的层级固定为 998（H5 端 .uni-tabbar），遮罩必须高于它，
+		   否则面板展开时底部一条会被 tabBar 盖住，且 tabBar 仍可点击 */
+		z-index: 999;
 		background-color: rgba(33, 28, 24, 0.45);
 		opacity: 1;
 		transition-property: opacity;
@@ -1016,6 +856,8 @@
 		left: 0;
 		right: 0;
 		bottom: 0;
+		/* 层级需同时高于 tabBar(998) 与遮罩(999)，面板底部才不会被 tabBar 遮挡 */
+		z-index: 1000;
 		background-color: #FFFFFF;
 		border-top-left-radius: 22px;
 		border-top-right-radius: 22px;

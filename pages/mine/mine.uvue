@@ -1,0 +1,456 @@
+<template>
+	<view class="page">
+		<!-- 状态栏底色与品牌区同色，避免顶部出现米色缝隙 -->
+		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
+
+		<!-- 品牌区：与首页保持同一套柿子橙视觉，仅保留标题层级 -->
+		<view class="hero">
+			<view class="hero-shape hero-shape-1" :class="entered ? '' : 'hero-shape-1-pre'"></view>
+			<view class="hero-shape hero-shape-2" :class="entered ? '' : 'hero-shape-2-pre'"></view>
+			<view class="hero-body">
+				<text class="hero-eyebrow">CAMPUS CANTEEN</text>
+				<text class="hero-title" :class="entered ? '' : 'hero-title-pre'">我的</text>
+				<text class="hero-desc" :class="entered ? '' : 'hero-desc-pre'">账号信息与登录状态</text>
+			</view>
+		</view>
+
+		<!-- 个人信息卡：白卡上移与品牌区重叠，展示头像、用户名与角色 -->
+		<view class="profile" :class="entered ? '' : 'profile-pre'">
+			<view class="avatar">
+				<text class="avatar-text">{{ avatarText }}</text>
+			</view>
+			<view class="profile-body">
+				<text class="profile-name">{{ username }}</text>
+				<text class="profile-meta">{{ roleName }} · ID {{ userId }}</text>
+			</view>
+		</view>
+
+		<!-- 账号信息明细：只展示令牌中可读到的字段，不额外请求后端 -->
+		<view class="group" :class="entered ? '' : 'group-pre'">
+			<text class="group-title">账号信息</text>
+			<view class="row">
+				<text class="row-label">用户名</text>
+				<text class="row-value">{{ username }}</text>
+			</view>
+			<view class="row">
+				<text class="row-label">角色</text>
+				<text class="row-value">{{ roleName }}</text>
+			</view>
+			<view class="row">
+				<text class="row-label">用户 ID</text>
+				<text class="row-value">{{ userId }}</text>
+			</view>
+		</view>
+
+		<!-- 退出登录：放在「我的」页，首页不再提供退出入口 -->
+		<view class="signout" :class="entered ? '' : 'signout-pre'" hover-class="signout-hover" @click="confirmSignOut">
+			<text class="signout-text">退出登录</text>
+		</view>
+
+		<view class="footer">
+			<text class="footer-text">湖北经济学院 · 食堂管理中心</text>
+		</view>
+	</view>
+</template>
+
+<script lang="uts">
+	// 导入登录态：退出动作、登录判断与当前身份读取。
+	import { logout as doLogout, isLoggedIn, currentUser } from '../../store/auth.uts'
+
+	/**
+	 * 把后端角色编码转换为可展示的中文名称。
+	 *
+	 * @param roleCode 角色编码
+	 * @return 角色中文名
+	 */
+	function roleLabel(roleCode: string): string {
+		// 按角色编码逐一映射为中文名称，顺序即优先级。
+		if (roleCode == 'SYSTEM_ADMIN') {
+			return '系统管理员'
+		}
+		if (roleCode == 'GENERAL_MANAGER') {
+			return '食堂总经理'
+		}
+		if (roleCode == 'RESTAURANT_MANAGER') {
+			return '餐厅经理'
+		}
+		if (roleCode == 'STALL_MANAGER') {
+			return '档口管理员'
+		}
+		if (roleCode == 'CUSTOMER') {
+			return '学生用户'
+		}
+		// 未匹配到已知编码时的兜底文案。
+		return '未分配角色'
+	}
+
+	export default {
+		data() {
+			return {
+				// 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
+				statusBarHeight: 0,
+				// 当前登录用户名。
+				username: '',
+				// 当前角色中文名。
+				roleName: '',
+				// 当前用户 ID。
+				userId: 0,
+				// 头像占位文字，取用户名首字。
+				avatarText: '食',
+				// 是否已进入入场动画终态，切换后驱动各元素的过渡。
+				entered: false
+			}
+		},
+		onShow() {
+			// 状态栏高度取不到时用 24px 兜底，避免顶部内容被系统栏遮挡。
+			const info = uni.getWindowInfo()
+			this.statusBarHeight = info.statusBarHeight > 0 ? info.statusBarHeight : 24
+
+			// 令牌被清空（如退出登录）时不允许停留在本页。
+			if (!isLoggedIn()) {
+				uni.reLaunch({ url: '/pages/login/login' })
+				return
+			}
+			this.loadProfile()
+		},
+		onReady() {
+			// 页面渲染完成后窗口信息才准确（app-android 尤其如此），此处再同步一次状态栏高度。
+			const readyInfo = uni.getWindowInfo()
+			this.statusBarHeight = readyInfo.statusBarHeight > 0 ? readyInfo.statusBarHeight : 24
+
+			// 首帧绘制完成后再切到「已入场」状态，属性变化才会驱动入场过渡动画。
+			setTimeout(() => {
+				this.entered = true
+			}, 60)
+		},
+		methods: {
+			/**
+			 * 从本地令牌读取并展示当前登录身份。
+			 */
+			loadProfile() {
+				// 从本地令牌解析出当前用户信息。
+				const profile = currentUser()
+				// 令牌存在但解析失败，说明凭据已不可用，回到登录页重新获取。
+				if (profile == null) {
+					uni.reLaunch({ url: '/pages/login/login' })
+					return
+				}
+				// 用户名缺失时用「校园用户」兜底。
+				this.username = profile.username.length > 0 ? profile.username : '校园用户'
+				// 角色编码转中文名后展示。
+				this.roleName = roleLabel(profile.roleCode)
+				// 写入用户 ID。
+				this.userId = profile.userId
+				// 头像文字取用户名首字，缺省为「食」。
+				this.avatarText = profile.username.length > 0 ? profile.username.substring(0, 1) : '食'
+			},
+			confirmSignOut() {
+				uni.showModal({
+					// 弹窗标题。
+					title: '退出登录',
+					// 弹窗正文：说明退出的后果。
+					content: '退出后需要重新输入账号密码，确定要退出吗？',
+					// 确认按钮文案。
+					confirmText: '退出',
+					// 取消按钮文案。
+					cancelText: '再想想',
+					success: (res) => {
+						// 选择取消时直接返回，不做任何处理。
+						if (!res.confirm) {
+							return
+						}
+						// 确认退出后调用注销流程，成功后回到登录页。
+						doLogout().then(() => {
+							uni.reLaunch({ url: '/pages/login/login' })
+						})
+					}
+				})
+			}
+		}
+	}
+</script>
+
+<style>
+	.page {
+		flex: 1;
+		background-color: #FDF6F0;
+	}
+
+	/* ---------- 品牌区 ---------- */
+
+	/* 状态栏底色：与品牌区同色，让头部整块连贯 */
+	.statusfill {
+		background-color: #E4572E;
+	}
+
+	.hero {
+		position: relative;
+		background-color: #E4572E;
+		padding-top: 22px;
+		/* 多留一段底部内边距，给下方白卡上移叠压的空间 */
+		padding-bottom: 44px;
+		overflow: hidden;
+	}
+
+	.hero-shape {
+		position: absolute;
+		border-radius: 999px;
+		transition-property: opacity, transform;
+		/* 带回弹的缓动曲线：放大到终值前先冲过头再收回，形成弹性出场 */
+		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	.hero-shape-1 {
+		width: 156px;
+		height: 156px;
+		right: -54px;
+		top: -42px;
+		background-color: #FFFFFF;
+		opacity: 0.14;
+		transform: scale(1);
+		transition-duration: 0.7s;
+		transition-delay: 0.06s;
+	}
+
+	.hero-shape-1-pre {
+		opacity: 0;
+		transform: scale(0.5);
+	}
+
+	/* 琥珀色实心小圆作为点睛，避免整块纯橙过于单调 */
+	.hero-shape-2 {
+		width: 28px;
+		height: 28px;
+		right: 36px;
+		top: 54px;
+		background-color: #F2A93B;
+		opacity: 1;
+		transform: scale(1);
+		transition-duration: 0.5s;
+		transition-delay: 0.16s;
+	}
+
+	.hero-shape-2-pre {
+		opacity: 0;
+		transform: scale(0);
+	}
+
+	.hero-body {
+		padding-left: 24px;
+		padding-right: 24px;
+	}
+
+	.hero-eyebrow {
+		font-size: 11px;
+		color: #FFD9C7;
+		letter-spacing: 3px;
+		font-weight: bold;
+	}
+
+	.hero-title {
+		margin-top: 10px;
+		font-size: 26px;
+		font-weight: bold;
+		color: #FFFFFF;
+		letter-spacing: 1px;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.55s;
+		/* 标题到位时略过冲再回落，避免机械的匀速滑入 */
+		transition-timing-function: cubic-bezier(0.22, 1.3, 0.36, 1);
+		transition-delay: 0.12s;
+	}
+
+	.hero-title-pre {
+		opacity: 0;
+		transform: translateY(16px);
+	}
+
+	.hero-desc {
+		margin-top: 8px;
+		font-size: 12px;
+		color: #FFD9C7;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.18s;
+	}
+
+	.hero-desc-pre {
+		opacity: 0;
+		transform: translateY(14px);
+	}
+
+	/* ---------- 个人信息卡 ---------- */
+
+	.profile {
+		flex-direction: row;
+		align-items: center;
+		background-color: #FFFFFF;
+		margin-left: 20px;
+		margin-right: 20px;
+		margin-top: -26px;
+		padding: 18px;
+		border-radius: 20px;
+		box-shadow: 0 8px 22px rgba(180, 120, 90, 0.12);
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.6s;
+		/* 白卡上浮到位时略过冲再回落 */
+		transition-timing-function: cubic-bezier(0.22, 1.3, 0.36, 1);
+		transition-delay: 0.24s;
+	}
+
+	.profile-pre {
+		opacity: 0;
+		transform: translateY(26px);
+	}
+
+	.avatar {
+		width: 52px;
+		height: 52px;
+		border-radius: 17px;
+		background-color: #E4572E;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.avatar-text {
+		font-size: 22px;
+		font-weight: bold;
+		color: #FFFFFF;
+	}
+
+	.profile-body {
+		flex: 1;
+		margin-left: 14px;
+	}
+
+	.profile-name {
+		font-size: 18px;
+		font-weight: bold;
+		color: #211C18;
+	}
+
+	.profile-meta {
+		margin-top: 5px;
+		font-size: 12px;
+		color: #A2968B;
+	}
+
+	/* ---------- 账号信息明细 ---------- */
+
+	.group {
+		margin-top: 22px;
+		margin-left: 20px;
+		margin-right: 20px;
+		background-color: #FFFFFF;
+		border-radius: 18px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #EFE1D6;
+		padding-top: 8px;
+		padding-bottom: 8px;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.32s;
+	}
+
+	.group-pre {
+		opacity: 0;
+		transform: translateY(16px);
+	}
+
+	.group-title {
+		padding-left: 16px;
+		padding-top: 10px;
+		padding-bottom: 6px;
+		font-size: 11px;
+		font-weight: bold;
+		color: #A2968B;
+		letter-spacing: 1px;
+	}
+
+	/* 明细行：标签在左、值在右，行间用分隔线区隔 */
+	.row {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding-left: 16px;
+		padding-right: 16px;
+		height: 48px;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #F6EBE2;
+	}
+
+	.row-label {
+		font-size: 13px;
+		color: #6B5F55;
+	}
+
+	.row-value {
+		font-size: 13px;
+		font-weight: bold;
+		color: #211C18;
+	}
+
+	/* ---------- 退出登录 ---------- */
+
+	.signout {
+		margin-top: 22px;
+		margin-left: 20px;
+		margin-right: 20px;
+		height: 48px;
+		border-radius: 16px;
+		background-color: #FFFFFF;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #F0D7C9;
+		align-items: center;
+		justify-content: center;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.38s;
+	}
+
+	.signout-pre {
+		opacity: 0;
+		transform: translateY(16px);
+	}
+
+	.signout-hover {
+		background-color: #FDF0E8;
+		border-color: #E4572E;
+	}
+
+	.signout-text {
+		font-size: 14px;
+		font-weight: bold;
+		color: #C2410C;
+	}
+
+	/* ---------- 页脚 ---------- */
+
+	.footer {
+		margin-top: auto;
+		padding-top: 18px;
+		padding-bottom: 24px;
+		align-items: center;
+	}
+
+	.footer-text {
+		font-size: 11px;
+		color: #C9BDB2;
+	}
+</style>
