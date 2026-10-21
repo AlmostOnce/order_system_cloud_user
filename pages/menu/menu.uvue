@@ -1,0 +1,1397 @@
+<template>
+	<view class="page">
+		<!-- 状态栏底色与头部品牌区同色，避免顶部出现米色缝隙 -->
+		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
+
+		<!-- 头部：返回按钮 + 档口名称 + 位置，沿用首页的柿子橙品牌色 -->
+		<view class="hero">
+			<view class="hero-shape hero-shape-1" :class="entered ? '' : 'hero-shape-1-pre'"></view>
+			<view class="hero-shape hero-shape-2" :class="entered ? '' : 'hero-shape-2-pre'"></view>
+			<view class="hero-body" :class="entered ? '' : 'hero-body-pre'">
+				<view class="nav-top">
+					<view class="nav-back" hover-class="nav-back-hover" @click="goBack">
+						<text class="nav-back-icon">‹</text>
+					</view>
+					<text class="hero-eyebrow">ORDER NOW</text>
+				</view>
+				<text class="hero-title">{{ windowName.length > 0 ? windowName : '档口点餐' }}</text>
+				<text class="hero-loc">{{ windowLocation.length > 0 ? windowLocation : '位置待补充' }}</text>
+			</view>
+		</view>
+
+		<!-- 加载中 -->
+		<view v-if="loading" class="state" :class="entered ? '' : 'state-pre'">
+			<text class="state-text">正在加载菜单…</text>
+		</view>
+
+		<!-- 加载失败 -->
+		<view v-else-if="loadError.length > 0" class="state" :class="entered ? '' : 'state-pre'">
+			<text class="state-text">{{ loadError }}</text>
+			<view class="state-action" hover-class="state-action-hover" @click="loadMenu">
+				<text class="state-action-text">重新加载</text>
+			</view>
+		</view>
+
+		<!-- 菜单主体：左侧分类栏 + 右侧菜品列表，两侧各自独立滚动 -->
+		<view v-else class="catalog">
+			<!-- 左侧分类栏：纵向排列，选中项带主色竖条与实色底 -->
+			<scroll-view class="rail" scroll-y="true">
+				<view
+					class="rail-item"
+					:class="activeCategoryId == 0 ? 'rail-item-on' : ''"
+					hover-class="rail-item-hover"
+					@click="selectCategory(0)"
+				>
+					<text class="rail-text" :class="activeCategoryId == 0 ? 'rail-text-on' : ''">全部</text>
+				</view>
+				<view
+					class="rail-item"
+					:class="activeCategoryId == group.categoryId ? 'rail-item-on' : ''"
+					hover-class="rail-item-hover"
+					v-for="group in groups"
+					:key="group.categoryId"
+					@click="selectCategory(group.categoryId)"
+				>
+					<text class="rail-text" :class="activeCategoryId == group.categoryId ? 'rail-text-on' : ''">{{ group.categoryName }}</text>
+				</view>
+			</scroll-view>
+
+			<!-- 右侧菜品区 -->
+			<scroll-view class="dishes" scroll-y="true">
+				<!-- 空菜单 / 当前分类无菜品 -->
+				<view v-if="visibleGroups().length == 0" class="state state-inline">
+					<text class="state-text">{{ activeCategoryId == 0 ? '该档口暂无在售菜品' : '该分类暂无在售菜品' }}</text>
+					<text class="state-hint">换一个分类或稍后再来看看</text>
+				</view>
+
+				<!-- 菜品列表：按分类分组展示，组内菜品依次浮入 -->
+				<view v-else class="menu">
+					<view class="group" v-for="group in visibleGroups()" :key="group.categoryId">
+						<view class="group-head">
+							<text class="group-title">{{ group.categoryName }}</text>
+							<text class="group-count">{{ group.products.length }} 款</text>
+						</view>
+
+						<view
+							class="dish"
+							:class="listReady ? '' : 'dish-pre'"
+							v-for="product in group.products"
+							:key="product.productId"
+						>
+							<!-- 缩略区：有图片用图片，没有图片用菜品名首字兜底 -->
+							<view class="dish-thumb">
+								<image
+									v-if="product.imageUrl.length > 0"
+									class="dish-img"
+									:src="product.imageUrl"
+									mode="aspectFill"
+								></image>
+								<text v-else class="dish-glyph">{{ productGlyph(product) }}</text>
+							</view>
+
+							<view class="dish-body">
+								<text class="dish-name">{{ product.productName }}</text>
+								<text v-if="product.description.length > 0" class="dish-desc">{{ product.description }}</text>
+
+								<view class="dish-foot">
+									<text class="dish-price">¥{{ formatPrice(product.price) }}</text>
+
+									<!-- 数量步进器：数量为 0 时只显示加号，避免出现无意义的 0 -->
+									<view class="stepper">
+										<view
+											v-if="quantityOf(product.productId) > 0"
+											class="step step-minus"
+											hover-class="step-hover"
+											@click="decrease(product)"
+										>
+											<text class="step-text">−</text>
+										</view>
+										<text v-if="quantityOf(product.productId) > 0" class="step-count">{{ quantityOf(product.productId) }}</text>
+										<view class="step step-plus" hover-class="step-plus-hover" @click="increase(product)">
+											<text class="step-text step-text-plus">+</text>
+										</view>
+									</view>
+								</view>
+							</view>
+						</view>
+					</view>
+				</view>
+			</scroll-view>
+		</view>
+
+		<!-- 底部购物车栏：菜单就绪后随页面出现；点击左侧信息区展开购物车清单 -->
+		<view v-if="!loading && loadError.length == 0" class="cartbar">
+			<view class="cartbar-info" hover-class="cartbar-info-hover" @click="toggleCartPanel">
+				<text class="cartbar-count">{{ cartQuantity > 0 ? '已选 ' + cartQuantity + ' 件，点击查看' : '购物车是空的' }}</text>
+				<text class="cartbar-amount">¥{{ formatPrice(cartAmount) }}</text>
+			</view>
+			<view
+				class="cartbar-btn"
+				:class="cartQuantity > 0 ? '' : 'cartbar-btn-off'"
+				hover-class="cartbar-btn-hover"
+				@click="goCheckout"
+			>
+				<text class="cartbar-btn-text">去结算</text>
+			</view>
+		</view>
+
+		<!-- 购物车清单：遮罩淡入、面板自底部上滑，交互与首页餐厅选择面板一致 -->
+		<view
+			v-if="cartPanelVisible"
+			class="mask"
+			:class="cartPanelReady ? '' : 'mask-pre'"
+			@click="closeCartPanel"
+		></view>
+		<view v-if="cartPanelVisible" class="sheet" :class="cartPanelReady ? '' : 'sheet-pre'">
+			<view class="sheet-head">
+				<text class="sheet-title">已选菜品</text>
+				<!-- 清空放在标题右侧；用 view 承载 hover-class，text 在部分平台不响应按下态 -->
+				<view v-if="cartItems.length > 0" class="sheet-clear" hover-class="sheet-clear-hover" @click="clearCart">
+					<text class="sheet-clear-text">清空</text>
+				</view>
+			</view>
+
+			<scroll-view class="sheet-list" scroll-y="true" :style="sheetListStyle()">
+				<view v-if="cartItems.length == 0" class="sheet-empty">
+					<text class="sheet-empty-text">还没有选择菜品</text>
+				</view>
+
+				<view class="sheet-item" v-for="item in cartItems" :key="item.productId">
+					<view class="sheet-item-body">
+						<text class="sheet-item-name">{{ item.productName }}</text>
+						<!-- 不可售条目只提示原因，不展示价格与加号，避免误下单 -->
+						<text v-if="item.available" class="sheet-item-price">¥{{ formatPrice(item.unitPrice) }}</text>
+						<text v-else class="sheet-item-warn">{{ unavailableHint(item) }}</text>
+					</view>
+
+					<view v-if="item.available" class="stepper">
+						<view class="step step-minus" hover-class="step-hover" @click="decreaseItem(item)">
+							<text class="step-text">−</text>
+						</view>
+						<text class="step-count">{{ item.quantity }}</text>
+						<view class="step step-plus" hover-class="step-plus-hover" @click="increaseItem(item)">
+							<text class="step-text step-text-plus">+</text>
+						</view>
+					</view>
+				</view>
+			</scroll-view>
+		</view>
+	</view>
+</template>
+
+<script lang="uts">
+	// 导入轻量提示：操作反馈与结算占位提示。
+	import { toast } from '../../common/feedback.uts'
+	// 导入登录态：令牌失效时回到登录页，避免带失效凭据反复请求。
+	import { isLoggedIn } from '../../store/auth.uts'
+	// 导入菜单接口与类型：档口菜单快照。
+	import { fetchWindowMenu, MenuProduct, WindowMenuResult } from '../../api/menu.uts'
+	// 导入购物车接口与类型：数量增减与金额汇总。
+	import { fetchCart, addToCart, setCartItemQuantity, removeCartItem, clearCartWindow, CartItem, CartWindow, CartResult, CartActionResult } from '../../api/cart.uts'
+
+	/**
+	 * 页面内的菜品分组。
+	 *
+	 * 后端的「分类」与「未归类菜品」在展示上结构一致，这里统一成分组，
+	 * 未归类菜品使用固定负数 ID，避免与真实分类 ID 冲突。
+	 */
+	type MenuGroup = {
+		/** 分组 ID，未归类分组为 UNCATEGORIZED_ID。 */
+		categoryId: number
+		/** 分组名称。 */
+		categoryName: string
+		/** 分组下的菜品。 */
+		products: Array<MenuProduct>
+	}
+
+	/**
+	 * 菜品数量条目。
+	 *
+	 * 页面用「菜品 ID → 数量」的扁平列表保存购物车中的数量，
+	 * 避免在菜品对象上直接写数量导致菜单快照被污染。
+	 */
+	type QuantityEntry = {
+		/** 菜品 ID。 */
+		productId: number
+		/** 当前购物车数量。 */
+		quantity: number
+	}
+
+	/** 未归类菜品的固定分组 ID，取负数保证不与后端分类 ID 冲突。 */
+	const UNCATEGORIZED_ID: number = -1
+
+	/** 未归类菜品的固定分组名称。 */
+	const UNCATEGORIZED_NAME: string = '其他'
+
+	/**
+	 * 把路由参数中的数字字符串转换为整数。
+	 *
+	 * 不使用 parseInt：UTS 各平台的内置能力存在差异，这里按十进制逐位转换，
+	 * 非数字字符直接忽略，非法参数最终为 0。
+	 *
+	 * @param text 数字字符串
+	 * @return 解析出的整数，无数字时返回 0
+	 */
+	function toInt(text: string): number {
+		// 累积转换结果。
+		let value = 0
+		// 逐字符读取，忽略非数字字符。
+		for (let i = 0; i < text.length; i++) {
+			// 查表得到当前字符对应的数值，非数字返回 -1。
+			const digit = '0123456789'.indexOf(text.charAt(i))
+			// 非数字字符跳过，避免污染结果。
+			if (digit < 0) {
+				continue
+			}
+			// 已有结果左移一位（乘 10），再加上当前位数值。
+			value = value * 10 + digit
+		}
+		// 返回最终整数。
+		return value
+	}
+
+	export default {
+		data() {
+			// 两个列表共用独立的空数组，避免渲染初期出现 undefined。
+			const emptyGroups: Array<MenuGroup> = []
+			const emptyQuantities: Array<QuantityEntry> = []
+			const emptyCartItems: Array<CartItem> = []
+
+			return {
+				// 状态栏高度（px），用于顶部占位。
+				statusBarHeight: 0,
+				// 当前档口 ID，来自路由参数，取不到时为 0（页面会展示失败态）。
+				windowId: 0,
+				// 档口名称，接口返回前使用默认标题。
+				windowName: '',
+				// 档口位置。
+				windowLocation: '',
+				// 是否正在加载菜单。
+				loading: true,
+				// 菜单加载失败文案，非空时展示错误态。
+				loadError: '',
+				// 菜品分组，已过滤掉没有菜品的空分类。
+				groups: emptyGroups,
+				// 当前选中的分类 ID，0 表示「全部」。
+				activeCategoryId: 0,
+				// 购物车中该窗口的菜品数量，按菜品 ID 记录。
+				quantities: emptyQuantities,
+				// 该窗口购物车条目明细，供购物车清单面板展示。
+				cartItems: emptyCartItems,
+				// 该窗口购物车的总件数。
+				cartQuantity: 0,
+				// 该窗口购物车已勾选且可售的预览金额。
+				cartAmount: 0,
+				// 购物车清单面板是否已挂载显示。
+				cartPanelVisible: false,
+				// 购物车清单面板是否已进入终态，控制滑入滑出过渡。
+				cartPanelReady: false,
+				// 是否有购物车写操作正在进行，防止连续点击产生并发请求。
+				mutating: false,
+				// 是否已进入入场动画终态。
+				entered: false,
+				// 菜品卡片是否已就绪，控制依次浮入。
+				listReady: false
+			}
+		},
+		onLoad(options: OnLoadOptions) {
+			// 路由参数中的 windowId 是字符串形态，取不到时保持 0，由加载流程给出失败提示。
+			const rawWindowId = options['windowId']
+			if (rawWindowId != null) {
+				this.windowId = toInt(rawWindowId as string)
+			}
+		},
+		onShow() {
+			// 状态栏高度取不到时用 24px 兜底；放在 onShow 中读取，
+			// 避免 H5 服务端预渲染阶段访问客户端窗口信息。
+			const info = uni.getWindowInfo()
+			this.statusBarHeight = info.statusBarHeight > 0 ? info.statusBarHeight : 24
+
+			// 令牌被清空（如退出登录）时不允许停留在本页。
+			if (!isLoggedIn()) {
+				uni.reLaunch({ url: '/pages/login/login' })
+				return
+			}
+			// 每次进入页面都重新拉取菜单与购物车，保证价格与可售状态是新的。
+			this.loadMenu()
+		},
+		onReady() {
+			// 页面渲染完成后窗口信息才准确，此处再同步一次状态栏高度。
+			const readyInfo = uni.getWindowInfo()
+			this.statusBarHeight = readyInfo.statusBarHeight > 0 ? readyInfo.statusBarHeight : 24
+
+			// 首帧绘制完成后再切到「已入场」，属性变化才会驱动入场过渡。
+			setTimeout(() => {
+				this.entered = true
+			}, 60)
+		},
+		methods: {
+			/**
+			 * 返回上一页；页面栈为空时退回首页，避免直接进入本页后无返回目标。
+			 */
+			goBack() {
+				// getCurrentPages 返回当前页面栈，长度大于 1 说明可以正常返回。
+				if (getCurrentPages().length > 1) {
+					uni.navigateBack()
+					return
+				}
+				// 直接进入本页（如刷新浏览器）时没有上一页，退回首页 tab。
+				uni.switchTab({ url: '/pages/home/home' })
+			},
+			/**
+			 * 拉取档口菜单，并把分类与未归类菜品统一成分组。
+			 */
+			loadMenu() {
+				// 档口 ID 缺失说明路由参数异常，直接给出错误态。
+				if (this.windowId <= 0) {
+					this.loading = false
+					this.loadError = '档口参数缺失，请返回重新选择'
+					return
+				}
+
+				// 进入加载态并清掉上一次的错误文案。
+				this.loading = true
+				this.loadError = ''
+				// 归零卡片就绪标记，数据回来后再重播入场。
+				this.listReady = false
+
+				fetchWindowMenu(this.windowId).then((result: WindowMenuResult) => {
+					// 菜单结果返回后统一结束加载态。
+					this.loading = false
+					// 请求失败时直接落到错误态。
+					if (!result.ok) {
+						this.loadError = result.message
+						return
+					}
+
+					// 成功但没有菜单对象，同样按失败处理。
+					const menu = result.menu
+					if (menu == null) {
+						this.loadError = '该档口暂无菜单'
+						return
+					}
+
+					// 写入档口基本信息，供头部展示。
+					this.windowName = menu.windowName
+					this.windowLocation = menu.location
+
+					// 把后端分类转换成页面分组，只保留有菜品的分类。
+					const converted: Array<MenuGroup> = []
+					for (let i = 0; i < menu.categories.length; i++) {
+						const category = menu.categories[i]
+						// 空分类不展示，避免出现点进去什么都没有的标签。
+						if (category.products.length > 0) {
+							const group: MenuGroup = {
+								// 分类 ID 直接沿用后端值。
+								categoryId: category.categoryId,
+								// 分类名称。
+								categoryName: category.categoryName,
+								// 分类下的菜品。
+								products: category.products
+							}
+							converted.push(group)
+						}
+					}
+
+					// 未归类菜品单独成组，排在全部分类之后。
+					if (menu.uncategorizedProducts.length > 0) {
+						const uncategorized: MenuGroup = {
+							// 固定负数 ID，与真实分类区分。
+							categoryId: UNCATEGORIZED_ID,
+							// 固定分组名称。
+							categoryName: UNCATEGORIZED_NAME,
+							// 未归类菜品。
+							products: menu.uncategorizedProducts
+						}
+						converted.push(uncategorized)
+					}
+
+					// 写回分组列表，驱动页面渲染。
+					this.groups = converted
+					// 回到「全部」标签，避免重载后停留在不存在的分类。
+					this.activeCategoryId = 0
+
+					// 菜单渲染完成后再切到「已入场」，菜品卡片才会依次浮入。
+					setTimeout(() => {
+						this.listReady = true
+					}, 60)
+
+					// 菜单就绪后同步购物车，保证数量与金额是服务端的最新值。
+					this.loadCart()
+				})
+			},
+			/**
+			 * 拉取购物车，并抽取当前窗口的数量与金额。
+			 */
+			loadCart() {
+				fetchCart().then((result: CartResult) => {
+					// 购物车为空时的统一展示值，避免每个分支重复构造。
+					const emptyEntries: Array<QuantityEntry> = []
+					const emptyItems: Array<CartItem> = []
+
+					// 购物车失败不阻塞点餐：清空展示值即可，后续增删会再次同步。
+					if (!result.ok) {
+						this.cartQuantity = 0
+						this.cartAmount = 0
+						this.quantities = emptyEntries
+						this.cartItems = emptyItems
+						return
+					}
+
+					// 购物车对象缺失时同样按空购物车处理。
+					const cart = result.cart
+					if (cart == null) {
+						this.cartQuantity = 0
+						this.cartAmount = 0
+						this.quantities = emptyEntries
+						this.cartItems = emptyItems
+						return
+					}
+
+					// 只取当前窗口分组：结算与数量展示都按窗口隔离。
+					let current: CartWindow | null = null
+					for (let i = 0; i < cart.windows.length; i++) {
+						if (cart.windows[i].windowId == this.windowId) {
+							current = cart.windows[i]
+							break
+						}
+					}
+
+					// 当前窗口没有条目时清空展示值。
+					if (current == null) {
+						this.cartQuantity = 0
+						this.cartAmount = 0
+						this.quantities = emptyEntries
+						this.cartItems = emptyItems
+						return
+					}
+
+					// 汇总当前窗口的件数与逐菜品数量。
+					const entries: Array<QuantityEntry> = []
+					let quantity = 0
+					for (let i = 0; i < current.items.length; i++) {
+						const item = current.items[i]
+						// 把数量记入逐菜品条目，供步进器展示。
+						const entry: QuantityEntry = { productId: item.productId, quantity: item.quantity }
+						entries.push(entry)
+						// 件数合计包含不可售项：用户能看到自己加过什么。
+						quantity += item.quantity
+					}
+
+					// 写回件数、金额、逐菜品数量与清单明细。
+					this.cartQuantity = quantity
+					this.cartAmount = current.checkedAmount
+					this.quantities = entries
+					this.cartItems = current.items
+				})
+			},
+			/**
+			 * 切换分类标签。
+			 *
+			 * @param categoryId 分类 ID，取 0 表示全部
+			 */
+			selectCategory(categoryId: number) {
+				// 分类切换本身只是本地过滤，无需请求后端。
+				this.activeCategoryId = categoryId
+				// 重播一次入场动画，让新分类的菜品重新依次浮入。
+				this.listReady = false
+				setTimeout(() => {
+					this.listReady = true
+				}, 60)
+			},
+			/**
+			 * 计算当前标签下需要展示的分组。
+			 *
+			 * @return 过滤后的分组列表
+			 */
+			visibleGroups(): Array<MenuGroup> {
+				// 「全部」标签直接展示所有分组。
+				if (this.activeCategoryId == 0) {
+					return this.groups
+				}
+				// 其它标签只保留匹配的分组。
+				const result: Array<MenuGroup> = []
+				for (let i = 0; i < this.groups.length; i++) {
+					if (this.groups[i].categoryId == this.activeCategoryId) {
+						result.push(this.groups[i])
+					}
+				}
+				return result
+			},
+			/**
+			 * 读取指定菜品在购物车中的数量。
+			 *
+			 * @param productId 菜品 ID
+			 * @return 数量，未加入购物车时为 0
+			 */
+			quantityOf(productId: number): number {
+				// 遍历扁平数量列表，命中即返回。
+				for (let i = 0; i < this.quantities.length; i++) {
+					if (this.quantities[i].productId == productId) {
+						return this.quantities[i].quantity
+					}
+				}
+				// 未找到说明该菜品还不在购物车里。
+				return 0
+			},
+			/**
+			 * 取菜品名称首字作为缩略区占位，避免为占位引入位图资源。
+			 *
+			 * @param product 菜品
+			 * @return 单个汉字
+			 */
+			productGlyph(product: MenuProduct): string {
+				// 有名称时取首字。
+				if (product.productName.length > 0) {
+					return product.productName.substring(0, 1)
+				}
+				// 名称缺失时用「菜」兜底，保证占位区不空白。
+				return '菜'
+			},
+			/**
+			 * 把价格格式化为两位小数的展示文本。
+			 *
+			 * @param value 金额
+			 * @return 两位小数文本
+			 */
+			formatPrice(value: number): string {
+				// 后端价格是 BigDecimal 序列化出的数字，展示时统一保留两位小数。
+				return value.toFixed(2)
+			},
+			/**
+			 * 加一份菜品。
+			 *
+			 * 菜单卡片与购物车清单共用同一套数量逻辑，只是入口不同。
+			 *
+			 * @param product 菜品
+			 */
+			increase(product: MenuProduct) {
+				// 复用按菜品 ID 增减的实现，数量取自当前购物车。
+				this.increaseById(product.productId, this.quantityOf(product.productId))
+			},
+			/**
+			 * 减一份菜品。
+			 *
+			 * @param product 菜品
+			 */
+			decrease(product: MenuProduct) {
+				// 复用按菜品 ID 增减的实现，数量取自当前购物车。
+				this.decreaseById(product.productId, this.quantityOf(product.productId))
+			},
+			/**
+			 * 购物车清单里的加号：条目上已带当前数量，直接使用。
+			 *
+			 * @param item 购物车条目
+			 */
+			increaseItem(item: CartItem) {
+				// 直接使用条目自带数量，避免再去扁平列表里查找。
+				this.increaseById(item.productId, item.quantity)
+			},
+			/**
+			 * 购物车清单里的减号：条目上已带当前数量，直接使用。
+			 *
+			 * @param item 购物车条目
+			 */
+			decreaseItem(item: CartItem) {
+				// 直接使用条目自带数量，避免再去扁平列表里查找。
+				this.decreaseById(item.productId, item.quantity)
+			},
+			/**
+			 * 按菜品 ID 增加一份。
+			 *
+			 * 数量为 0 时走新增接口，已有数量时走「设置目标值」接口；
+			 * 写入成功后重新拉取购物车，金额一律以服务端核价结果为准。
+			 *
+			 * @param productId 菜品 ID
+			 * @param current 当前数量
+			 */
+			increaseById(productId: number, current: number) {
+				// 已有写操作进行中时忽略连续点击，避免并发请求互相覆盖。
+				if (this.mutating) {
+					return
+				}
+				this.mutating = true
+
+				if (current <= 0) {
+					// 首次加入：新增接口默认勾选，可直接结算。
+					addToCart(this.windowId, productId, 1).then((result: CartActionResult) => {
+						this.mutating = false
+						if (!result.ok) {
+							toast(result.message)
+							return
+						}
+						this.loadCart()
+					})
+					return
+				}
+
+				// 已有条目：直接设置为「当前数量 + 1」。
+				setCartItemQuantity(this.windowId, productId, current + 1).then((result: CartActionResult) => {
+					this.mutating = false
+					if (!result.ok) {
+						toast(result.message)
+						return
+					}
+					this.loadCart()
+				})
+			},
+			/**
+			 * 按菜品 ID 减少一份。
+			 *
+			 * 减到 0 时必须调用删除接口：后端不接受数量为 0 的更新。
+			 *
+			 * @param productId 菜品 ID
+			 * @param current 当前数量
+			 */
+			decreaseById(productId: number, current: number) {
+				// 已有写操作进行中时忽略连续点击。
+				if (this.mutating) {
+					return
+				}
+				// 数量为零时无需处理。
+				if (current <= 0) {
+					return
+				}
+				this.mutating = true
+
+				if (current == 1) {
+					// 最后一份：删除条目。
+					removeCartItem(this.windowId, productId).then((result: CartActionResult) => {
+						this.mutating = false
+						if (!result.ok) {
+							toast(result.message)
+							return
+						}
+						this.loadCart()
+					})
+					return
+				}
+
+				// 仍有多份：把目标数量设为当前数量减一。
+				setCartItemQuantity(this.windowId, productId, current - 1).then((result: CartActionResult) => {
+					this.mutating = false
+					if (!result.ok) {
+						toast(result.message)
+						return
+					}
+					this.loadCart()
+				})
+			},
+			/**
+			 * 展开 / 收起购物车清单面板。
+			 */
+			toggleCartPanel() {
+				// 面板已展开时点击即收起。
+				if (this.cartPanelVisible) {
+					this.closeCartPanel()
+					return
+				}
+				this.openCartPanel()
+			},
+			/**
+			 * 展开购物车清单：先按初始态挂载，下一帧再切终态以触发滑入过渡。
+			 */
+			openCartPanel() {
+				// 购物车为空时不展开：面板里没有任何可操作内容。
+				if (this.cartItems.length == 0) {
+					toast('购物车还是空的')
+					return
+				}
+				// 先置为初始态，保证面板以「未就绪」的样子挂载。
+				this.cartPanelReady = false
+				// 挂载面板节点（此时还是初始态）。
+				this.cartPanelVisible = true
+				// 下一帧切到终态，属性变化驱动滑入过渡。
+				setTimeout(() => {
+					this.cartPanelReady = true
+				}, 30)
+			},
+			/**
+			 * 收起购物车清单：先回落到初始态，等过渡结束再卸载节点。
+			 */
+			closeCartPanel() {
+				// 面板本就未显示时无需处理。
+				if (!this.cartPanelVisible) {
+					return
+				}
+				// 先回落到初始态，触发滑出过渡。
+				this.cartPanelReady = false
+				// 等过渡播放完毕（240ms）再卸载节点，避免动画被截断。
+				setTimeout(() => {
+					this.cartPanelVisible = false
+				}, 240)
+			},
+			/**
+			 * 计算购物车清单的高度，按条目数自适应并最多展示 5 条。
+			 *
+			 * @return 内联的 height 声明
+			 */
+			sheetListStyle(): string {
+				// 条目不足 1 条时按 1 条计算，保证空态也有稳定的高度。
+				const total = this.cartItems.length > 0 ? this.cartItems.length : 1
+				// 面板最多展示 5 条，超出部分靠内部滚动查看。
+				const visible = total > 5 ? 5 : total
+				// 每项固定 60px，换算出面板高度。
+				return 'height: ' + (visible * 60) + 'px'
+			},
+			/**
+			 * 不可售条目的提示文案，后端未给出原因时用兜底文案。
+			 *
+			 * @param item 购物车条目
+			 * @return 提示文案
+			 */
+			unavailableHint(item: CartItem): string {
+				// 后端说明了原因就原样展示，便于用户判断是下架还是窗口歇业。
+				if (item.unavailableReason.length > 0) {
+					return item.unavailableReason
+				}
+				// 未给出原因时统一兜底，避免出现空白行。
+				return '当前不可购买'
+			},
+			/**
+			 * 清空当前窗口的购物车。
+			 */
+			clearCart() {
+				// 已有写操作进行中时忽略重复点击。
+				if (this.mutating) {
+					return
+				}
+				this.mutating = true
+
+				clearCartWindow(this.windowId).then((result: CartActionResult) => {
+					this.mutating = false
+					if (!result.ok) {
+						toast(result.message)
+						return
+					}
+					// 清空后先收起面板，再同步购物车状态。
+					this.closeCartPanel()
+					this.loadCart()
+				})
+			},
+			/**
+			 * 去结算：确认页尚未落地，先给出明确反馈。
+			 */
+			goCheckout() {
+				// 购物车为空时提示先选菜，不进入结算流程。
+				if (this.cartQuantity <= 0) {
+					toast('请先选择菜品')
+					return
+				}
+				// 结算页尚未实现，先提示，避免点击后无响应。
+				toast('结算功能即将上线')
+			}
+		}
+	}
+</script>
+
+<style>
+	.page {
+		flex: 1;
+		background-color: #FDF6F0;
+	}
+
+	/* ---------- 头部 ---------- */
+
+	.statusfill {
+		background-color: #E4572E;
+	}
+
+	.hero {
+		position: relative;
+		background-color: #E4572E;
+		padding-top: 10px;
+		padding-bottom: 22px;
+		overflow: hidden;
+	}
+
+	.hero-shape {
+		position: absolute;
+		border-radius: 999px;
+		transition-property: opacity, transform;
+		/* 带回弹的缓动曲线，与首页保持一致 */
+		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	.hero-shape-1 {
+		width: 150px;
+		height: 150px;
+		right: -52px;
+		top: -46px;
+		background-color: #FFFFFF;
+		opacity: 0.14;
+		transform: scale(1);
+		transition-duration: 0.7s;
+		transition-delay: 0.06s;
+	}
+
+	.hero-shape-1-pre {
+		opacity: 0;
+		transform: scale(0.5);
+	}
+
+	.hero-shape-2 {
+		width: 24px;
+		height: 24px;
+		right: 40px;
+		top: 46px;
+		background-color: #F2A93B;
+		opacity: 1;
+		transform: scale(1);
+		transition-duration: 0.5s;
+		transition-delay: 0.16s;
+	}
+
+	.hero-shape-2-pre {
+		opacity: 0;
+		transform: scale(0);
+	}
+
+	.hero-body {
+		padding-left: 20px;
+		padding-right: 20px;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.06s;
+	}
+
+	.hero-body-pre {
+		opacity: 0;
+		transform: translateY(12px);
+	}
+
+	.nav-top {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	/* 返回按钮：半透明白底圆形，按下时提亮 */
+	.nav-back {
+		width: 34px;
+		height: 34px;
+		border-radius: 999px;
+		background-color: rgba(255, 255, 255, 0.22);
+		align-items: center;
+		justify-content: center;
+	}
+
+	.nav-back-hover {
+		background-color: rgba(255, 255, 255, 0.42);
+	}
+
+	.nav-back-icon {
+		font-size: 24px;
+		font-weight: bold;
+		color: #FFFFFF;
+		/* 字形本身偏下，上移一点让视觉居中 */
+		margin-top: -2px;
+	}
+
+	.hero-eyebrow {
+		margin-left: 10px;
+		font-size: 11px;
+		color: #FFD9C7;
+		letter-spacing: 3px;
+		font-weight: bold;
+	}
+
+	.hero-title {
+		margin-top: 12px;
+		font-size: 24px;
+		font-weight: bold;
+		color: #FFFFFF;
+		letter-spacing: 1px;
+	}
+
+	.hero-loc {
+		margin-top: 6px;
+		font-size: 12px;
+		color: #FFD9C7;
+	}
+
+	/* ---------- 分类栏与菜品区 ---------- */
+
+	/* 主体：左侧固定宽度分类栏 + 右侧菜品区，左右各自滚动。
+	   显式声明 align-items: stretch，让两个滚动区自动撑满剩余高度，
+	   否则 scroll-view 高度收缩为内容高度，无法滚动 */
+	.catalog {
+		flex: 1;
+		flex-direction: row;
+		align-items: stretch;
+	}
+
+	/* 左侧分类栏：米色底与右侧菜品区形成层次，宽度固定不随内容撑开 */
+	.rail {
+		width: 88px;
+		background-color: #F7EEE6;
+	}
+
+	/* 分类项：纵向排列，选中项用白底 + 左侧主色竖条标出当前位置。
+	   竖条用透明边框预留位置，选中时只换颜色，文字不会因占位变化而左右跳动 */
+	.rail-item {
+		height: 54px;
+		align-items: center;
+		justify-content: center;
+		padding-left: 8px;
+		padding-right: 8px;
+		border-left-width: 3px;
+		border-left-style: solid;
+		border-left-color: rgba(0, 0, 0, 0);
+		background-color: #F7EEE6;
+		/* 底色不在过渡列表内，按下与选中状态立即切换 */
+	}
+
+	.rail-item-hover {
+		background-color: #F0E0D2;
+	}
+
+	.rail-item-on {
+		background-color: #FFFFFF;
+		border-left-color: #E4572E;
+	}
+
+	.rail-text {
+		font-size: 12px;
+		color: #7A6C60;
+		text-align: center;
+	}
+
+	.rail-text-on {
+		font-weight: bold;
+		color: #E4572E;
+	}
+
+	/* 右侧菜品区：白底，底部留出购物车栏高度，最后一张卡片不被遮挡 */
+	.dishes {
+		flex: 1;
+		background-color: #FFFFFF;
+	}
+
+	/* ---------- 状态区 ---------- */
+
+	.state {
+		margin-top: 20px;
+		margin-left: 20px;
+		margin-right: 20px;
+		background-color: #FFFFFF;
+		border-radius: 18px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #EFE1D6;
+		padding-top: 34px;
+		padding-bottom: 34px;
+		padding-left: 20px;
+		padding-right: 20px;
+		align-items: center;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.1s;
+	}
+
+	.state-pre {
+		opacity: 0;
+		transform: translateY(16px);
+	}
+
+	/* 右侧菜品区内的空态：宽度被左侧分类栏压缩，收紧外边距与描边色，
+	   需放在 .state 之后才能覆盖其左右外边距 */
+	.state-inline {
+		margin-top: 36px;
+		margin-left: 14px;
+		margin-right: 14px;
+		border-color: #F6EBE2;
+	}
+
+	.state-text {
+		font-size: 13px;
+		color: #A2968B;
+		text-align: center;
+	}
+
+	.state-hint {
+		margin-top: 6px;
+		font-size: 11px;
+		color: #C9BDB2;
+		text-align: center;
+	}
+
+	.state-action {
+		margin-top: 14px;
+		padding-left: 18px;
+		padding-right: 18px;
+		padding-top: 8px;
+		padding-bottom: 8px;
+		border-radius: 999px;
+		background-color: #E4572E;
+	}
+
+	.state-action-hover {
+		background-color: #C2410C;
+	}
+
+	.state-action-text {
+		font-size: 13px;
+		font-weight: bold;
+		color: #FFFFFF;
+	}
+
+	/* ---------- 菜品列表 ---------- */
+
+	.menu {
+		padding-left: 12px;
+		padding-right: 12px;
+		/* 底部留出购物车栏高度，最后一张卡片不会被常驻栏挡住 */
+		padding-bottom: 92px;
+	}
+
+	.group {
+		margin-top: 18px;
+	}
+
+	.group-head {
+		flex-direction: row;
+		align-items: center;
+		padding-left: 4px;
+		padding-bottom: 8px;
+	}
+
+	.group-title {
+		font-size: 15px;
+		font-weight: bold;
+		color: #211C18;
+		letter-spacing: 1px;
+	}
+
+	.group-count {
+		margin-left: 8px;
+		font-size: 11px;
+		color: #A2968B;
+	}
+
+	/* 菜品卡片：白底细描边，按下时描边转主色 */
+	.dish {
+		flex-direction: row;
+		align-items: center;
+		background-color: #FFFFFF;
+		border-radius: 18px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #EFE1D6;
+		padding: 12px;
+		margin-bottom: 12px;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	.dish-pre {
+		opacity: 0;
+		transform: translateY(16px);
+	}
+
+	/* 缩略区：右侧菜品区宽度有限，尺寸比首页卡片更克制 */
+	.dish-thumb {
+		width: 62px;
+		height: 62px;
+		border-radius: 13px;
+		background-color: #FDF0E8;
+		align-items: center;
+		justify-content: center;
+		overflow: hidden;
+	}
+
+	.dish-img {
+		width: 62px;
+		height: 62px;
+	}
+
+	.dish-glyph {
+		font-size: 22px;
+		font-weight: bold;
+		color: #E4572E;
+	}
+
+	.dish-body {
+		flex: 1;
+		margin-left: 12px;
+	}
+
+	.dish-name {
+		font-size: 15px;
+		font-weight: bold;
+		color: #211C18;
+	}
+
+	.dish-desc {
+		margin-top: 4px;
+		font-size: 11px;
+		color: #A2968B;
+		/* 描述较长时省略，避免把卡片撑得过高 */
+		max-height: 30px;
+		overflow: hidden;
+	}
+
+	.dish-foot {
+		flex-direction: row;
+		align-items: center;
+		margin-top: 8px;
+	}
+
+	.dish-price {
+		flex: 1;
+		font-size: 16px;
+		font-weight: bold;
+		color: #E4572E;
+	}
+
+	/* 步进器：减号描边圆、数量文本、加号实底圆 */
+	.stepper {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.step {
+		width: 26px;
+		height: 26px;
+		border-radius: 999px;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.step-minus {
+		border-width: 1px;
+		border-style: solid;
+		border-color: #E4572E;
+		/* 底色不在过渡列表内，按下立即变化 */
+	}
+
+	.step-hover {
+		background-color: #FDF0E8;
+	}
+
+	.step-plus {
+		background-color: #E4572E;
+	}
+
+	.step-plus-hover {
+		background-color: #C2410C;
+	}
+
+	.step-text {
+		font-size: 16px;
+		font-weight: bold;
+		color: #E4572E;
+	}
+
+	.step-text-plus {
+		color: #FFFFFF;
+	}
+
+	.step-count {
+		min-width: 26px;
+		text-align: center;
+		font-size: 13px;
+		font-weight: bold;
+		color: #211C18;
+	}
+
+	/* ---------- 底部购物车栏 ---------- */
+
+	.cartbar {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		/* 本页不是 tab 页，没有原生 tabBar；层级压到遮罩(999)之下，
+		   展开清单时整条栏都会被遮罩覆盖 */
+		z-index: 900;
+		flex-direction: row;
+		align-items: center;
+		background-color: #FFFFFF;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #EFE1D6;
+		padding-top: 10px;
+		padding-bottom: 14px;
+	}
+
+	/* 信息区整体可点：按下时给底色反馈，提示这里能展开清单 */
+	.cartbar-info {
+		flex: 1;
+		padding-left: 20px;
+		padding-right: 12px;
+	}
+
+	.cartbar-info-hover {
+		background-color: #FDF6F0;
+	}
+
+	.cartbar-count {
+		font-size: 11px;
+		color: #A2968B;
+	}
+
+	.cartbar-amount {
+		margin-top: 2px;
+		font-size: 19px;
+		font-weight: bold;
+		color: #E4572E;
+	}
+
+	/* 结算按钮：购物车为空时置灰，数量恢复后自动变回主色 */
+	.cartbar-btn {
+		margin-right: 20px;
+		padding-left: 26px;
+		padding-right: 26px;
+		padding-top: 11px;
+		padding-bottom: 11px;
+		border-radius: 999px;
+		background-color: #E4572E;
+	}
+
+	.cartbar-btn-hover {
+		background-color: #C2410C;
+	}
+
+	.cartbar-btn-off {
+		background-color: #E8DED4;
+	}
+
+	.cartbar-btn-text {
+		font-size: 14px;
+		font-weight: bold;
+		color: #FFFFFF;
+	}
+
+	/* ---------- 购物车清单面板 ---------- */
+
+	/* 遮罩：覆盖整屏（含底部购物车栏），透明度过渡实现淡入淡出 */
+	.mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		z-index: 999;
+		background-color: rgba(33, 28, 24, 0.45);
+		opacity: 1;
+		transition-property: opacity;
+		transition-duration: 0.24s;
+		transition-timing-function: ease-out;
+	}
+
+	.mask-pre {
+		opacity: 0;
+	}
+
+	/* 面板：自底部上滑到位时略过冲再回落，层级需高于遮罩 */
+	.sheet {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 1000;
+		background-color: #FFFFFF;
+		border-top-left-radius: 22px;
+		border-top-right-radius: 22px;
+		padding-top: 16px;
+		padding-bottom: 24px;
+		transform: translateY(0);
+		transition-property: transform;
+		transition-duration: 0.3s;
+		transition-timing-function: cubic-bezier(0.22, 1.3, 0.36, 1);
+	}
+
+	.sheet-pre {
+		transform: translateY(440px);
+	}
+
+	/* 面板标题行：标题在左、清空在右 */
+	.sheet-head {
+		flex-direction: row;
+		align-items: center;
+		padding-left: 22px;
+		padding-right: 22px;
+	}
+
+	.sheet-title {
+		flex: 1;
+		font-size: 13px;
+		font-weight: bold;
+		color: #211C18;
+		letter-spacing: 1px;
+	}
+
+	/* 清空：文字按钮，按下时文字转主色（颜色变化不放过渡列表，按下立即生效） */
+	.sheet-clear {
+		padding-left: 10px;
+		padding-right: 10px;
+		padding-top: 4px;
+		padding-bottom: 4px;
+	}
+
+	.sheet-clear-hover {
+		background-color: #FDF6F0;
+	}
+
+	.sheet-clear-text {
+		font-size: 12px;
+		color: #A2968B;
+	}
+
+	.sheet-list {
+		margin-top: 8px;
+	}
+
+	/* 面板条目：固定 60px 高，与 sheetListStyle() 的计算保持一致 */
+	.sheet-item {
+		flex-direction: row;
+		align-items: center;
+		height: 60px;
+		padding-left: 22px;
+		padding-right: 22px;
+	}
+
+	.sheet-item-body {
+		flex: 1;
+		padding-right: 12px;
+	}
+
+	.sheet-item-name {
+		font-size: 14px;
+		color: #211C18;
+	}
+
+	.sheet-item-price {
+		margin-top: 3px;
+		font-size: 13px;
+		font-weight: bold;
+		color: #E4572E;
+	}
+
+	/* 不可售条目的原因提示：用灰色小字，避免被误认为价格 */
+	.sheet-item-warn {
+		margin-top: 3px;
+		font-size: 11px;
+		color: #A2968B;
+	}
+
+	.sheet-empty {
+		height: 60px;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.sheet-empty-text {
+		font-size: 12px;
+		color: #A2968B;
+	}
+</style>

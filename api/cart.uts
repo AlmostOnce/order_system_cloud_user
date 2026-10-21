@@ -1,0 +1,326 @@
+/**
+ * 购物车服务接口。
+ *
+ * 对应后端 cart-service 的 CartController：
+ * - GET    /cart                                        查询当前顾客购物车
+ * - POST   /cart/windows/{windowId}/items                增加菜品（重复提交继续累加）
+ * - PUT    /cart/windows/{windowId}/items/{productId}    设置条目目标数量
+ * - DELETE /cart/windows/{windowId}/items/{productId}    删除单个条目
+ * - DELETE /cart/windows/{windowId}                      清空某个窗口
+ *
+ * 注意：增删改接口只返回 Void，写入成功后必须重新 GET 才能拿到服务端核价后的
+ * 数量与金额，因此页面上的购物车小计一律以 fetchCart 的结果为准。
+ */
+
+// 导入统一请求入口：购物车接口全部需要鉴权。
+import { httpGet, httpPost, httpPut, httpDelete, HttpResult } from '../common/http.uts'
+
+/**
+ * 购物车条目，对应后端 CartItemVO。
+ *
+ * 价格字段可为 null：条目变成不可售时后端不返回价格，避免把失效菜品算成零元。
+ */
+export type CartItem = {
+	/** 菜品 ID。 */
+	productId: number
+	/** 菜品名称，不可售时可能是名称快照。 */
+	productName: string
+	/** 菜品编码，不可售时可能是编码快照。 */
+	productCode: string
+	/** 购买数量。 */
+	quantity: number
+	/** 是否勾选结算。 */
+	checked: boolean
+	/** 条目修改版本。 */
+	revision: string
+	/** 当前是否可结算。 */
+	available: boolean
+	/** 不可结算原因，可售时为空字符串。 */
+	unavailableReason: string
+	/** 当前单价，不可售时为 0。 */
+	unitPrice: number
+	/** 当前行金额，不可售时为 0。 */
+	lineAmount: number
+}
+
+/**
+ * 按窗口分组的购物车，对应后端 CartWindowVO。
+ */
+export type CartWindow = {
+	/** 窗口 ID。 */
+	windowId: number
+	/** 窗口当前是否启用。 */
+	windowActive: boolean
+	/** 窗口内全部条目，含不可售项。 */
+	items: Array<CartItem>
+	/** 本窗口已勾选且可售的预览金额。 */
+	checkedAmount: number
+}
+
+/**
+ * 当前顾客的购物车，对应后端 CartVO。
+ */
+export type CartData = {
+	/** 按窗口 ID 排序的分组。 */
+	windows: Array<CartWindow>
+	/** 全部条目的数量合计，含失效与未勾选项。 */
+	totalQuantity: number
+	/** 已勾选且可售的数量合计。 */
+	checkedQuantity: number
+	/** 已勾选且可售的预览金额合计。 */
+	checkedAmount: number
+}
+
+/**
+ * 购物车查询结果。
+ */
+export type CartResult = {
+	/** 是否查询成功。 */
+	ok: boolean
+	/** 失败时的提示文案。 */
+	message: string
+	/** 成功时的购物车，失败时为 null。 */
+	cart: CartData | null
+}
+
+/**
+ * 购物车写操作结果。
+ *
+ * 增删改接口没有业务数据返回，这里只保留成败与提示，便于页面直接使用。
+ */
+export type CartActionResult = {
+	/** 是否写入成功。 */
+	ok: boolean
+	/** 失败时的提示文案。 */
+	message: string
+}
+
+/**
+ * 把后端返回的 any 元素转换为强类型购物车条目。
+ *
+ * @param raw 后端返回的条目对象
+ * @return 强类型购物车条目
+ */
+function toItem(raw: UTSJSONObject): CartItem {
+	// 逐字段读取，缺失字段用类型安全的默认值兜底，页面无需再判空。
+	const item: CartItem = {
+		// 菜品 ID。
+		productId: raw.getNumber('productId') ?? 0,
+		// 菜品名称。
+		productName: raw.getString('productName') ?? '',
+		// 菜品编码。
+		productCode: raw.getString('productCode') ?? '',
+		// 购买数量。
+		quantity: raw.getNumber('quantity') ?? 0,
+		// 勾选状态，缺失按未勾选处理，避免误结算。
+		checked: raw.getBoolean('checked') ?? false,
+		// 条目版本。
+		revision: raw.getString('revision') ?? '',
+		// 是否可结算，缺失按不可售处理，避免把失效菜品算进金额。
+		available: raw.getBoolean('available') ?? false,
+		// 不可售原因。
+		unavailableReason: raw.getString('unavailableReason') ?? '',
+		// 单价，后端可能返回 null，统一折算为 0。
+		unitPrice: raw.getNumber('unitPrice') ?? 0,
+		// 行金额，后端可能返回 null，统一折算为 0。
+		lineAmount: raw.getNumber('lineAmount') ?? 0
+	}
+	// 返回转换后的条目。
+	return item
+}
+
+/**
+ * 把后端返回的数组转换为强类型条目数组。
+ *
+ * @param rawList 后端数组，可能为 null
+ * @return 条目数组，无数据时返回空数组
+ */
+function toItemList(rawList: Array<any> | null): Array<CartItem> {
+	// 字段缺失或为 null 都按「没有条目」处理。
+	const items: Array<CartItem> = []
+	if (rawList == null) {
+		return items
+	}
+	// 逐项转换，元素是 any 需先断言为对象。
+	for (let i = 0; i < rawList.length; i++) {
+		const raw = rawList[i] as UTSJSONObject
+		items.push(toItem(raw))
+	}
+	// 返回完整列表。
+	return items
+}
+
+/**
+ * 从统一响应体中解析购物车。
+ *
+ * @param envelope 后端统一响应体
+ * @return 解析成功返回购物车，响应结构异常返回 null
+ */
+function parseCart(envelope: UTSJSONObject): CartData | null {
+	// data 是购物车对象，缺失说明响应异常。
+	const rawCart = envelope.getJSON('data')
+	if (rawCart == null) {
+		return null
+	}
+	// data 是 any，断言为对象后按字段读取。
+	const cartObject = rawCart as UTSJSONObject
+
+	// 解析按窗口分组的分组列表。
+	const windows: Array<CartWindow> = []
+	const rawWindows = cartObject.getArray('windows')
+	if (rawWindows != null) {
+		for (let i = 0; i < rawWindows.length; i++) {
+			const rawWindow = rawWindows[i] as UTSJSONObject
+			const window: CartWindow = {
+				// 窗口 ID。
+				windowId: rawWindow.getNumber('windowId') ?? 0,
+				// 窗口启用状态。
+				windowActive: rawWindow.getBoolean('windowActive') ?? false,
+				// 窗口内条目。
+				items: toItemList(rawWindow.getArray('items')),
+				// 本窗口已勾选金额。
+				checkedAmount: rawWindow.getNumber('checkedAmount') ?? 0
+			}
+			windows.push(window)
+		}
+	}
+
+	// 组装强类型购物车。
+	const cart: CartData = {
+		// 按窗口分组。
+		windows: windows,
+		// 全部条目数量合计。
+		totalQuantity: cartObject.getNumber('totalQuantity') ?? 0,
+		// 已勾选且可售数量合计。
+		checkedQuantity: cartObject.getNumber('checkedQuantity') ?? 0,
+		// 已勾选且可售金额合计。
+		checkedAmount: cartObject.getNumber('checkedAmount') ?? 0
+	}
+	// 返回解析结果。
+	return cart
+}
+
+/**
+ * 把一次写操作的请求结果转换为页面可直接使用的成败结构。
+ *
+ * @param result 请求结果
+ * @return 写操作结果
+ */
+function toActionResult(result: HttpResult): CartActionResult {
+	// 成功时无需提示，失败时原样透传后端文案。
+	const action: CartActionResult = { ok: result.ok, message: result.ok ? '' : result.message }
+	// 返回转换后的结果。
+	return action
+}
+
+/**
+ * 查询当前顾客的购物车。
+ *
+ * @return 购物车查询结果
+ */
+export function fetchCart(): Promise<CartResult> {
+	// 用 Promise 收敛结果：成功带购物车，失败带可直接展示的提示。
+	return new Promise<CartResult>((resolve) => {
+		httpGet('/cart', true).then((result: HttpResult) => {
+			// 请求整体失败（网络、401 等）：原样透传后端提示。
+			if (!result.ok) {
+				const failed: CartResult = { ok: false, message: result.message, cart: null }
+				resolve(failed)
+				return
+			}
+
+			// 成功需要从统一响应体中取出 data 字段。
+			const envelope = result.data
+			if (envelope == null) {
+				const abnormal: CartResult = { ok: false, message: '购物车响应异常，请稍后重试', cart: null }
+				resolve(abnormal)
+				return
+			}
+
+			// 解析购物车对象，结构异常时给出可重试提示。
+			const cart = parseCart(envelope)
+			if (cart == null) {
+				const missing: CartResult = { ok: false, message: '购物车响应异常，请稍后重试', cart: null }
+				resolve(missing)
+				return
+			}
+
+			// 返回成功结果。
+			const success: CartResult = { ok: true, message: '', cart: cart }
+			resolve(success)
+		})
+	})
+}
+
+/**
+ * 向指定窗口的购物车增加菜品。
+ *
+ * 后端语义是「累加」：重复调用会继续增加数量，因此页面加号可以直接调用它。
+ *
+ * @param windowId 窗口 ID
+ * @param productId 菜品 ID
+ * @param quantity 本次增加的数量，必须大于零
+ * @return 写操作结果
+ */
+export function addToCart(windowId: number, productId: number, quantity: number): Promise<CartActionResult> {
+	// 按后端 CartItemAddRequest 契约组装请求体。
+	const body: UTSJSONObject = { productId: productId, quantity: quantity }
+	// 返回收敛后的写操作结果。
+	return new Promise<CartActionResult>((resolve) => {
+		httpPost('/cart/windows/' + windowId + '/items', body, true).then((result: HttpResult) => {
+			resolve(toActionResult(result))
+		})
+	})
+}
+
+/**
+ * 把已有条目的数量设置为目标值。
+ *
+ * 后端不允许用 0 表示删除，减到零必须调用 removeCartItem。
+ *
+ * @param windowId 窗口 ID
+ * @param productId 菜品 ID
+ * @param quantity 目标数量，必须大于零
+ * @return 写操作结果
+ */
+export function setCartItemQuantity(windowId: number, productId: number, quantity: number): Promise<CartActionResult> {
+	// 按后端 CartItemQuantityRequest 契约组装请求体。
+	const body: UTSJSONObject = { quantity: quantity }
+	// 返回收敛后的写操作结果。
+	return new Promise<CartActionResult>((resolve) => {
+		httpPut('/cart/windows/' + windowId + '/items/' + productId, body, true).then((result: HttpResult) => {
+			resolve(toActionResult(result))
+		})
+	})
+}
+
+/**
+ * 删除购物车中的单个菜品。
+ *
+ * @param windowId 窗口 ID
+ * @param productId 菜品 ID
+ * @return 写操作结果
+ */
+export function removeCartItem(windowId: number, productId: number): Promise<CartActionResult> {
+	// 删除接口无请求体，只需要鉴权。
+	return new Promise<CartActionResult>((resolve) => {
+		httpDelete('/cart/windows/' + windowId + '/items/' + productId, true).then((result: HttpResult) => {
+			resolve(toActionResult(result))
+		})
+	})
+}
+
+/**
+ * 清空指定窗口的购物车，其它窗口的菜品不受影响。
+ *
+ * @param windowId 窗口 ID
+ * @return 写操作结果
+ */
+export function clearCartWindow(windowId: number): Promise<CartActionResult> {
+	// 清空接口无请求体，删除整个窗口分组即可。
+	return new Promise<CartActionResult>((resolve) => {
+		httpDelete('/cart/windows/' + windowId, true).then((result: HttpResult) => {
+			resolve(toActionResult(result))
+		})
+	})
+}

@@ -224,6 +224,79 @@ function getOnce(path: string, needAuth: boolean): Promise<HttpResult> {
 }
 
 /**
+ * 发送一次 PUT 请求，不带任何续期逻辑。
+ *
+ * @param path 业务路径
+ * @param body 请求体
+ * @param needAuth 是否需要携带 Bearer 令牌
+ * @return 请求结果
+ */
+function putOnce(
+	path: string,
+	body: UTSJSONObject | null,
+	needAuth: boolean
+): Promise<HttpResult> {
+	// 与 postOnce 结构一致，仅 method 不同，便于各自使用字面量类型。
+	return new Promise<HttpResult>((resolve) => {
+		uni.request({
+			// 网关地址与业务路径拼接，调用方只传服务自身路径。
+			url: API_BASE_URL + path,
+			// PUT 用于「设置为目标值」类操作，如修改购物车条目的数量。
+			method: 'PUT',
+			// 请求头按是否需要鉴权动态拼装。
+			header: buildHeader(needAuth),
+			// PUT 请求体。
+			data: body,
+			// 使用全局统一超时时间。
+			timeout: API_TIMEOUT,
+			// 声明为 json 后由 uni 完成一次 JSON.parse，小程序与 App 行为一致。
+			dataType: 'json',
+			success: (res) => {
+				// 请求已到达服务端，按状态码与业务码解析统一响应体。
+				resolve(parseResponse(res.statusCode, res.data))
+			},
+			fail: (err) => {
+				// 网络层失败（超时、断网、地址不可达）不会返回 HTTP 状态码。
+				resolve(failureResult('网络连接失败，请检查网络后重试', 0))
+			}
+		})
+	})
+}
+
+/**
+ * 发送一次 DELETE 请求，不带任何续期逻辑。
+ *
+ * @param path 业务路径
+ * @param needAuth 是否需要携带 Bearer 令牌
+ * @return 请求结果
+ */
+function deleteOnce(path: string, needAuth: boolean): Promise<HttpResult> {
+	// 与 getOnce 结构一致，仅 method 不同，便于各自使用字面量类型。
+	return new Promise<HttpResult>((resolve) => {
+		uni.request({
+			// 网关地址与业务路径拼接，调用方只传服务自身路径。
+			url: API_BASE_URL + path,
+			// DELETE 用于删除购物车条目等幂等删除操作。
+			method: 'DELETE',
+			// 请求头按是否需要鉴权动态拼装。
+			header: buildHeader(needAuth),
+			// 使用全局统一超时时间。
+			timeout: API_TIMEOUT,
+			// 声明为 json 后由 uni 完成一次 JSON.parse，小程序与 App 行为一致。
+			dataType: 'json',
+			success: (res) => {
+				// 请求已到达服务端，按状态码与业务码解析统一响应体。
+				resolve(parseResponse(res.statusCode, res.data))
+			},
+			fail: (err) => {
+				// 网络层失败（超时、断网、地址不可达）不会返回 HTTP 状态码。
+				resolve(failureResult('网络连接失败，请检查网络后重试', 0))
+			}
+		})
+	})
+}
+
+/**
  * 发送请求，并在需要鉴权的请求收到 401 时尝试自动续期。
  *
  * <p>这是 httpPost 与 httpGet 共用的外层。收到 401 且允许续期时，先走一次
@@ -399,5 +472,34 @@ export function httpGet(path: string, needAuth: boolean): Promise<HttpResult> {
 	// 以闭包传入一次性的 GET 发送动作，由 sendWithRefresh 决定是否续期重试。
 	return sendWithRefresh(() => {
 		return getOnce(path, needAuth)
+	}, needAuth, true)
+}
+
+/**
+ * 以 PUT 方式请求后端，收到 401 时自动续期并重试一次。
+ *
+ * @param path 业务路径，如 '/cart/windows/1/items/2'
+ * @param body 请求体
+ * @param needAuth 是否需要携带 Bearer 令牌
+ * @return 请求结果
+ */
+export function httpPut(path: string, body: UTSJSONObject | null, needAuth: boolean): Promise<HttpResult> {
+	// 以闭包传入一次性的 PUT 发送动作，由 sendWithRefresh 决定是否续期重试。
+	return sendWithRefresh(() => {
+		return putOnce(path, body, needAuth)
+	}, needAuth, true)
+}
+
+/**
+ * 以 DELETE 方式请求后端，收到 401 时自动续期并重试一次。
+ *
+ * @param path 业务路径，如 '/cart/windows/1/items/2'
+ * @param needAuth 是否需要携带 Bearer 令牌
+ * @return 请求结果
+ */
+export function httpDelete(path: string, needAuth: boolean): Promise<HttpResult> {
+	// 以闭包传入一次性的 DELETE 发送动作，由 sendWithRefresh 决定是否续期重试。
+	return sendWithRefresh(() => {
+		return deleteOnce(path, needAuth)
 	}, needAuth, true)
 }

@@ -1,0 +1,203 @@
+/**
+ * 档口菜单（点餐详情）接口。
+ *
+ * 对应后端 ProductMenuController 的 GET /products/windows/{windowId}/menu。
+ * 接口只返回查询时刻的菜单快照，价格与可售状态在真正下单时会重新核价，
+ * 因此页面上的价格仅用于展示与预估。
+ */
+
+// 导入统一请求入口：菜单查询是鉴权的 GET 请求。
+import { httpGet, HttpResult } from '../common/http.uts'
+
+/**
+ * 菜单中的单个菜品，对应后端 MenuProductVO。
+ */
+export type MenuProduct = {
+	/** 菜品 ID。 */
+	productId: number
+	/** 窗口内菜品编码。 */
+	productCode: string
+	/** 菜品名称。 */
+	productName: string
+	/** 菜品描述。 */
+	description: string
+	/** 菜品图片地址，可能为空。 */
+	imageUrl: string
+	/** 当前售价。 */
+	price: number
+	/** 窗口内排序值。 */
+	sortOrder: number
+}
+
+/**
+ * 菜单分类，对应后端 ProductCategoryMenuVO。
+ *
+ * 分类下可能没有在售菜品，页面需要保留分类但展示空态。
+ */
+export type MenuCategory = {
+	/** 分类 ID。 */
+	categoryId: number
+	/** 分类名称。 */
+	categoryName: string
+	/** 分类排序值。 */
+	sortOrder: number
+	/** 该分类下的在售菜品。 */
+	products: Array<MenuProduct>
+}
+
+/**
+ * 档口菜单，对应后端 WindowMenuVO。
+ */
+export type WindowMenu = {
+	/** 档口 ID。 */
+	windowId: number
+	/** 档口编码。 */
+	windowCode: string
+	/** 档口名称。 */
+	windowName: string
+	/** 档口位置。 */
+	location: string
+	/** 启用的分类，含空分类。 */
+	categories: Array<MenuCategory>
+	/** 未归入分类的在售菜品。 */
+	uncategorizedProducts: Array<MenuProduct>
+}
+
+/**
+ * 菜单查询结果。
+ */
+export type WindowMenuResult = {
+	/** 是否查询成功。 */
+	ok: boolean
+	/** 失败时的提示文案。 */
+	message: string
+	/** 成功时的菜单快照，失败时为 null。 */
+	menu: WindowMenu | null
+}
+
+/**
+ * 把后端返回的 any 元素转换为强类型菜品。
+ *
+ * @param raw 后端返回的菜品对象
+ * @return 强类型菜品
+ */
+function toProduct(raw: UTSJSONObject): MenuProduct {
+	// 逐字段读取，缺失字段用类型安全的默认值兜底，避免页面出现 undefined。
+	const product: MenuProduct = {
+		// 菜品 ID，缺失按 0 处理。
+		productId: raw.getNumber('productId') ?? 0,
+		// 菜品编码。
+		productCode: raw.getString('productCode') ?? '',
+		// 菜品名称。
+		productName: raw.getString('productName') ?? '',
+		// 菜品描述。
+		description: raw.getString('description') ?? '',
+		// 图片地址，可能为空，页面据此决定是否展示图片区。
+		imageUrl: raw.getString('imageUrl') ?? '',
+		// 价格，缺失按 0 处理。
+		price: raw.getNumber('price') ?? 0,
+		// 排序值。
+		sortOrder: raw.getNumber('sortOrder') ?? 0
+	}
+	// 返回转换后的菜品。
+	return product
+}
+
+/**
+ * 把后端返回的数组转换为强类型菜品数组。
+ *
+ * @param rawList 后端数组，可能为 null
+ * @return 菜品数组，无数据时返回空数组
+ */
+function toProductList(rawList: Array<any> | null): Array<MenuProduct> {
+	// 空数组或字段缺失都按「没有菜品」处理。
+	const items: Array<MenuProduct> = []
+	if (rawList == null) {
+		return items
+	}
+	// 逐项转换，元素是 any 需先断言为对象。
+	for (let i = 0; i < rawList.length; i++) {
+		const raw = rawList[i] as UTSJSONObject
+		items.push(toProduct(raw))
+	}
+	// 返回完整列表。
+	return items
+}
+
+/**
+ * 查询指定档口的菜单。
+ *
+ * @param windowId 档口 ID
+ * @return 菜单查询结果
+ */
+export function fetchWindowMenu(windowId: number): Promise<WindowMenuResult> {
+	// 用 Promise 收敛结果：成功带菜单，失败带可直接展示的提示。
+	return new Promise<WindowMenuResult>((resolve) => {
+		httpGet('/products/windows/' + windowId + '/menu', true).then((result: HttpResult) => {
+			// 请求整体失败（网络、401、403 等）：原样透传后端提示。
+			if (!result.ok) {
+				const failed: WindowMenuResult = { ok: false, message: result.message, menu: null }
+				resolve(failed)
+				return
+			}
+
+			// 成功需要从统一响应体中取出 data 字段。
+			const envelope = result.data
+			if (envelope == null) {
+				const abnormal: WindowMenuResult = { ok: false, message: '菜单响应异常，请稍后重试', menu: null }
+				resolve(abnormal)
+				return
+			}
+
+			// data 是菜单对象，缺失说明档口不存在或已停用。
+			const rawMenu = envelope.getJSON('data')
+			if (rawMenu == null) {
+				const missing: WindowMenuResult = { ok: false, message: '该档口暂无菜单', menu: null }
+				resolve(missing)
+				return
+			}
+
+			// data 是 any，断言为对象后按字段读取。
+			const menuObject = rawMenu as UTSJSONObject
+			// 读取分类数组，逐个转换分类与其下菜品。
+			const categories: Array<MenuCategory> = []
+			const rawCategories = menuObject.getArray('categories')
+			if (rawCategories != null) {
+				for (let i = 0; i < rawCategories.length; i++) {
+					const rawCategory = rawCategories[i] as UTSJSONObject
+					const category: MenuCategory = {
+						// 分类 ID。
+						categoryId: rawCategory.getNumber('categoryId') ?? 0,
+						// 分类名称。
+						categoryName: rawCategory.getString('categoryName') ?? '',
+						// 分类排序值。
+						sortOrder: rawCategory.getNumber('sortOrder') ?? 0,
+						// 分类下的菜品列表。
+						products: toProductList(rawCategory.getArray('products'))
+					}
+					categories.push(category)
+				}
+			}
+
+			// 组装强类型菜单快照。
+			const menu: WindowMenu = {
+				// 档口 ID。
+				windowId: menuObject.getNumber('windowId') ?? windowId,
+				// 档口编码。
+				windowCode: menuObject.getString('windowCode') ?? '',
+				// 档口名称。
+				windowName: menuObject.getString('windowName') ?? '',
+				// 档口位置。
+				location: menuObject.getString('location') ?? '',
+				// 分类列表。
+				categories: categories,
+				// 未归类菜品。
+				uncategorizedProducts: toProductList(menuObject.getArray('uncategorizedProducts'))
+			}
+
+			// 返回成功结果。
+			const success: WindowMenuResult = { ok: true, message: '', menu: menu }
+			resolve(success)
+		})
+	})
+}
