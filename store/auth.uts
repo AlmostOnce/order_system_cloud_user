@@ -23,14 +23,16 @@ import { parseTokenPayload, TokenPayload } from '../common/jwt.uts'
  *
  * @param username 用户名
  * @param password 密码
+ * @param captchaId 验证码标识，由获取验证码接口下发
+ * @param captchaCode 用户输入的验证码字符
  * @param rememberUsername 是否记住用户名
  * @return 空字符串表示登录成功，否则为需要展示的错误提示
  */
-export function login(username: string, password: string, rememberUsername: boolean): Promise<string> {
+export function login(username: string, password: string, captchaId: string, captchaCode: string, rememberUsername: boolean): Promise<string> {
 	// 用 Promise<string> 收敛结果：空串表示成功，非空串为可直接 toast 的提示。
 	return new Promise<string>((resolve) => {
-		// 调用认证接口发起登录。
-		loginApi(username, password).then((result: HttpResult) => {
+		// 调用认证接口发起登录，验证码与账号密码一并提交。
+		loginApi(username, password, captchaId, captchaCode).then((result: HttpResult) => {
 			// 请求失败：后端 message 已可直接展示，原样返回给页面。
 			if (!result.ok) {
 				resolve(result.message)

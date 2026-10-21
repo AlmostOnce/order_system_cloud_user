@@ -6,18 +6,37 @@
  */
 
 // 导入统一请求入口：本层只负责拼装请求体与路径，不处理令牌与存储。
-import { httpPost, HttpResult } from '../common/http.uts'
+import { httpGet, httpPost, HttpResult } from '../common/http.uts'
+
+/**
+ * 获取登录用图片验证码。
+ *
+ * 每次调用都会生成一张新图，旧验证码仍可能在有效期内，但只能被使用一次。
+ *
+ * @return 请求结果，成功时 data 内含 captchaId、imageBase64、expiresIn
+ */
+export function fetchCaptcha(): Promise<HttpResult> {
+	// 验证码接口是免鉴权入口，不携带任何令牌。
+	return httpGet('/auth/captcha', false)
+}
 
 /**
  * 账号密码登录。
  *
  * @param username 用户名
  * @param password 密码
+ * @param captchaId 验证码标识，由 fetchCaptcha 下发
+ * @param captchaCode 用户输入的验证码字符
  * @return 请求结果，成功时 data 内含 accessToken、refreshToken、expiresIn
  */
-export function login(username: string, password: string): Promise<HttpResult> {
-	// 按后端 LoginRequest 契约组装请求体。
-	const body: UTSJSONObject = { username: username, password: password }
+export function login(username: string, password: string, captchaId: string, captchaCode: string): Promise<HttpResult> {
+	// 按后端 LoginRequest 契约组装请求体，验证码标识与字符必须原样回传。
+	const body: UTSJSONObject = {
+		username: username,
+		password: password,
+		captchaId: captchaId,
+		captchaCode: captchaCode
+	}
 	// 登录接口是免鉴权入口，不携带旧令牌。
 	return httpPost('/auth/login', body, false)
 }

@@ -67,6 +67,36 @@
 				<view class="field-rule" :class="focusedField == 'password' ? 'field-rule-on' : ''"></view>
 			</view>
 
+			<!-- 验证码：图片由后端绘制并以 Base64 下发，点击图片即可换一张 -->
+			<view class="field" :class="focusedField == 'captcha' ? 'field-focused' : ''">
+				<text class="field-label">验证码</text>
+				<view class="captcha-row">
+					<input
+						class="field-input captcha-input"
+						type="text"
+						v-model="captchaCode"
+						placeholder="请输入图中字符"
+						placeholder-class="field-placeholder"
+						:maxlength="8"
+						confirm-type="go"
+						@focus="onCaptchaFocus"
+						@blur="onFieldBlur"
+						@confirm="onPasswordConfirm"
+					/>
+					<image
+						v-if="captchaImage.length > 0"
+						class="captcha-image"
+						:src="captchaImage"
+						mode="aspectFit"
+						@click="loadCaptcha"
+					/>
+					<view v-else class="captcha-empty" @click="loadCaptcha">
+						<text class="captcha-empty-text">点击获取</text>
+					</view>
+				</view>
+				<view class="field-rule" :class="focusedField == 'captcha' ? 'field-rule-on' : ''"></view>
+			</view>
+
 			<view class="options">
 				<view class="remember" @click="toggleRemember">
 					<view class="remember-box" :class="rememberUsername ? 'remember-box-on' : ''">
@@ -106,6 +136,10 @@
 	import { toastSuccess, toast } from '../../common/feedback.uts'
 	// 导入登录态：登录动作与是否已登录判断。
 	import { login as doLogin, isLoggedIn } from '../../store/auth.uts'
+	// 导入验证码接口：登录前必须先取到一次有效的图片验证码。
+	import { fetchCaptcha } from '../../api/auth.uts'
+	// 导入统一请求结果类型，用于标注验证码接口返回值。
+	import { HttpResult } from '../../common/http.uts'
 
 	export default {
 		data() {
@@ -123,7 +157,15 @@
 				showPassword: false,
 				// 是否勾选「记住账号」。
 				rememberUsername: false,
-				// 当前聚焦的字段名，用于驱动聚焦样式：''/username/password。
+				// 验证码输入框绑定值。
+				captchaCode: '',
+				// 当前验证码标识，登录时原样回传给后端校验。
+				captchaId: '',
+				// 验证码图片的 Base64 数据 URI，为空表示尚未取到。
+				captchaImage: '',
+				// 是否正在获取验证码，避免连续点击触发并发请求。
+				captchaLoading: false,
+				// 当前聚焦的字段名，用于驱动聚焦样式：''/username/password/captcha。
 				focusedField: '',
 				// 是否正在提交登录，用于置灰按钮并拦截重复点击。
 				submitting: false,
@@ -140,7 +182,7 @@
 
 			// 已登录用户直接进入首页；onLoad 先于渲染执行，因此不会出现登录页闪现。
 			if (isLoggedIn()) {
-				uni.reLaunch({ url: '/pages/home/home' })
+				uni.switchTab({ url: '/pages/home/home' })
 				return
 			}
 
@@ -150,6 +192,9 @@
 				this.username = remembered
 				this.rememberUsername = true
 			}
+
+			// 进入页面即预取一张验证码，避免用户填完账密后才等待图片加载。
+			this.loadCaptcha()
 		},
 		onReady() {
 			// 页面渲染完成后窗口信息才准确（app-android 尤其如此），此处再同步一次状态栏高度。
@@ -185,6 +230,58 @@
 				// 标记密码字段为聚焦，驱动其底线扫出动画与高亮。
 				this.focusedField = 'password'
 			},
+			onCaptchaFocus() {
+				// 标记验证码字段为聚焦，驱动其底线扫出动画与高亮。
+				this.focusedField = 'captcha'
+			},
+			/**
+			 * 获取一张新的图片验证码。
+			 *
+			 * 点击图片、进入页面与登录失败后都会调用；失败时保留旧图并提示重试。
+			 */
+			loadCaptcha() {
+				// 正在请求时忽略重复触发，避免连点产生多张无效验证码。
+				if (this.captchaLoading) {
+					return
+				}
+				// 标记请求中，阻止并发获取。
+				this.captchaLoading = true
+
+				// 验证码接口免鉴权，直接按统一结果结构处理。
+				fetchCaptcha().then((result: HttpResult) => {
+					// 请求结束，解除加载中状态。
+					this.captchaLoading = false
+
+					// 接口失败或响应体缺失时提示用户点击重试。
+					if (!result.ok || result.data == null) {
+						const message = result.message.length > 0 ? result.message : '验证码加载失败，请点击重试'
+						toast(message)
+						return
+					}
+
+					// 取出统一响应体中的 data 字段。
+					const rawPayload = result.data.getJSON('data')
+					if (rawPayload == null) {
+						toast('验证码加载失败，请点击重试')
+						return
+					}
+
+					// data 是 any，断言为对象后按字段读取。
+					const payload = rawPayload as UTSJSONObject
+					// 验证码标识与图片缺一不可，缺失时按失败处理。
+					const captchaId = payload.getString('captchaId') ?? ''
+					const imageBase64 = payload.getString('imageBase64') ?? ''
+					if (captchaId.length == 0 || imageBase64.length == 0) {
+						toast('验证码加载失败，请点击重试')
+						return
+					}
+
+					// 写入页面状态，旧输入随新图一起清空，避免答案错位。
+					this.captchaId = captchaId
+					this.captchaImage = imageBase64
+					this.captchaCode = ''
+				})
+			},
 			onFieldBlur() {
 				// 任意字段失焦即清除聚焦标记，收回高亮动画。
 				this.focusedField = ''
@@ -219,24 +316,38 @@
 					toast('请输入登录密码')
 					return
 				}
+				// 验证码图片尚未取到：重新获取并中止本次提交，避免提交空标识。
+				if (this.captchaId.length == 0 || this.captchaImage.length == 0) {
+					toast('验证码未加载，正在重新获取')
+					this.loadCaptcha()
+					return
+				}
+				// 去掉首尾空格后再校验验证码，避免把纯空白当作有效输入。
+				const captchaCode = this.captchaCode.trim()
+				if (captchaCode.length == 0) {
+					toast('请输入验证码')
+					return
+				}
 
 				// 置为提交中，按钮进入忙碌态并拦截重复点击。
 				this.submitting = true
 				// 调用登录流程，返回空串表示成功，否则为错误提示。
-				doLogin(username, this.password, this.rememberUsername).then((message: string) => {
+				doLogin(username, this.password, this.captchaId, captchaCode, this.rememberUsername).then((message: string) => {
 					// 请求结束，无论成败都先解除忙碌态。
 					this.submitting = false
 					// 有错误提示说明登录失败，直接 toast 后结束。
 					if (message.length > 0) {
 						toast(message)
+						// 验证码提交一次即失效，失败后必须换新图，否则再次提交只会提示过期。
+						this.loadCaptcha()
 						return
 					}
 					// 登录后清空密码，避免残留在页面状态里。
 					this.password = ''
 					// 给出成功提示。
 					toastSuccess('登录成功')
-					// 用 reLaunch 进入首页，重置页面栈避免返回登录页。
-					uni.reLaunch({ url: '/pages/home/home' })
+					// 首页已是底部导航的 tab 页，必须用 switchTab 跳转并重置页面栈。
+					uni.switchTab({ url: '/pages/home/home' })
 				})
 			},
 			toRegister() {
@@ -520,6 +631,46 @@
 		font-size: 12px;
 		color: #C2410C;
 		padding: 4px 2px;
+	}
+
+	/* ---------- 验证码 ---------- */
+
+	/* 输入框与图片同排，图片固定在右侧 */
+	.captcha-row {
+		margin-top: 6px;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	/* 验证码输入框占据剩余宽度，与普通字段的输入框对齐 */
+	.captcha-input {
+		flex: 1;
+		margin-top: 0;
+	}
+
+	/* 图片尺寸固定，避免不同验证码比例导致布局跳动 */
+	.captcha-image {
+		width: 110px;
+		height: 36px;
+		margin-left: 12px;
+		border-radius: 6px;
+		background-color: #FDF6F0;
+	}
+
+	/* 图片尚未取到时的占位，点击可重新获取 */
+	.captcha-empty {
+		width: 110px;
+		height: 36px;
+		margin-left: 12px;
+		border-radius: 6px;
+		background-color: #FDF6F0;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.captcha-empty-text {
+		font-size: 12px;
+		color: #C2410C;
 	}
 
 	/* ---------- 选项行 ---------- */
