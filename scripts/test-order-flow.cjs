@@ -1,0 +1,133 @@
+// Runs frontend business logic in Node; does not compile the app or call live APIs.
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const ts = require(process.env.ORDER_TEST_TYPESCRIPT || 'D:/HBuilderX/plugins/compile-typescript/node_modules/typescript/lib/typescript.js');
+const root = path.resolve(__dirname, '..');
+const storage = new Map();
+global.uni = { getStorageSync: key => storage.get(key), setStorageSync: (key, value) => storage.set(key, value), removeStorageSync: key => storage.delete(key), redirectTo() {}, navigateTo() {}, getWindowInfo: () => ({ statusBarHeight: 0 }) };
+const calls = [];
+let response = null;
+const http = {};
+for (const method of ['httpGet', 'httpPost', 'httpPatch']) http[method] = (...args) => { calls.push({ method, args }); return Promise.resolve(typeof response === 'function' ? response(args[0]) : response); };
+const cache = new Map();
+function load(relative) {
+    const file = path.resolve(root, relative);
+    if (cache.has(file)) return cache.get(file);
+    if (file === path.resolve(root, 'common/http.uts')) return http;
+    if (file === path.resolve(root, 'store/auth.uts')) return { currentUser: () => ({ userId: 7, roleCode: 'CUSTOMER' }) };
+    if (file === path.resolve(root, 'common/account.uts')) return { accountDate: s => s, backToAccount() {} };
+    let source = fs.readFileSync(file, 'utf8');
+    if (file.endsWith('.uvue')) source = source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
+    const parsed = ts.createSourceFile(file + '.ts', source, ts.ScriptTarget.Latest, true);
+    assert.equal(parsed.parseDiagnostics.length, 0, relative + ': syntax');
+    const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+    const mod = { exports: {} }; cache.set(file, mod.exports);
+    new Function('require', 'exports', 'module', output)(p => load(path.relative(root, path.resolve(path.dirname(file), p))), mod.exports, mod);
+    cache.set(file, mod.exports); return mod.exports;
+}
+function page(relative) {
+    const component = load(relative).default;
+    const vm = component.data();
+    for (const [name, fn] of Object.entries(component.methods)) vm[name] = fn.bind(vm);
+    return { vm, component };
+}
+const flush = () => new Promise(resolve => setImmediate(resolve));
+const ok = data => ({ ok: true, data: { data }, message: '', statusCode: 200 });
+const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, status: '待支付', items: [{ productId: 3, productName: '饭', quantity: 2, unitPrice: 9, lineAmount: 18 }] };
+
+(async () => {
+    const api = load('api/order.uts');
+    const checkout = load('common/checkout.uts');
+    const draft = { key: 'order-original', windowId: 2, windowName: '一食堂', remark: '少辣', items: [{ productId: 3, productName: '饭', quantity: 2, revision: 'rev-original', unitPrice: 9, lineAmount: 18 }] };
+    assert.deepEqual(checkout.orderBody(draft), { windowId: 2, remark: '少辣', items: [{ productId: 3, quantity: 2 }] });
+    assert.equal(checkout.cleanupBody(draft).items[0].revision, 'rev-original');
+    assert.equal(api.parseOrder({ ...orderData, totalAmount: null }), null);
+    assert.equal(api.parseOrder({ ...orderData, items: [null] }), null);
+    assert.equal(api.parseOrder(orderData).items[0].lineAmount, 18);
+
+    const { vm, component } = page('pages/order/confirm.uvue');
+    Object.assign(vm, { userId: 7, windowId: 2, windowName: draft.windowName, items: draft.items, remark: draft.remark });
+    response = { ok: false, statusCode: 0, message: 'timeout' };
+    vm.submit(); await flush();
+    assert.equal(vm.pending, true);
+    const first = calls.find(c => c.args[0] === '/orders');
+    const saved = checkout.readCheckout(7);
+    assert.equal(saved.key, first.args[3]);
+    vm.submit(); await flush();
+    const submitted = calls.filter(c => c.args[0] === '/orders');
+    assert.deepEqual(submitted[0].args, submitted[1].args, 'uncertain retry uses identical body and key');
+    const restored = page('pages/order/confirm.uvue');
+    restored.component.onShow.call(restored.vm);
+    assert.equal(restored.vm.pending, true);
+    assert.equal(restored.vm.requestKey, saved.key);
+    assert.equal(restored.vm.remark, '少辣');
+
+    response = ok(orderData);
+    vm.submit(); await flush();
+    assert.equal(vm.createdOrderId, 11);
+    assert.equal(checkout.readCheckout(7), null);
+    const cleaned = calls.find(c => c.args[0] === '/cart/orders/11/cleanup');
+    assert.deepEqual(cleaned.args[1], checkout.cleanupBody(draft));
+    const count = calls.filter(c => c.args[0] === '/orders').length;
+    vm.submit(); await flush();
+    assert.equal(calls.filter(c => c.args[0] === '/orders').length, count, 'created order cannot be submitted again');
+
+    const rejected = page('pages/order/confirm.uvue').vm;
+    Object.assign(rejected, { userId: 7, windowId: 2, items: draft.items });
+    response = { ok: false, statusCode: 400, message: '库存不足' };
+    rejected.submit(); await flush();
+    assert.equal(rejected.pending, false);
+    assert.equal(checkout.readCheckout(7), null);
+
+    response = { ok: false, statusCode: 409, message: '菜品库存不足' };
+    rejected.submit(); await flush();
+    assert.equal(rejected.pending, false, 'stock rejection allows editing cart and resubmitting');
+    response = { ok: false, statusCode: 409, message: 'Idempotency-Key 已用于不同的订单请求' };
+    rejected.submit(); await flush();
+    assert.equal(rejected.pending, true, 'key conflict never silently starts another order');
+    storage.delete(checkout.checkoutKey(7));
+    response = ok({ status: 'SUCCESS' });
+    await api.payOrder(11, 'secret');
+    const payment = calls.at(-1);
+    assert.deepEqual(payment.args[1], { orderId: 11, channelCode: 'BALANCE', payPassword: 'secret' });
+    await api.cancelOrder(11);
+    assert.equal(calls.at(-1).method, 'httpPatch');
+    assert.equal(calls.at(-1).args[0], '/orders/11/cancel');
+
+    const detail = page('pages/order/detail.uvue');
+    detail.vm.payPassword = 'secret'; detail.component.onHide.call(detail.vm);
+    assert.equal(detail.vm.payPassword, '', 'password cleared when leaving');
+    Object.assign(detail.vm, { cancelConfirm: true, paymentReady: true, paymentUncertain: true, orderId: 11 });
+    const before = calls.length; detail.vm.cancel(); await flush();
+    assert.equal(calls.length, before, 'uncertain payment blocks cancellation');
+    const state = page('pages/order/detail.uvue').vm;
+    Object.assign(state, { orderId: 11, userId: 7 });
+    response = route => route === '/orders/11' ? ok(orderData) : route === '/users/me/balance' ? ok({ balance: 25, payPasswordSet: true }) : { ok: false, statusCode: 404, message: '支付单不存在' };
+    state.refresh(); await flush();
+    assert.equal(state.paymentReady, true, 'no payment yet permits first payment');
+    assert.equal(state.balanceReady, true);
+    response = route => route === '/orders/11' ? ok(orderData) : route === '/users/me/balance' ? ok({ balance: 7, payPasswordSet: true }) : ok({ status: 'SUCCESS' });
+    state.refresh(); await flush();
+    assert.equal(state.paymentSuccess, true, 'successful payment remains visible while order update is pending');
+    state.payPassword = 'secret'; const paidCalls = calls.length; state.pay(); await flush();
+    assert.equal(calls.length, paidCalls, 'successful payment cannot be reissued from detail');
+    const list = page('pages/order/list.uvue');
+    list.vm.orders = ['待支付', '已支付', '制作中', '待取货', '已完成', '已取消'].map((status, index) => ({ ...api.parseOrder(orderData), orderId: index + 1, status }));
+    list.component.onLoad.call(list.vm, { filter: 'pending' });
+    assert.deepEqual(list.component.computed.visibleOrders.call(list.vm).map(o => o.status), ['待支付']);
+    list.vm.selectFilter('active');
+    assert.deepEqual(list.component.computed.visibleOrders.call(list.vm).map(o => o.status), ['已支付', '制作中', '待取货']);
+    list.vm.selectFilter('completed');
+    assert.deepEqual(list.component.computed.visibleOrders.call(list.vm).map(o => o.status), ['已完成']);
+    list.vm.selectFilter('all');
+    assert.equal(list.component.computed.visibleOrders.call(list.vm).length, 6, 'cancelled orders remain in all orders');
+    list.vm.selectFilter('invalid'); assert.equal(list.vm.filter, 'all');
+    const mine = page('pages/mine/mine.uvue');
+    let url = ''; uni.navigateTo = options => { url = options.url; };
+    mine.vm.openPendingOrders(); assert.equal(url, '/pages/order/list?filter=pending');
+    mine.vm.openActiveOrders(); assert.equal(url, '/pages/order/list?filter=active');
+    mine.vm.openCompletedOrders(); assert.equal(url, '/pages/order/list?filter=completed');
+    mine.vm.openOrders(); assert.equal(url, '/pages/order/list');
+    console.log('Order flow assertions passed: price isolation, snapshot cleanup, idempotent retry/recovery, duplicate guard, rejection recovery, payment contract, cancellation guard, password clearing.');
+})().catch(error => { console.error(error); process.exitCode = 1; });
