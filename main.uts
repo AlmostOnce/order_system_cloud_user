@@ -2,7 +2,7 @@
  * 应用入口。
  *
  * uni-app x 要求每个工程提供 createApp 工厂函数，由运行时在启动时调用一次；
- * 这里用 Vue 3 的 createSSRApp 创建根实例，应用级生命周期由 App.uvue 承载。
+ * 这里用 Vue 3 的根实例工厂创建应用，应用级生命周期由 App.uvue 承载。
  */
 
 // 导入根组件，应用的所有页面都挂载在它之下。
@@ -11,13 +11,15 @@ import App from './App.uvue'
 // 导入 Vue 的根实例创建函数。
 import { createSSRApp } from 'vue'
 
+// Web 编译器按首次出现位置改写上面的工厂导入，导入前的注释不要包含该工厂名。
+
 /**
  * 创建应用根实例。
  *
  * @return 含 app 字段的对象，uni-app x 运行时据此挂载根组件
  */
 export function createApp() {
-	// 以 SSR 模式创建根实例：这是 uni-app x 约定的创建方式，不能换成 createApp。
+	// 按框架约定创建根实例，Web 的具体挂载方式由编译器处理。
 	const app = createSSRApp(App)
 	// 运行时从返回值中取 app 字段作为根实例，故键名必须固定为 app。
 	return {

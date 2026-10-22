@@ -50,20 +50,32 @@
 
 			<view class="field" :class="focusedField == 'password' ? 'field-focused' : ''">
 				<text class="field-label">密码</text>
-				<input
-					class="field-input"
-					type="text"
-					:password="!showPassword"
-					v-model="password"
-					placeholder="请输入登录密码"
-					placeholder-class="field-placeholder"
-					:maxlength="64"
-					confirm-type="go"
-					@focus="onPasswordFocus"
-					@blur="onFieldBlur"
-					@confirm="onPasswordConfirm"
-				/>
-				<text class="field-action" @click="togglePassword">{{ showPassword ? '隐藏' : '显示' }}</text>
+				<view class="password-row">
+					<input
+						class="field-input password-input"
+						type="text"
+						:password="!showPassword"
+						v-model="password"
+						placeholder="请输入登录密码"
+						placeholder-class="field-placeholder"
+						:maxlength="64"
+						confirm-type="go"
+						@focus="onPasswordFocus"
+						@blur="onFieldBlur"
+						@confirm="onPasswordConfirm"
+					/>
+					<button
+						class="field-action"
+						:aria-label="showPassword ? '隐藏密码' : '显示密码'"
+						@click="togglePassword"
+					>
+						<view class="password-icon">
+							<view class="password-eye"></view>
+							<view class="password-eye-pupil"></view>
+							<view v-if="!showPassword" class="password-eye-slash"></view>
+						</view>
+					</button>
+				</view>
 				<view class="field-rule" :class="focusedField == 'password' ? 'field-rule-on' : ''"></view>
 			</view>
 
@@ -130,6 +142,8 @@
 </template>
 
 <script lang="uts">
+	import { jsonObject, jsonString } from '../../common/json.uts'
+
 	// 导入本地存储读取：取上次「记住账号」保存的用户名。
 	import { getRememberedUsername } from '../../common/storage.uts'
 	// 导入轻量提示：普通提示与成功提示。
@@ -260,7 +274,7 @@
 					}
 
 					// 取出统一响应体中的 data 字段。
-					const rawPayload = result.data.getJSON('data')
+					const rawPayload = jsonObject(result.data, 'data')
 					if (rawPayload == null) {
 						toast('验证码加载失败，请点击重试')
 						return
@@ -269,8 +283,8 @@
 					// data 是 any，断言为对象后按字段读取。
 					const payload = rawPayload as UTSJSONObject
 					// 验证码标识与图片缺一不可，缺失时按失败处理。
-					const captchaId = payload.getString('captchaId') ?? ''
-					const imageBase64 = payload.getString('imageBase64') ?? ''
+					const captchaId = jsonString(payload, 'captchaId') ?? ''
+					const imageBase64 = jsonString(payload, 'imageBase64') ?? ''
 					if (captchaId.length == 0 || imageBase64.length == 0) {
 						toast('验证码加载失败，请点击重试')
 						return
@@ -624,14 +638,73 @@
 		font-size: 15px;
 	}
 
-	.field-action {
-		position: absolute;
-		right: 0;
-		bottom: 10px;
-		font-size: 12px;
-		color: #C2410C;
-		padding: 4px 2px;
-	}
+	.password-row {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        margin-top: 6px;
+        min-height: 44px;
+    }
+    .password-input {
+        flex: 1;
+        min-width: 0;
+        margin-top: 0;
+        margin-right: 8px;
+    }
+    .field-action {
+        display: flex;
+        flex-direction: row;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        margin: 0;
+        padding: 0;
+        border-width: 0;
+        border-radius: 8px;
+        line-height: 24px;
+        background-color: transparent;
+    }
+    .password-icon {
+        position: relative;
+        width: 24px;
+        height: 24px;
+    }
+    .password-eye {
+        position: absolute;
+        left: 1px;
+        top: 5px;
+        width: 22px;
+        height: 14px;
+        border-width: 2px;
+        border-style: solid;
+        border-color: #C2410C;
+        border-radius: 12px;
+        box-sizing: border-box;
+    }
+    .password-eye-pupil {
+        position: absolute;
+        left: 9px;
+        top: 9px;
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background-color: #C2410C;
+    }
+    .password-eye-slash {
+        position: absolute;
+        left: 0;
+        top: 11px;
+        width: 24px;
+        height: 2px;
+        border-radius: 1px;
+        background-color: #C2410C;
+        transform: rotate(-45deg);
+    }
+    /* #ifdef WEB */
+    .field-action::after { border: none; }
+    /* #endif */
 
 	/* ---------- 验证码 ---------- */
 

@@ -10,9 +10,9 @@
 			<view class="hero-body" :class="entered ? '' : 'hero-body-pre'">
 				<view class="nav-top">
 					<view class="nav-back" hover-class="nav-back-hover" @click="goBack">
-						<text class="nav-back-icon">‹</text>
+						<view class="nav-back-icon"></view>
 					</view>
-					<text class="hero-eyebrow">ORDER NOW</text>
+					<text class="hero-eyebrow">档口点餐</text>
 				</view>
 				<text class="hero-title">{{ windowName.length > 0 ? windowName : '档口点餐' }}</text>
 				<text class="hero-loc">{{ windowLocation.length > 0 ? windowLocation : '位置待补充' }}</text>
@@ -58,6 +58,10 @@
 
 			<!-- 右侧菜品区 -->
 			<scroll-view class="dishes" scroll-y="true">
+				<button class="stock-status" :disabled="stockLoading" aria-label="刷新菜品库存" hover-class="stock-status-hover" @click="loadStocks">
+					<text class="stock-status-text">{{ stockLoading ? '正在查询库存…' : (stockLoadError.length > 0 ? stockLoadError : '库存已更新 · 点击刷新') }}</text>
+				</button>
+				<text v-if="windowDescription.trim().length > 0" class="menu-description">{{ windowDescription }}</text>
 				<!-- 空菜单 / 当前分类无菜品 -->
 				<view v-if="visibleGroups().length == 0" class="state state-inline">
 					<text class="state-text">{{ activeCategoryId == 0 ? '该档口暂无在售菜品' : '该分类暂无在售菜品' }}</text>
@@ -92,7 +96,9 @@
 							<view class="dish-body">
 								<text class="dish-name">{{ product.productName }}</text>
 								<text v-if="product.description.length > 0" class="dish-desc">{{ product.description }}</text>
+								<text class="dish-stock">{{ stockHint(product.productId) }}</text>
 
+							</view>
 								<view class="dish-foot">
 									<text class="dish-price">¥{{ formatPrice(product.price) }}</text>
 
@@ -104,15 +110,14 @@
 											hover-class="step-hover"
 											@click="decrease(product)"
 										>
-											<text class="step-text">−</text>
+											<view class="step-line"></view>
 										</view>
 										<text v-if="quantityOf(product.productId) > 0" class="step-count">{{ quantityOf(product.productId) }}</text>
-										<view class="step step-plus" hover-class="step-plus-hover" @click="increase(product)">
-											<text class="step-text step-text-plus">+</text>
+										<view class="step step-plus" :class="canIncrease(product.productId) ? '' : 'step-disabled'" hover-class="step-plus-hover" @click="increase(product)">
+											<view class="step-line step-line-light"></view><view class="step-line step-line-light step-line-vertical"></view>
 										</view>
 									</view>
 								</view>
-							</view>
 						</view>
 					</view>
 				</view>
@@ -122,8 +127,16 @@
 		<!-- 底部购物车栏：菜单就绪后随页面出现；点击左侧信息区展开购物车清单 -->
 		<view v-if="!loading && loadError.length == 0" class="cartbar">
 			<view class="cartbar-info" hover-class="cartbar-info-hover" @click="toggleCartPanel">
-				<text class="cartbar-count">{{ cartQuantity > 0 ? '已选 ' + cartQuantity + ' 件，点击查看' : '购物车是空的' }}</text>
-				<text class="cartbar-amount">¥{{ formatPrice(cartAmount) }}</text>
+				<view class="cart-icon" :class="cartQuantity > 0 ? 'cart-icon-active' : ''">
+					<view class="cart-icon-handle"></view>
+					<view class="cart-icon-basket"></view>
+					<view class="cart-icon-wheel cart-icon-wheel-left"></view>
+					<view class="cart-icon-wheel cart-icon-wheel-right"></view>
+				</view>
+				<view class="cartbar-summary">
+					<text class="cartbar-amount">¥{{ formatPrice(cartAmount) }}</text>
+					<text class="cartbar-count">{{ cartQuantity > 0 ? '已选 ' + cartQuantity + ' 件 · 查看明细' : '选点喜欢的菜品吧' }}</text>
+				</view>
 			</view>
 			<view
 				class="cartbar-btn"
@@ -166,11 +179,11 @@
 
 					<view v-if="item.available" class="stepper">
 						<view class="step step-minus" hover-class="step-hover" @click="decreaseItem(item)">
-							<text class="step-text">−</text>
+							<view class="step-line"></view>
 						</view>
 						<text class="step-count">{{ item.quantity }}</text>
-						<view class="step step-plus" hover-class="step-plus-hover" @click="increaseItem(item)">
-							<text class="step-text step-text-plus">+</text>
+						<view class="step step-plus" :class="canIncrease(item.productId) ? '' : 'step-disabled'" hover-class="step-plus-hover" @click="increaseItem(item)">
+							<view class="step-line step-line-light"></view><view class="step-line step-line-light step-line-vertical"></view>
 						</view>
 					</view>
 				</view>
@@ -180,12 +193,13 @@
 </template>
 
 <script lang="uts">
-	// 导入轻量提示：操作反馈与结算占位提示。
+	// 导入轻量提示：购物车操作反馈。
 	import { toast } from '../../common/feedback.uts'
 	// 导入登录态：令牌失效时回到登录页，避免带失效凭据反复请求。
 	import { isLoggedIn } from '../../store/auth.uts'
 	// 导入菜单接口与类型：档口菜单快照。
 	import { fetchWindowMenu, MenuProduct, WindowMenuResult } from '../../api/menu.uts'
+	import { fetchWindowStocks, ProductStock, StockListResult } from '../../api/stock.uts'
 	// 导入购物车接口与类型：数量增减与金额汇总。
 	import { fetchCart, addToCart, setCartItemQuantity, removeCartItem, clearCartWindow, CartItem, CartWindow, CartResult, CartActionResult } from '../../api/cart.uts'
 
@@ -256,16 +270,23 @@
 			const emptyGroups: Array<MenuGroup> = []
 			const emptyQuantities: Array<QuantityEntry> = []
 			const emptyCartItems: Array<CartItem> = []
+			const emptyStocks: Array<ProductStock> = []
 
 			return {
 				// 状态栏高度（px），用于顶部占位。
 				statusBarHeight: 0,
 				// 当前档口 ID，来自路由参数，取不到时为 0（页面会展示失败态）。
 				windowId: 0,
+				stocks: emptyStocks,
+				stockLoading: false,
+				stockRequestVersion: 0,
+				stockLoadError: '',
 				// 档口名称，接口返回前使用默认标题。
 				windowName: '',
 				// 档口位置。
 				windowLocation: '',
+				// 窗口简介，未配置时不占展示空间。
+				windowDescription: '',
 				// 是否正在加载菜单。
 				loading: true,
 				// 菜单加载失败文案，非空时展示错误态。
@@ -342,6 +363,10 @@
 			 * 拉取档口菜单，并把分类与未归类菜品统一成分组。
 			 */
 			loadMenu() {
+				// 使页面上次查询失效，避免返回页面时旧请求覆盖新库存。
+				this.stockRequestVersion = this.stockRequestVersion + 1
+				this.stockLoading = false
+				this.stockLoadError = '正在等待菜单加载'
 				// 档口 ID 缺失说明路由参数异常，直接给出错误态。
 				if (this.windowId <= 0) {
 					this.loading = false
@@ -374,6 +399,7 @@
 					// 写入档口基本信息，供头部展示。
 					this.windowName = menu.windowName
 					this.windowLocation = menu.location
+					this.windowDescription = menu.description
 
 					// 把后端分类转换成页面分组，只保留有菜品的分类。
 					const converted: Array<MenuGroup> = []
@@ -418,7 +444,56 @@
 
 					// 菜单就绪后同步购物车，保证数量与金额是服务端的最新值。
 					this.loadCart()
+					this.stockLoading = false
+					this.loadStocks()
 				})
+			},
+			/** 库存独立刷新，不沿用菜单缓存，也不因错误伪装成售罄。 */
+			loadStocks() {
+				if (this.stockLoading || this.loading || this.loadError.length > 0 || this.windowId <= 0) {
+					return
+				}
+				this.stockLoading = true
+				this.stockLoadError = ''
+				this.stockRequestVersion = this.stockRequestVersion + 1
+				const requestVersion = this.stockRequestVersion
+				fetchWindowStocks(this.windowId).then((result: StockListResult) => {
+					if (requestVersion != this.stockRequestVersion) {
+						return
+					}
+					this.stockLoading = false
+					if (!result.ok) {
+						this.stockLoadError = result.message
+						return
+					}
+					this.stocks = result.items
+				})
+			},
+			stockOf(productId: number): number {
+				for (let i = 0; i < this.stocks.length; i++) {
+					if (this.stocks[i].productId == productId) {
+						return this.stocks[i].configured ? this.stocks[i].availableQty : 0
+					}
+				}
+				return 0
+			},
+			canIncrease(productId: number): boolean {
+				return !this.stockLoading && this.stockLoadError.length == 0 && this.stockOf(productId) > this.quantityOf(productId)
+			},
+			stockHint(productId: number): string {
+				if (this.stockLoading) {
+					return '库存查询中'
+				}
+				if (this.stockLoadError.length > 0) {
+					return '库存暂不可用'
+				}
+				for (let i = 0; i < this.stocks.length; i++) {
+					const stock = this.stocks[i]
+					if (stock.productId == productId) {
+						return !stock.configured ? '暂未备货' : (stock.availableQty > 0 ? '剩余 ' + stock.availableQty + ' 份' : '已售罄')
+					}
+				}
+				return '暂未备货'
 			},
 			/**
 			 * 拉取购物车，并抽取当前窗口的数量与金额。
@@ -606,6 +681,10 @@
 			 * @param current 当前数量
 			 */
 			increaseById(productId: number, current: number) {
+				if (!this.canIncrease(productId)) {
+					toast(this.stockLoading ? '正在查询库存，请稍候' : (this.stockLoadError.length > 0 ? '库存查询失败，请刷新后重试' : '已达到当前可售数量'))
+					return
+				}
 				// 已有写操作进行中时忽略连续点击，避免并发请求互相覆盖。
 				if (this.mutating) {
 					return
@@ -770,7 +849,7 @@
 				})
 			},
 			/**
-			 * 去结算：确认页尚未落地，先给出明确反馈。
+			 * 进入当前窗口的订单确认页。
 			 */
 			goCheckout() {
 				// 购物车为空时提示先选菜，不进入结算流程。
@@ -778,8 +857,9 @@
 					toast('请先选择菜品')
 					return
 				}
-				// 结算页尚未实现，先提示，避免点击后无响应。
-				toast('结算功能即将上线')
+				if (this.mutating || this.loading || this.stockLoading) return
+				this.closeCartPanel()
+				uni.navigateTo({ url: '/pages/order/confirm?windowId=' + this.windowId + '&windowName=' + encodeURIComponent(this.windowName) })
 			}
 		}
 	}
@@ -883,18 +963,23 @@
 	}
 
 	.nav-back-icon {
-		font-size: 24px;
-		font-weight: bold;
-		color: #FFFFFF;
-		/* 字形本身偏下，上移一点让视觉居中 */
-		margin-top: -2px;
+		width: 10px;
+		height: 10px;
+		border-left-width: 2px;
+		border-left-style: solid;
+		border-left-color: #FFFFFF;
+		border-bottom-width: 2px;
+		border-bottom-style: solid;
+		border-bottom-color: #FFFFFF;
+		transform: rotate(45deg);
+		margin-left: 4px;
 	}
 
 	.hero-eyebrow {
 		margin-left: 10px;
 		font-size: 11px;
 		color: #FFD9C7;
-		letter-spacing: 3px;
+		letter-spacing: 1px;
 		font-weight: bold;
 	}
 
@@ -912,6 +997,47 @@
 		color: #FFD9C7;
 	}
 
+	.menu-description {
+		margin: 14px 12px 0 12px;
+		padding: 12px;
+		border-radius: 10px;
+		background-color: #FDF6F0;
+		font-size: 12px;
+		line-height: 18px;
+		color: #7A6C60;
+	}
+
+	.stock-status {
+		margin: 0;
+		padding: 12px;
+		min-height: 44px;
+		border-width: 0;
+		border-radius: 0;
+		align-items: flex-start;
+		background-color: #FDF6F0;
+	}
+
+	.stock-status-hover {
+		background-color: #F7EEE6;
+	}
+
+	.stock-status-text {
+		font-size: 12px;
+		line-height: 18px;
+		color: #C2410C;
+	}
+
+	.dish-stock {
+		margin-top: 4px;
+		font-size: 11px;
+		line-height: 16px;
+		color: #7A6C60;
+	}
+
+	.step-disabled {
+		opacity: 0.4;
+	}
+
 	/* ---------- 分类栏与菜品区 ---------- */
 
 	/* 主体：左侧固定宽度分类栏 + 右侧菜品区，左右各自滚动。
@@ -925,7 +1051,8 @@
 
 	/* 左侧分类栏：米色底与右侧菜品区形成层次，宽度固定不随内容撑开 */
 	.rail {
-		width: 88px;
+		width: 76px;
+		flex-shrink: 0;
 		background-color: #F7EEE6;
 	}
 
@@ -954,7 +1081,8 @@
 	}
 
 	.rail-text {
-		font-size: 12px;
+		font-size: 13px;
+		line-height: 20px;
 		color: #7A6C60;
 		text-align: center;
 	}
@@ -1062,6 +1190,7 @@
 	}
 
 	.group-title {
+		flex: 1;
 		font-size: 15px;
 		font-weight: bold;
 		color: #211C18;
@@ -1077,9 +1206,10 @@
 	/* 菜品卡片：白底细描边，按下时描边转主色 */
 	.dish {
 		flex-direction: row;
-		align-items: center;
+		flex-wrap: wrap;
+		align-items: flex-start;
 		background-color: #FFFFFF;
-		border-radius: 18px;
+		border-radius: 14px;
 		border-width: 1px;
 		border-style: solid;
 		border-color: #EFE1D6;
@@ -1101,6 +1231,7 @@
 	.dish-thumb {
 		width: 62px;
 		height: 62px;
+		flex-shrink: 0;
 		border-radius: 13px;
 		background-color: #FDF0E8;
 		align-items: center;
@@ -1121,28 +1252,32 @@
 
 	.dish-body {
 		flex: 1;
-		margin-left: 12px;
+		margin-left: 10px;
+		min-height: 62px;
 	}
 
 	.dish-name {
 		font-size: 15px;
+		line-height: 22px;
 		font-weight: bold;
 		color: #211C18;
 	}
 
 	.dish-desc {
 		margin-top: 4px;
-		font-size: 11px;
-		color: #A2968B;
+		font-size: 12px;
+		line-height: 18px;
+		color: #7A6C60;
 		/* 描述较长时省略，避免把卡片撑得过高 */
-		max-height: 30px;
+		max-height: 36px;
 		overflow: hidden;
 	}
 
 	.dish-foot {
+		width: 100%;
 		flex-direction: row;
 		align-items: center;
-		margin-top: 8px;
+		margin-top: 12px;
 	}
 
 	.dish-price {
@@ -1159,6 +1294,7 @@
 	}
 
 	.step {
+		position: relative;
 		width: 26px;
 		height: 26px;
 		border-radius: 999px;
@@ -1185,16 +1321,21 @@
 		background-color: #C2410C;
 	}
 
-	.step-text {
-		font-size: 16px;
-		font-weight: bold;
-		color: #E4572E;
+	.step-line {
+		position: absolute;
+		width: 10px;
+		height: 2px;
+		border-radius: 1px;
+		background-color: #E4572E;
 	}
 
-	.step-text-plus {
-		color: #FFFFFF;
+	.step-line-light {
+		background-color: #FFFFFF;
 	}
 
+	.step-line-vertical {
+		transform: rotate(90deg);
+	}
 	.step-count {
 		min-width: 26px;
 		text-align: center;
@@ -1226,8 +1367,67 @@
 	/* 信息区整体可点：按下时给底色反馈，提示这里能展开清单 */
 	.cartbar-info {
 		flex: 1;
+		flex-direction: row;
+		align-items: center;
 		padding-left: 20px;
 		padding-right: 12px;
+	}
+
+	.cart-icon {
+		position: relative;
+		width: 44px;
+		height: 44px;
+		flex-shrink: 0;
+		margin-right: 10px;
+		border-radius: 22px;
+		background-color: #A2968B;
+	}
+
+	.cart-icon-active {
+		background-color: #E4572E;
+	}
+
+	.cart-icon-handle {
+		position: absolute;
+		left: 8px;
+		top: 11px;
+		width: 7px;
+		height: 2px;
+		border-radius: 1px;
+		background-color: #FFFFFF;
+	}
+
+	.cart-icon-basket {
+		position: absolute;
+		left: 13px;
+		top: 12px;
+		width: 23px;
+		height: 15px;
+		border-width: 2px;
+		border-style: solid;
+		border-color: #FFFFFF;
+		border-radius: 3px;
+	}
+
+	.cart-icon-wheel {
+		position: absolute;
+		top: 30px;
+		width: 4px;
+		height: 4px;
+		border-radius: 2px;
+		background-color: #FFFFFF;
+	}
+
+	.cart-icon-wheel-left {
+		left: 16px;
+	}
+
+	.cart-icon-wheel-right {
+		left: 29px;
+	}
+
+	.cartbar-summary {
+		flex: 1;
 	}
 
 	.cartbar-info-hover {
@@ -1236,11 +1436,12 @@
 
 	.cartbar-count {
 		font-size: 11px;
-		color: #A2968B;
+		line-height: 18px;
+		color: #7A6C60;
 	}
 
 	.cartbar-amount {
-		margin-top: 2px;
+		line-height: 26px;
 		font-size: 19px;
 		font-weight: bold;
 		color: #E4572E;
@@ -1248,9 +1449,10 @@
 
 	/* 结算按钮：购物车为空时置灰，数量恢复后自动变回主色 */
 	.cartbar-btn {
+		flex-shrink: 0;
 		margin-right: 20px;
-		padding-left: 26px;
-		padding-right: 26px;
+		padding-left: 20px;
+		padding-right: 20px;
 		padding-top: 11px;
 		padding-bottom: 11px;
 		border-radius: 999px;

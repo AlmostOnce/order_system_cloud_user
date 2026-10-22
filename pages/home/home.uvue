@@ -72,6 +72,7 @@
 					<view class="stall-body">
 						<text class="stall-name">{{ item.windowName }}</text>
 						<text class="stall-meta">{{ stallMeta(item) }}</text>
+						<text v-if="item.description.trim().length > 0" class="stall-desc">{{ stallDescription(item) }}</text>
 					</view>
 					<text class="stall-arrow">›</text>
 				</view>
@@ -319,22 +320,37 @@
 				return '档'
 			},
 			/**
-			 * 生成档口副标题，优先展示位置，位置缺失时退回档口编码。
+			 * 生成档口副标题，展示所属食堂及档口位置（楼层）。
 			 *
 			 * @param item 档口
 			 * @return 副标题文案
 			 */
 			stallMeta(item: WindowItem): string {
-				// 优先展示档口位置，位置信息对顾客最直观。
-				if (item.location.length > 0) {
-					return item.location
+				// 通过所属餐厅 ID 关联完整名称，不使用顶部筛选器的简称。
+				let restaurantName = ''
+				for (let i = 0; i < this.restaurants.length; i++) {
+					if (this.restaurants[i].restaurantId == item.restaurantId) {
+						restaurantName = this.restaurants[i].restaurantName.trim()
+						break
+					}
 				}
-				// 位置缺失时退回展示档口编码。
-				if (item.windowCode.length > 0) {
-					return item.windowCode
+				const location = item.location.trim()
+				if (restaurantName.length == 0) {
+					return '食堂待补充 · ' + (location.length > 0 ? location : '楼层待补充')
 				}
-				// 两者皆空时给出占位文案。
-				return '位置待补充'
+				if (location.length == 0) {
+					return restaurantName + ' · 楼层待补充'
+				}
+				// 位置已包含完整食堂名称时，避免重复拼接。
+				if (location.indexOf(restaurantName) >= 0) {
+					return location
+				}
+				return restaurantName + ' · ' + location
+			},
+			/** 首页仅展示简介摘要，完整内容在点单页查看。 */
+			stallDescription(item: WindowItem): string {
+				const description = item.description.trim()
+				return description.length > 48 ? description.substring(0, 48) + '…' : description
 			},
 			loadProfile() {
 				// 从本地令牌解析出当前用户信息。
@@ -825,6 +841,13 @@
 	.stall-arrow {
 		font-size: 20px;
 		color: #D8C6B8;
+	}
+
+	.stall-desc {
+		margin-top: 6px;
+		font-size: 12px;
+		line-height: 18px;
+		color: #7A6C60;
 	}
 
 	/* ---------- 餐厅选择面板 ---------- */
