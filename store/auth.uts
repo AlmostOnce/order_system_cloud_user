@@ -68,6 +68,12 @@ export function login(username: string, password: string, captchaId: string, cap
 				return
 			}
 
+			if (parseTokenPayload(accessToken) == null) {
+				clearTokens()
+				resolve('登录凭据格式不兼容，请确认认证服务已更新后重试')
+				return
+			}
+
 			// 双令牌齐全，写入本地存储，后续请求即携带该访问令牌。
 			saveTokens(accessToken, refreshToken)
 			// 勾选「记住账号」：只记用户名，不落盘密码。
@@ -145,8 +151,8 @@ export function logout(): Promise<void> {
  * @return 已登录返回 true
  */
 export function isLoggedIn(): boolean {
-	// 以访问令牌是否存在作为登录判据：令牌由 http 层统一注入请求。
-	return getAccessToken().length > 0
+	// 与业务页使用同一身份解析规则，避免登录页和首页互相跳转。
+	return currentUser() != null
 }
 
 /**
@@ -164,5 +170,10 @@ export function currentUser(): TokenPayload | null {
 		return null
 	}
 	// 解析令牌载荷得到身份信息；令牌非法时解析函数返回 null。
-	return parseTokenPayload(accessToken)
+	const user = parseTokenPayload(accessToken)
+	if (user == null) {
+		// 旧版数字标识或损坏凭据不能继续驱动自动跳转；保留记住的账号。
+		clearTokens()
+	}
+	return user
 }

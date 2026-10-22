@@ -1,7 +1,9 @@
 <template>
 	<view class="account-page">
 		<view class="mine-status" :style="'height:' + statusBarHeight + 'px'"></view>
-		<scroll-view class="account-scroll" scroll-y="true">
+		<scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!signingOut && (refreshing || (!profileLoading && !balanceLoading))" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+
 			<view class="mine-hero">
 				<text class="mine-eyebrow">校园食堂 · 账户中心</text>
 				<text class="mine-title">我的</text>
@@ -9,13 +11,12 @@
 			</view>
 			<view class="mine-content">
 				<button class="profile-card" aria-label="查看个人资料" @click="openProfile">
-					<view class="mine-avatar">
-						<image v-if="avatarUrl.length > 0" class="mine-avatar-image" :src="avatarUrl" mode="aspectFill"></image>
-						<text v-else class="mine-avatar-text">{{ username.substring(0, 1) }}</text>
+					<view class="mine-avatar" aria-label="预览头像" @click.stop="openAvatarPreview">
+						<business-image class="mine-avatar-image" :src="avatarUrl" kind="avatar"></business-image>
 					</view>
 					<view class="account-entry-body">
 						<text class="profile-name">{{ username }}</text>
-						<text class="profile-meta">{{ roleName }} · ID {{ userId }}</text>
+						<text class="profile-meta">{{ roleName }}</text>
 						<text class="profile-note">{{ email.length > 0 ? email : '查看个人资料' }}</text>
 					</view>
 					<view class="account-arrow"></view>
@@ -28,6 +29,7 @@
                         <button class="order-center-shortcut" @click="openPendingOrders"><view class="order-center-symbol"><view class="center-clock"></view><view class="center-clock-hand"></view></view><text class="order-center-label">待支付</text></button>
                         <button class="order-center-shortcut" @click="openActiveOrders"><view class="order-center-symbol"><view class="center-receipt"></view><view class="center-receipt-line"></view><view class="center-receipt-line center-receipt-line-two"></view></view><text class="order-center-label">进行中</text></button>
                         <button class="order-center-shortcut" @click="openCompletedOrders"><view class="order-center-symbol"><view class="center-clock"></view><view class="center-check"></view></view><text class="order-center-label">已完成</text></button>
+                        <button class="order-center-shortcut" @click="openCancelledOrders"><view class="order-center-symbol"><view class="center-clock"></view><view class="center-cross"></view><view class="center-cross center-cross-other"></view></view><text class="order-center-label">已取消</text></button>
                     </view>
                 </view>
                 <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">我的钱包</text>
@@ -43,14 +45,16 @@
 					<button class="account-entry" @click="openPayRecords"><view class="account-entry-icon"><view class="flow-stem"></view><view class="flow-tip flow-tip-out"></view></view><view class="account-entry-body"><text class="account-entry-title">消费记录</text><text class="account-entry-note">查看余额支付支出</text></view><view class="account-arrow"></view></button>
 				</view>
 
-				<text class="account-section-label">账号与安全</text>
+				<text v-if="roleCode == 'STALL_MANAGER' || roleCode == 'RESTAURANT_MANAGER'" class="account-section-label">窗口管理</text>
+                <view v-if="roleCode == 'STALL_MANAGER' || roleCode == 'RESTAURANT_MANAGER'" class="entry-group"><button class="account-entry" @click="openImageManagement"><view class="account-entry-icon"><view class="account-icon-line"></view><view class="account-icon-line"></view></view><view class="account-entry-body"><text class="account-entry-title">窗口与菜品图片</text><text class="account-entry-note">上传封面，维护菜品展示图片</text></view><view class="account-arrow"></view></button></view>
+                <text class="account-section-label">账号与安全</text>
 				<view class="entry-group">
 					<button class="account-entry" @click="openProfile"><view class="account-entry-icon"><view class="person-head"></view><view class="person-body"></view></view><view class="account-entry-body"><text class="account-entry-title">个人资料</text><text class="account-entry-note">用户名、联系方式与账号信息</text></view><view class="account-arrow"></view></button>
 					<view v-if="roleCode == 'CUSTOMER'" class="entry-divider"></view>
 					<button v-if="roleCode == 'CUSTOMER'" class="account-entry" @click="openPayPassword"><view class="account-entry-icon"><view class="lock-hoop"></view><view class="lock-body"></view></view><view class="account-entry-body"><text class="account-entry-title">支付密码</text><text class="account-entry-note">{{ payPasswordSet ? '修改独立支付密码' : '设置后可充值和使用余额' }}</text></view><view class="account-arrow"></view></button>
 				</view>
 				<view v-if="signOutConfirm" class="account-card"><text class="account-heading">确认退出登录？</text><text class="account-note">退出后需要重新登录才能查看账户。</text><button class="account-primary" :disabled="signingOut" @click="signOut"><text class="account-primary-text">{{ signingOut ? '退出中…' : '确认退出' }}</text></button><button class="account-link" :disabled="signingOut" @click="cancelSignOut"><text class="account-link-text">继续使用</text></button></view>
-				<button v-else class="signout-button" @click="confirmSignOut"><text class="signout-label">退出登录</text></button>
+				<button v-else class="signout-button" hover-class="signout-button-pressed" @click="confirmSignOut"><view class="signout-icon"><view class="signout-door"></view><view class="signout-shaft"></view><view class="signout-tip"></view></view><text class="signout-label">退出登录</text></button>
 				<text class="mine-footer">湖北经济学院 · 食堂管理中心</text>
 			</view>
 		</scroll-view>
@@ -58,15 +62,20 @@
 </template>
 
 <script lang="uts">
+    import BusinessImage from '../../components/business-image/business-image.uvue'
+    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 	import { logout as doLogout, isLoggedIn, currentUser } from '../../store/auth.uts'
 	import { fetchMyProfile, fetchMyBalance, walletPayload } from '../../api/wallet.uts'
 	import { HttpResult } from '../../common/http.uts'
 	import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts'
 	import { accountRoleLabel } from '../../common/account.uts'
+    import { openOrderList } from '../../common/order-navigation.uts'
 
 	export default {
+        components: { RefreshHeader, BusinessImage },
 		data() {
-			return { statusBarHeight: 0, username: '校园用户', roleName: '', roleCode: '', userId: 0,
+			return { refreshing: false, currentRefreshTime: '', profileLoading: false, statusBarHeight: 0, username: '校园用户', roleName: '', roleCode: '', userUuid: '',
 				email: '', avatarUrl: '', profileError: '', balanceLoading: false, balanceReady: false,
 				balanceText: '--', balanceError: '', payPasswordSet: false, signOutConfirm: false, signingOut: false }
 		},
@@ -76,16 +85,33 @@
 			const user = currentUser()
 			if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
 			this.username = user.username.length > 0 ? user.username : '校园用户'
-			this.userId = user.userId
+			this.userUuid = user.userUuid
 			this.roleCode = user.roleCode
 			this.roleName = accountRoleLabel(user.roleCode)
 			this.loadProfile()
 			if (this.roleCode == 'CUSTOMER') this.loadBalance()
 		},
 		methods: {
-			loadProfile() {
-				this.profileError = ''
-				fetchMyProfile().then((result: HttpResult) => {
+            refreshPage() {
+                if (this.refreshing || this.profileLoading || this.balanceLoading || this.signingOut) return
+                this.refreshing = true
+                const refreshStartedAt = Date.now()
+                this.currentRefreshTime = refreshTimeLabel(refreshStartedAt)
+                const tasks: Array<Promise<void>> = [this.loadProfile()]
+                if (this.roleCode == 'CUSTOMER') tasks.push(this.loadBalance())
+                Promise.all(tasks).then(() => {
+                    finishPullRefresh(refreshStartedAt, this.profileError.length == 0 && (this.roleCode != 'CUSTOMER' || this.balanceError.length == 0), (time: string) => {
+                        if (time.length > 0) this.currentRefreshTime = time
+                        this.refreshing = false
+                    })
+                }).catch(() => {
+                    finishPullRefresh(refreshStartedAt, false, (_time: string) => { this.refreshing = false })
+                })
+            },
+			loadProfile(): Promise<void> {
+				this.profileError = ''; this.profileLoading = true
+				return fetchMyProfile().then((result: HttpResult) => {
+                    this.profileLoading = false
 					const data = walletPayload(result)
 					if (data == null) { this.profileError = result.message.length > 0 ? result.message : '资料暂时无法获取，可进入个人资料重试'; return }
 					this.username = jsonString(data, 'username') ?? this.username
@@ -93,12 +119,12 @@
 					this.avatarUrl = jsonString(data, 'avatarUrl') ?? ''
 				})
 			},
-			loadBalance() {
-				if (this.balanceLoading) return
+			loadBalance(): Promise<void> {
+				if (this.balanceLoading) return Promise.resolve()
 				this.balanceLoading = true
 				this.balanceReady = false
 				this.balanceError = ''
-				fetchMyBalance().then((result: HttpResult) => {
+				return fetchMyBalance().then((result: HttpResult) => {
 					this.balanceLoading = false
 					const data = walletPayload(result)
 					if (data == null || jsonNumber(data, 'balance') == null) { this.balanceError = result.message.length > 0 ? result.message : '余额暂时无法获取'; return }
@@ -107,11 +133,14 @@
 					this.balanceReady = true
 				})
 			},
-			openOrders() { uni.navigateTo({ url: '/pages/order/list' }) },
-            openPendingOrders() { uni.navigateTo({ url: '/pages/order/list?filter=pending' }) },
-            openActiveOrders() { uni.navigateTo({ url: '/pages/order/list?filter=active' }) },
-            openCompletedOrders() { uni.navigateTo({ url: '/pages/order/list?filter=completed' }) },
-			openProfile() { uni.navigateTo({ url: '/pages/account/profile' }) },
+			openOrders() { openOrderList('all') },
+            openPendingOrders() { openOrderList('pending') },
+            openActiveOrders() { openOrderList('active') },
+            openCompletedOrders() { openOrderList('completed') },
+            openCancelledOrders() { openOrderList('cancelled') },
+			openImageManagement() { uni.navigateTo({ url: '/pages/manage/images' }) },
+            openAvatarPreview() { uni.navigateTo({ url: '/pages/account/profile?avatar=preview' }) },
+            openProfile() { uni.navigateTo({ url: '/pages/account/profile' }) },
 			openWallet() { uni.navigateTo({ url: '/pages/wallet/recharge' }) },
 			openAllRecords() { uni.navigateTo({ url: '/pages/wallet/records' }) },
 			openRechargeRecords() { uni.navigateTo({ url: '/pages/wallet/records?type=RECHARGE' }) },
@@ -152,11 +181,18 @@
 	.person-body { position: absolute; top: 17px; left: 8px; width: 16px; height: 9px; border-radius: 6px; border-width: 2px; border-style: solid; border-color: #C2410C; }
 	.lock-hoop { position: absolute; top: 6px; left: 11px; width: 10px; height: 10px; border-radius: 5px; border-width: 2px; border-style: solid; border-color: #C2410C; }
 	.lock-body { position: absolute; top: 14px; left: 8px; width: 16px; height: 12px; border-radius: 3px; background-color: #C2410C; }
-	.signout-button { display: flex; margin: 0; padding: 14px; border-width: 0; border-radius: 12px; background-color: #F5EAE0; align-items: center; }
-	.signout-label { font-size: 14px; line-height: 20px; color: #7A6C60; }
+	.signout-button { display: flex; flex-direction: row; width: 100%; min-height: 52px; margin: 4px 0 0 0; padding: 14px 20px; border-width: 1px; border-style: solid; border-color: #E8DCD2; border-radius: 16px; background-color: #FFFFFF; align-items: center; justify-content: center; }
+	.signout-button-pressed { background-color: #FDF0E8; border-color: #C2410C; }
+	.signout-label { margin-left: 10px; font-size: 15px; line-height: 22px; font-weight: 500; color: #7A6C60; }
+	.signout-icon { position: relative; flex-shrink: 0; width: 20px; height: 20px; }
+	.signout-door { position: absolute; left: 2px; top: 3px; width: 9px; height: 14px; border-width: 2px; border-style: solid; border-color: #7A6C60; border-right-width: 0; border-radius: 2px; }
+	.signout-shaft { position: absolute; left: 8px; top: 9px; width: 10px; height: 2px; background-color: #7A6C60; }
+	.signout-tip { position: absolute; left: 13px; top: 6px; width: 7px; height: 7px; border-top-width: 2px; border-top-style: solid; border-top-color: #7A6C60; border-right-width: 2px; border-right-style: solid; border-right-color: #7A6C60; transform: rotate(45deg); }
 	.mine-footer { margin-top: 22px; font-size: 11px; line-height: 18px; text-align: center; color: #A2968B; }
 
 	/* #ifdef WEB */
+	.account-page .signout-button { flex-direction: row; cursor: pointer; }
+	.signout-button:focus-visible { outline: 2px solid #C2410C; outline-offset: 3px; }
 	.account-page .profile-card { flex-direction: row; }
 	/* #endif */
 
@@ -181,4 +217,6 @@
     .account-page .order-center-heading, .account-page .order-center-shortcuts { flex-direction: row; }
     .order-center-all::after, .order-center-shortcut::after { border: none; }
     /* #endif */
+    .center-cross { position: absolute; left: 16px; top: 21px; width: 12px; height: 2px; border-radius: 1px; background-color: #C2410C; transform: rotate(45deg); }
+    .center-cross-other { transform: rotate(-45deg); }
 </style>

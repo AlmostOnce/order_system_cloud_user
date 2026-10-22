@@ -3,14 +3,14 @@ import { jsonArray, jsonNumber, jsonString, parseJsonObject } from './json.uts'
 export type CheckoutLine = { productId: number, productName: string, quantity: number, revision: string, unitPrice: number, lineAmount: number }
 export type CheckoutDraft = { key: string, windowId: number, windowName: string, remark: string, items: Array<CheckoutLine> }
 
-export function checkoutKey(userId: number): string { return 'order_pending_' + userId }
-export function cleanupKey(userId: number, orderId: number): string { return 'order_cleanup_' + userId + '_' + orderId }
+export function checkoutKey(userUuid: string): string { return 'order_pending_' + userUuid }
+export function cleanupKey(userUuid: string, orderId: number): string { return 'order_cleanup_' + userUuid + '_' + orderId }
 export function readStoredObject(key: string): UTSJSONObject | null {
     const raw = uni.getStorageSync(key)
     return typeof raw == 'string' ? parseJsonObject(raw as string) : null
 }
-export function readCheckout(userId: number): CheckoutDraft | null {
-    const raw = readStoredObject(checkoutKey(userId))
+export function readCheckout(userUuid: string): CheckoutDraft | null {
+    const raw = readStoredObject(checkoutKey(userUuid))
     if (raw == null) return null
     const key = jsonString(raw, 'key') ?? ''
     const windowId = jsonNumber(raw, 'windowId') ?? 0

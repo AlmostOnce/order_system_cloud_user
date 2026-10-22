@@ -9,8 +9,8 @@ export function accountRoleLabel(code: string): string {
 }
 
 /** 只持久化待确认充值的金额和请求标识，支付密码绝不保存。 */
-export function pendingRechargeKey(userId: number): string {
-	return 'wallet_pending_recharge_' + userId
+export function pendingRechargeKey(userUuid: string): string {
+	return 'wallet_pending_recharge_' + userUuid
 }
 
 export function newRechargeKey(): string {

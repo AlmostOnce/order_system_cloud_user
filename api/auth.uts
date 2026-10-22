@@ -47,7 +47,7 @@ export function login(username: string, password: string, captchaId: string, cap
  * @param username 用户名，2-64 个字符
  * @param phone 手机号，需匹配 1[3-9] 开头的 11 位号码
  * @param password 登录密码，6-64 个字符
- * @return 请求结果，成功时 data 内含 userId、username、roleCode
+ * @return 请求结果，成功时 data 内含 userUuid、username、roleCode
  */
 export function register(username: string, phone: string, password: string): Promise<HttpResult> {
 	// 按后端 RegisterRequest 契约组装请求体：用户名、手机号、登录密码。

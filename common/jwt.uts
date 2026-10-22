@@ -3,7 +3,7 @@ import { jsonArray, jsonNumber, jsonString, parseJsonObject } from './json.uts'
  * JWT 载荷解析工具。
  *
  * 后端签发的访问令牌是标准 JWT（RS256），载荷段为 base64url 编码的 JSON，
- * 其中 sub 为用户 ID、username 为用户名、roles 为角色编码数组。
+ * 其中 sub 为用户公开 UUID、username 为用户名、roles 为角色编码数组。
  * 登录接口只返回令牌、不返回用户资料，因此客户端从载荷中读取展示登录身份所需的信息。
  *
  * 说明：这里只做解码与解析，不做签名校验——签名合法性由服务端负责，
@@ -21,14 +21,14 @@ const B64_ALPHABET: string = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
  * 十进制的单个数字，用于把字符串形式的数字转换为数值。
  */
 // 同样用 indexOf 得到数字值，等价于 digit = ch - '0'。
-const DECIMAL_DIGITS: string = '0123456789'
+
 
 /**
  * 访问令牌中携带的用户身份信息。
  */
 export type TokenPayload = {
-	/** 用户 ID，对应令牌的 sub 声明。 */
-	userId: number
+	/** 用户公开 UUID，对应令牌的 sub 声明。 */
+	userUuid: string
 	/** 用户名，对应令牌的 username 声明。 */
 	username: string
 	/** 角色编码，取 roles 数组的第一个元素。 */
@@ -187,32 +187,6 @@ function utf8ToString(bytes: number[]): string {
 }
 
 /**
- * 把纯数字字符串转换为数值，非数字字符会被忽略。
- *
- * 不用 parseInt 是为了与 UTS 内置能力解耦，也避免进制与空白带来的歧义。
- *
- * @param text 数字字符串
- * @return 解析出的数值，无数字时返回 0
- */
-function toNumber(text: string): number {
-	// 累积转换结果，按十进制逐位进位。
-	let value = 0
-	// 逐字符读取，忽略非数字字符。
-	for (let i = 0; i < text.length; i++) {
-		// 查表得到当前字符对应的数值，非数字返回 -1。
-		const digit = DECIMAL_DIGITS.indexOf(text.charAt(i))
-		// 非数字字符直接跳过，避免污染结果。
-		if (digit < 0) {
-			continue
-		}
-		// 已有结果整体左移一位（乘以 10），再加上当前位的数值。
-		value = value * 10 + digit
-	}
-	// 返回最终数值，无任何数字时结果为 0。
-	return value
-}
-
-/**
  * 解析访问令牌载荷，取出登录身份信息。
  *
  * @param accessToken 访问令牌
@@ -238,7 +212,7 @@ export function parseTokenPayload(accessToken: string): TokenPayload | null {
 
 		// 取 sub 声明作为用户 ID；缺失说明载荷不完整。
 		const subject = jsonString(payload, 'sub')
-		if (subject == null) {
+		if (subject == null || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(subject)) {
 			return null
 		}
 
@@ -262,8 +236,8 @@ export function parseTokenPayload(accessToken: string): TokenPayload | null {
 
 		// 组装为强类型的身份信息对象返回。
 		const result: TokenPayload = {
-			// sub 是字符串形式的用户 ID，需转换为数值。
-			userId: toNumber(subject),
+			// sub 保持公开 UUID 字符串，禁止数字化转换。
+			userUuid: subject,
 			username: username,
 			roleCode: roleCode,
 			expiresAt: expiresAt
