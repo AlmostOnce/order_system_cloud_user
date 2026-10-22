@@ -1,0 +1,42 @@
+<template>
+    <view v-if="message.length > 0" :key="message" class="window-message">
+        <view class="message-track" :style="'animation-duration:' + durationSeconds + 's'">
+            <text class="message-copy">{{ message }}</text>
+            <text class="message-copy" aria-hidden="true">{{ message }}</text>
+        </view>
+    </view>
+</template>
+
+<script lang="uts">
+    export default {
+        props: { content: { type: String, default: '' } },
+        computed: {
+            message(): string {
+                return this.content.replace(/[\r\n\t]+/g, ' ').trim()
+            },
+            durationSeconds(): number {
+                // 长文相应延长周期，避免文字越多滚得越快。
+                return Math.max(12, this.message.length * 0.5 + 2)
+            }
+        }
+    }
+</script>
+
+<style>
+    .window-message { margin: 0 14px 12px 14px; padding: 0 12px; height: 40px; border-radius: 12px; background-color: #FDF0E8; overflow: hidden; }
+    .message-track { display: flex; flex-direction: row; align-items: center; height: 40px; width: max-content; animation-name: window-message-scroll; animation-timing-function: linear; animation-iteration-count: infinite; }
+    .message-copy { flex-shrink: 0; padding-right: 40px; font-size: 12px; line-height: 20px; color: #7A6C60; white-space: nowrap; }
+    @keyframes window-message-scroll {
+        from { transform: translateX(0); }
+        to { transform: translateX(-50%); }
+    }
+    /* #ifdef WEB */
+    .window-message:hover .message-track { animation-play-state: paused; }
+    @media (prefers-reduced-motion: reduce) {
+        .window-message { height: auto; padding-top: 10px; padding-bottom: 10px; }
+        .message-track { animation: none; width: 100%; height: auto; }
+        .message-copy { white-space: normal; padding-right: 0; }
+        .message-copy[aria-hidden="true"] { display: none; }
+    }
+    /* #endif */
+</style>

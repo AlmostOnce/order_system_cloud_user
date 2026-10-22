@@ -19,18 +19,14 @@
 			</view>
 		</view>
 
-		<!-- 加载中 -->
-		<view v-if="loading" class="state" :class="entered ? '' : 'state-pre'">
-			<text class="state-text">正在加载菜单…</text>
-		</view>
+        <scroll-view v-if="(loading && groups.length == 0) || loadError.length > 0" class="menu-state-scroll" scroll-y="true" :refresher-enabled="refreshing || (!loading && !stockLoading && !cartLoading && !mutating)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
 
-		<!-- 加载失败 -->
-		<view v-else-if="loadError.length > 0" class="state" :class="entered ? '' : 'state-pre'">
-			<text class="state-text">{{ loadError }}</text>
-			<view class="state-action" hover-class="state-action-hover" @click="loadMenu">
-				<text class="state-action-text">重新加载</text>
-			</view>
-		</view>
+            <view class="state" :class="entered ? '' : 'state-pre'">
+                <text class="state-text">{{ loading ? '正在加载菜单…' : loadError }}</text>
+
+            </view>
+        </scroll-view>
 
 		<!-- 菜单主体：左侧分类栏 + 右侧菜品列表，两侧各自独立滚动 -->
 		<view v-else class="catalog">
@@ -57,11 +53,15 @@
 			</scroll-view>
 
 			<!-- 右侧菜品区 -->
-			<scroll-view class="dishes" scroll-y="true">
-				<button class="stock-status" :disabled="stockLoading" aria-label="刷新菜品库存" hover-class="stock-status-hover" @click="loadStocks">
-					<text class="stock-status-text">{{ stockLoading ? '正在查询库存…' : (stockLoadError.length > 0 ? stockLoadError : '库存已更新 · 点击刷新') }}</text>
-				</button>
-				<text v-if="windowDescription.trim().length > 0" class="menu-description">{{ windowDescription }}</text>
+			<scroll-view class="dishes" scroll-y="true" :refresher-enabled="!mutating && (refreshing || (!loading && !stockLoading && !cartLoading))" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+
+				<view v-if="stockLoading || stockLoadError.length > 0" class="stock-status">
+					<text class="stock-status-text">{{ stockLoading ? '正在查询库存…' : stockLoadError }}</text>
+				</view>
+                <text v-if="cartLoadError.length > 0" class="stock-status-text">{{ cartLoadError }}</text>
+				<view class="menu-window-cover"><business-image :src="windowImageUrl" kind="window"></business-image></view>
+                <window-message :content="windowDescription"></window-message>
 				<!-- 空菜单 / 当前分类无菜品 -->
 				<view v-if="visibleGroups().length == 0" class="state state-inline">
 					<text class="state-text">{{ activeCategoryId == 0 ? '该档口暂无在售菜品' : '该分类暂无在售菜品' }}</text>
@@ -84,13 +84,7 @@
 						>
 							<!-- 缩略区：有图片用图片，没有图片用菜品名首字兜底 -->
 							<view class="dish-thumb">
-								<image
-									v-if="product.imageUrl.length > 0"
-									class="dish-img"
-									:src="product.imageUrl"
-									mode="aspectFill"
-								></image>
-								<text v-else class="dish-glyph">{{ productGlyph(product) }}</text>
+								<business-image :src="product.imageUrl" kind="product"></business-image>
 							</view>
 
 							<view class="dish-body">
@@ -164,7 +158,9 @@
 				</view>
 			</view>
 
-			<scroll-view class="sheet-list" scroll-y="true" :style="sheetListStyle()">
+			<scroll-view class="sheet-list" scroll-y="true" :refresher-enabled="!mutating && (refreshing || (!loading && !stockLoading && !cartLoading))" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" :style="sheetListStyle()" refresher-default-style="none" :refresher-threshold="72">
+                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+
 				<view v-if="cartItems.length == 0" class="sheet-empty">
 					<text class="sheet-empty-text">还没有选择菜品</text>
 				</view>
@@ -193,6 +189,10 @@
 </template>
 
 <script lang="uts">
+    import WindowMessage from '../../components/window-message/window-message.uvue'
+    import BusinessImage from '../../components/business-image/business-image.uvue'
+    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 	// 导入轻量提示：购物车操作反馈。
 	import { toast } from '../../common/feedback.uts'
 	// 导入登录态：令牌失效时回到登录页，避免带失效凭据反复请求。
@@ -265,6 +265,7 @@
 	}
 
 	export default {
+        components: { RefreshHeader, BusinessImage, WindowMessage },
 		data() {
 			// 两个列表共用独立的空数组，避免渲染初期出现 undefined。
 			const emptyGroups: Array<MenuGroup> = []
@@ -272,7 +273,7 @@
 			const emptyCartItems: Array<CartItem> = []
 			const emptyStocks: Array<ProductStock> = []
 
-			return {
+			return { refreshing: false, cartLoadError: '', currentRefreshTime: '', cartLoading: false,
 				// 状态栏高度（px），用于顶部占位。
 				statusBarHeight: 0,
 				// 当前档口 ID，来自路由参数，取不到时为 0（页面会展示失败态）。
@@ -282,7 +283,7 @@
 				stockRequestVersion: 0,
 				stockLoadError: '',
 				// 档口名称，接口返回前使用默认标题。
-				windowName: '',
+				windowName: '', windowImageUrl: '',
 				// 档口位置。
 				windowLocation: '',
 				// 窗口简介，未配置时不占展示空间。
@@ -347,6 +348,20 @@
 			}, 60)
 		},
 		methods: {
+            refreshPage() {
+                if (this.refreshing || this.loading || this.stockLoading || this.cartLoading || this.mutating) return
+                this.refreshing = true
+                const refreshStartedAt = Date.now()
+                this.currentRefreshTime = refreshTimeLabel(refreshStartedAt)
+                this.loadMenu().then(() => {
+                    finishPullRefresh(refreshStartedAt, this.loadError.length == 0 && this.stockLoadError.length == 0 && this.cartLoadError.length == 0, (time: string) => {
+                        if (time.length > 0) this.currentRefreshTime = time
+                        this.refreshing = false
+                    })
+                }).catch(() => {
+                    finishPullRefresh(refreshStartedAt, false, (_time: string) => { this.refreshing = false })
+                })
+            },
 			/**
 			 * 返回上一页；页面栈为空时退回首页，避免直接进入本页后无返回目标。
 			 */
@@ -362,7 +377,7 @@
 			/**
 			 * 拉取档口菜单，并把分类与未归类菜品统一成分组。
 			 */
-			loadMenu() {
+			loadMenu(): Promise<void> {
 				// 使页面上次查询失效，避免返回页面时旧请求覆盖新库存。
 				this.stockRequestVersion = this.stockRequestVersion + 1
 				this.stockLoading = false
@@ -371,7 +386,7 @@
 				if (this.windowId <= 0) {
 					this.loading = false
 					this.loadError = '档口参数缺失，请返回重新选择'
-					return
+					return Promise.resolve()
 				}
 
 				// 进入加载态并清掉上一次的错误文案。
@@ -380,7 +395,7 @@
 				// 归零卡片就绪标记，数据回来后再重播入场。
 				this.listReady = false
 
-				fetchWindowMenu(this.windowId).then((result: WindowMenuResult) => {
+				return fetchWindowMenu(this.windowId).then((result: WindowMenuResult) => {
 					// 菜单结果返回后统一结束加载态。
 					this.loading = false
 					// 请求失败时直接落到错误态。
@@ -398,6 +413,7 @@
 
 					// 写入档口基本信息，供头部展示。
 					this.windowName = menu.windowName
+                    this.windowImageUrl = menu.imageUrl
 					this.windowLocation = menu.location
 					this.windowDescription = menu.description
 
@@ -443,21 +459,20 @@
 					}, 60)
 
 					// 菜单就绪后同步购物车，保证数量与金额是服务端的最新值。
-					this.loadCart()
-					this.stockLoading = false
-					this.loadStocks()
+                    this.stockLoading = false
+                    return Promise.all([this.loadCart(), this.loadStocks()]).then(() => {})
 				})
 			},
 			/** 库存独立刷新，不沿用菜单缓存，也不因错误伪装成售罄。 */
-			loadStocks() {
+			loadStocks(): Promise<void> {
 				if (this.stockLoading || this.loading || this.loadError.length > 0 || this.windowId <= 0) {
-					return
+					return Promise.resolve()
 				}
 				this.stockLoading = true
 				this.stockLoadError = ''
 				this.stockRequestVersion = this.stockRequestVersion + 1
 				const requestVersion = this.stockRequestVersion
-				fetchWindowStocks(this.windowId).then((result: StockListResult) => {
+				return fetchWindowStocks(this.windowId).then((result: StockListResult) => {
 					if (requestVersion != this.stockRequestVersion) {
 						return
 					}
@@ -498,14 +513,17 @@
 			/**
 			 * 拉取购物车，并抽取当前窗口的数量与金额。
 			 */
-			loadCart() {
-				fetchCart().then((result: CartResult) => {
+			loadCart(): Promise<void> {
+                this.cartLoading = true; this.cartLoadError = ''
+				return fetchCart().then((result: CartResult) => {
+                    this.cartLoading = false
 					// 购物车为空时的统一展示值，避免每个分支重复构造。
 					const emptyEntries: Array<QuantityEntry> = []
 					const emptyItems: Array<CartItem> = []
 
 					// 购物车失败不阻塞点餐：清空展示值即可，后续增删会再次同步。
 					if (!result.ok) {
+                        this.cartLoadError = result.message.length > 0 ? result.message : '购物车获取失败'
 						this.cartQuantity = 0
 						this.cartAmount = 0
 						this.quantities = emptyEntries
@@ -516,6 +534,7 @@
 					// 购物车对象缺失时同样按空购物车处理。
 					const cart = result.cart
 					if (cart == null) {
+                        this.cartLoadError = '购物车响应异常'
 						this.cartQuantity = 0
 						this.cartAmount = 0
 						this.quantities = emptyEntries
@@ -682,7 +701,7 @@
 			 */
 			increaseById(productId: number, current: number) {
 				if (!this.canIncrease(productId)) {
-					toast(this.stockLoading ? '正在查询库存，请稍候' : (this.stockLoadError.length > 0 ? '库存查询失败，请刷新后重试' : '已达到当前可售数量'))
+					toast(this.stockLoading ? '正在查询库存，请稍候' : (this.stockLoadError.length > 0 ? '库存查询失败，请稍后重试' : '已达到当前可售数量'))
 					return
 				}
 				// 已有写操作进行中时忽略连续点击，避免并发请求互相覆盖。
@@ -995,16 +1014,6 @@
 		margin-top: 6px;
 		font-size: 12px;
 		color: #FFD9C7;
-	}
-
-	.menu-description {
-		margin: 14px 12px 0 12px;
-		padding: 12px;
-		border-radius: 10px;
-		background-color: #FDF6F0;
-		font-size: 12px;
-		line-height: 18px;
-		color: #7A6C60;
 	}
 
 	.stock-status {
@@ -1596,4 +1605,6 @@
 		font-size: 12px;
 		color: #A2968B;
 	}
+    .menu-state-scroll { flex: 1; min-height: 0; width: 100%; }
+    .menu-window-cover { height: 112px; margin: 8px 14px 12px 14px; border-radius: 14px; overflow: hidden; }
 </style>

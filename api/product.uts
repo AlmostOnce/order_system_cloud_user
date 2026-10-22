@@ -16,6 +16,7 @@ import { httpGet, HttpResult } from '../common/http.uts'
  * 档口摘要，对应后端 WindowSummaryVO。
  */
 export type WindowItem = {
+    imageUrl: string
 	/** 档口 ID。 */
 	windowId: number
 	/** 所属餐厅 ID，用于按餐厅筛选档口。 */
@@ -89,7 +90,8 @@ export function listActiveWindows(): Promise<WindowListResult> {
 				// 按后端字段名取值，缺失字段用默认值兜底，避免展示出 undefined。
 				const item: WindowItem = {
 					// 档口 ID，缺失时按 0 处理。
-					windowId: jsonNumber(raw, 'windowId') ?? 0,
+					imageUrl: jsonString(raw, 'imageUrl') ?? '',
+                    windowId: jsonNumber(raw, 'windowId') ?? 0,
 					// 所属餐厅 ID，用于本地按餐厅筛选。
 					restaurantId: jsonNumber(raw, 'restaurantId') ?? 0,
 					// 档口编码。

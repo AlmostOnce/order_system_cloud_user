@@ -50,6 +50,7 @@ export type MenuCategory = {
  * 档口菜单，对应后端 WindowMenuVO。
  */
 export type WindowMenu = {
+    imageUrl: string
 	/** 档口 ID。 */
 	windowId: number
 	/** 档口编码。 */
@@ -184,6 +185,7 @@ export function fetchWindowMenu(windowId: number): Promise<WindowMenuResult> {
 
 			// 组装强类型菜单快照。
 			const menu: WindowMenu = {
+                imageUrl: jsonString(menuObject, 'imageUrl') ?? '',
 				// 档口 ID。
 				windowId: jsonNumber(menuObject, 'windowId') ?? windowId,
 				// 档口编码。

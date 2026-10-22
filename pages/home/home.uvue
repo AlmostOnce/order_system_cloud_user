@@ -3,6 +3,9 @@
 		<!-- 状态栏底色与品牌区同色，避免顶部出现米色缝隙 -->
 		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
 
+        <scroll-view class="home-scroll" scroll-y="true" :refresher-enabled="roleCode == 'CUSTOMER' && !pickerVisible && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+
 		<!-- 品牌区：柿子橙实色块 + 半透明几何圆，控件与标题错峰上浮 -->
 		<view class="hero">
 			<view class="hero-shape hero-shape-1" :class="entered ? '' : 'hero-shape-1-pre'"></view>
@@ -42,9 +45,7 @@
 
 			<view v-else-if="loadError.length > 0" class="state" :class="entered ? '' : 'state-pre'">
 				<text class="state-text">{{ loadError }}</text>
-				<view class="state-action" hover-class="state-action-hover" @click="loadCatalog">
-					<text class="state-action-text">重新加载</text>
-				</view>
+
 			</view>
 
 			<view v-else-if="roleCode != 'CUSTOMER'" class="state" :class="entered ? '' : 'state-pre'">
@@ -67,12 +68,11 @@
 					@click="openWindow(item)"
 				>
 					<view class="stall-badge">
-						<text class="stall-badge-text">{{ stallGlyph(item) }}</text>
+						<business-image :src="item.imageUrl" kind="window"></business-image>
 					</view>
 					<view class="stall-body">
 						<text class="stall-name">{{ item.windowName }}</text>
 						<text class="stall-meta">{{ stallMeta(item) }}</text>
-						<text v-if="item.description.trim().length > 0" class="stall-desc">{{ stallDescription(item) }}</text>
 					</view>
 					<text class="stall-arrow">›</text>
 				</view>
@@ -82,6 +82,8 @@
 		<view class="footer">
 			<text class="footer-text">湖北经济学院 · 食堂管理中心</text>
 		</view>
+
+        </scroll-view>
 
 		<!-- 餐厅选择面板：遮罩淡入，面板自底部上滑；关闭时先回落再卸载节点 -->
 		<view
@@ -125,6 +127,9 @@
 </template>
 
 <script lang="uts">
+    import BusinessImage from '../../components/business-image/business-image.uvue'
+    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 	// 导入登录态：登录判断与当前身份读取（退出入口已迁到「我的」页）。
 	import { isLoggedIn, currentUser } from '../../store/auth.uts'
 	// 导入商品查询与结果类型：档口列表、餐厅列表及其返回结构。
@@ -181,13 +186,14 @@
 	}
 
 	export default {
+        components: { RefreshHeader, BusinessImage },
 		data() {
 			// 档口列表与可见档口共用同一份空数组，避免先渲染时出现 undefined。
 			const emptyWindows: Array<WindowItem> = []
 			// 餐厅列表的初始空数组。
 			const emptyRestaurants: Array<RestaurantItem> = []
 
-			return {
+			return { refreshing: false, currentRefreshTime: '',
 				// 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
 				statusBarHeight: 0,
 				// 顶部问候语：初值必须保持为空字符串，不能在此调用依赖当前时间的函数。
@@ -243,6 +249,20 @@
 			}, 60)
 		},
 		methods: {
+            refreshPage() {
+                if (this.refreshing || this.loading || this.pickerVisible || this.roleCode != 'CUSTOMER') return
+                this.refreshing = true
+                const refreshStartedAt = Date.now()
+                this.currentRefreshTime = refreshTimeLabel(refreshStartedAt)
+                this.loadCatalog().then(() => {
+                    finishPullRefresh(refreshStartedAt, this.loadError.length == 0, (time: string) => {
+                        if (time.length > 0) this.currentRefreshTime = time
+                        this.refreshing = false
+                    })
+                }).catch(() => {
+                    finishPullRefresh(refreshStartedAt, false, (_time: string) => { this.refreshing = false })
+                })
+            },
 			/**
 			 * 计算各档口卡片的入场延迟，让列表从上到下依次浮入。
 			 *
@@ -347,11 +367,6 @@
 				}
 				return restaurantName + ' · ' + location
 			},
-			/** 首页仅展示简介摘要，完整内容在点单页查看。 */
-			stallDescription(item: WindowItem): string {
-				const description = item.description.trim()
-				return description.length > 48 ? description.substring(0, 48) + '…' : description
-			},
 			loadProfile() {
 				// 从本地令牌解析出当前用户信息。
 				const profile = currentUser()
@@ -381,14 +396,14 @@
 			 * 先取餐厅再取档口：餐厅决定了选择面板的内容，接口语义上更靠前，
 			 * 顺序请求也让加载中的状态文案更直观。
 			 */
-			loadCatalog() {
+			loadCatalog(): Promise<void> {
 				// 进入加载态并清掉上一次的错误文案。
 				this.loading = true
 				this.loadError = ''
 				// 归零列表就绪标记，数据回来后再重播入场。
 				this.listReady = false
 
-				listActiveRestaurants().then((restaurantResult: RestaurantListResult) => {
+				return listActiveRestaurants().then((restaurantResult: RestaurantListResult) => {
 					// 餐厅列表失败时直接落到错误态，不再发起档口请求。
 					if (!restaurantResult.ok) {
 						this.loading = false
@@ -398,7 +413,7 @@
 					// 餐厅数据一次性写入，供选择面板渲染。
 					this.restaurants = restaurantResult.items
 
-					listActiveWindows().then((windowResult: WindowListResult) => {
+					return listActiveWindows().then((windowResult: WindowListResult) => {
 						// 档口结果返回后统一结束加载态。
 						this.loading = false
 						// 档口列表失败时落到错误态。
@@ -807,6 +822,8 @@
 	}
 
 	.stall-badge {
+        overflow: hidden;
+        flex-shrink: 0;
 		width: 44px;
 		height: 44px;
 		border-radius: 15px;
@@ -841,13 +858,6 @@
 	.stall-arrow {
 		font-size: 20px;
 		color: #D8C6B8;
-	}
-
-	.stall-desc {
-		margin-top: 6px;
-		font-size: 12px;
-		line-height: 18px;
-		color: #7A6C60;
 	}
 
 	/* ---------- 餐厅选择面板 ---------- */
@@ -960,4 +970,8 @@
 		font-size: 11px;
 		color: #C9BDB2;
 	}
+    .home-scroll { flex: 1; min-height: 0; width: 100%; }
+    /* #ifdef WEB */
+    .page { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+    /* #endif */
 </style>
