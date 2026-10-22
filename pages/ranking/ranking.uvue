@@ -1,0 +1,126 @@
+<template>
+    <view class="account-page ranking-page">
+        <view class="ranking-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="ranking-header">
+            <text class="ranking-kicker">校园食堂 · 人气之选</text>
+            <text class="ranking-title">排行榜</text>
+            <view class="ranking-heading-row"><text class="ranking-selected">销量榜</text><text class="ranking-scope">累计已支付 · TOP 50</text></view>
+        </view>
+        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-default-style="none" :refresher-threshold="72" refresher-background="#FDF6F0" @refresherrefresh="refreshPage">
+            <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            <view class="ranking-content">
+                <text class="ranking-intro">按菜品售出份数排名，看看大家都在吃什么</text>
+                <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
+                <view v-if="loading && !refreshing && items.length == 0" class="ranking-state"><text class="account-muted">正在加载销量榜…</text></view>
+                <view v-if="!loading && errorText.length == 0 && items.length == 0" class="ranking-state"><text class="account-heading">好味道，等你发现</text><text class="account-note">有菜品售出后，就会出现在这里。</text></view>
+                <view v-if="items.length > 0" class="ranking-list">
+                    <button v-for="item in items" :key="item.productId + ':' + item.windowId" class="ranking-row" :class="item.rank <= 3 ? 'ranking-row-leading' : ''" hover-class="ranking-row-pressed" :disabled="!canOrder" @click="openWindow(item)">
+                        <view class="ranking-number" :class="item.rank <= 3 ? 'ranking-number-leading' : ''"><text class="ranking-number-text">{{ item.rank < 10 ? '0' + item.rank : '' + item.rank }}</text></view>
+                        <view class="ranking-dish"><text class="ranking-dish-name">{{ item.productName }}</text><text class="ranking-window">{{ windowLabel(item.windowId) }}</text></view>
+                        <view class="ranking-sales"><view class="ranking-sales-value"><text class="ranking-count">{{ item.sales }}</text><text class="ranking-unit">份</text></view><text class="ranking-sales-label">累计售出</text></view>
+                    </button>
+                </view>
+                <text v-if="items.length > 0" class="ranking-note">待支付、已取消订单不计入</text>
+            </view>
+        </scroll-view>
+    </view>
+</template>
+
+<script lang="uts">
+    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
+    import { isLoggedIn, currentUser } from '../../store/auth.uts'
+    import { fetchSalesRanking, SalesRankItem, SalesRankResult } from '../../api/ranking.uts'
+    import { listActiveWindows, WindowItem, WindowListResult } from '../../api/product.uts'
+
+    export default {
+        components: { RefreshHeader },
+        data() {
+            const items: SalesRankItem[] = []
+            const windows: WindowItem[] = []
+            return { statusBarHeight: 0, loading: false, refreshing: false, currentRefreshTime: '', errorText: '', items: items, windows: windows, canOrder: false }
+        },
+        onShow() {
+            if (!isLoggedIn()) { uni.reLaunch({ url: '/pages/login/login' }); return }
+            this.statusBarHeight = uni.getWindowInfo().statusBarHeight
+            const user = currentUser()
+            this.canOrder = user != null && user.roleCode == 'CUSTOMER'
+            this.loadRanking()
+        },
+        methods: {
+            loadRanking(): Promise<void> {
+                if (this.loading) return Promise.resolve()
+                this.loading = true
+                this.errorText = ''
+                const ranking = fetchSalesRanking().then((result: SalesRankResult) => {
+                    if (!result.ok) { this.errorText = result.message.length > 0 ? result.message : '销量榜暂时无法获取'; return }
+                    this.items = result.items
+                })
+                const windows = this.canOrder ? listActiveWindows().then((result: WindowListResult) => {
+                    if (result.ok) this.windows = result.items
+                }) : Promise.resolve()
+                return Promise.all([ranking, windows]).then(() => { this.loading = false }).catch(() => {
+                    this.loading = false; this.errorText = '销量榜暂时无法获取，请稍后再试'
+                })
+            },
+            refreshPage() {
+                if (this.loading || this.refreshing) return
+                this.refreshing = true
+                const startedAt = Date.now()
+                this.currentRefreshTime = refreshTimeLabel(startedAt)
+                this.loadRanking().then(() => {
+                    finishPullRefresh(startedAt, this.errorText.length == 0, (time: string) => {
+                        if (time.length > 0) this.currentRefreshTime = time
+                        this.refreshing = false
+                    })
+                })
+            },
+            windowLabel(windowId: number): string {
+                for (let i = 0; i < this.windows.length; i++) {
+                    if (this.windows[i].windowId == windowId) return this.windows[i].windowName
+                }
+                return '食堂窗口'
+            },
+            openWindow(item: SalesRankItem) {
+                if (!this.canOrder) return
+                uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId })
+            }
+        }
+    }
+</script>
+
+<style>
+    @import '../../styles/account.css';
+    .ranking-status, .ranking-header { background-color: #E4572E; }
+    .ranking-header { padding: 20px 24px 0 24px; }
+    .ranking-kicker { font-size: 12px; line-height: 18px; color: #FFE3D6; }
+    .ranking-title { margin-top: 8px; font-size: 28px; line-height: 36px; font-weight: bold; color: #FFFFFF; }
+    .ranking-heading-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding-top: 22px; padding-bottom: 14px; }
+    .ranking-selected { font-size: 17px; line-height: 24px; font-weight: bold; color: #FFFFFF; }
+    .ranking-scope { font-size: 11px; line-height: 18px; color: #FFE3D6; }
+    .ranking-content { padding: 20px; }
+    .ranking-intro { margin-bottom: 16px; font-size: 12px; line-height: 20px; color: #7A6C60; }
+    .ranking-state { padding: 36px 20px; border-radius: 18px; background-color: #FFFFFF; }
+    .ranking-list { border-radius: 18px; overflow: hidden; background-color: #FFFFFF; }
+    .ranking-row { display: flex; flex-direction: row; align-items: center; width: 100%; min-height: 94px; margin: 0; padding: 18px 14px; border-width: 0; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #F4EBE4; border-radius: 0; background-color: #FFFFFF; text-align: left; }
+    .ranking-row-leading { background-color: #FFFAF6; }
+    .ranking-row-pressed { background-color: #FDF0E8; }
+    .ranking-number { flex-shrink: 0; width: 34px; margin-right: 12px; }
+    .ranking-number-text { font-size: 20px; line-height: 28px; font-weight: bold; color: #7A6C60; }
+    .ranking-number-leading .ranking-number-text { color: #C2410C; }
+    .ranking-dish { flex: 1; min-width: 0; }
+    .ranking-dish-name { font-size: 15px; line-height: 22px; font-weight: bold; color: #211C18; }
+    .ranking-window { margin-top: 5px; font-size: 11px; line-height: 18px; color: #7A6C60; }
+    .ranking-sales { flex-shrink: 0; margin-left: 10px; align-items: flex-end; }
+    .ranking-sales-value { display: flex; flex-direction: row; align-items: baseline; }
+    .ranking-count { font-size: 21px; line-height: 28px; font-weight: bold; color: #C2410C; }
+    .ranking-unit { margin-left: 3px; font-size: 11px; line-height: 18px; color: #7A6C60; }
+    .ranking-sales-label { font-size: 10px; line-height: 18px; color: #7A6C60; }
+    .ranking-note { margin-top: 18px; text-align: center; font-size: 11px; line-height: 18px; color: #7A6C60; }
+    /* #ifdef WEB */
+    .account-page .ranking-heading-row, .account-page .ranking-sales-value { flex-direction: row; }
+    .ranking-row { cursor: pointer; }
+    .ranking-row[disabled] { opacity: 1; cursor: default; }
+    .ranking-row:focus-visible { outline: 2px solid #C2410C; outline-offset: -3px; }
+    /* #endif */
+</style>

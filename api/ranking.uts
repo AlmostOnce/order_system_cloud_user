@@ -1,0 +1,31 @@
+import { httpGet, HttpResult } from '../common/http.uts'
+import { jsonObject, jsonArray, jsonString, jsonNumber } from '../common/json.uts'
+
+export type SalesRankItem = { rank: number, productId: number, windowId: number, productName: string, sales: number }
+export type SalesRankResult = { ok: boolean, message: string, items: SalesRankItem[] }
+
+export function fetchSalesRanking(): Promise<SalesRankResult> {
+    return httpGet('/orders/rankings/sales?limit=50', true).then((result: HttpResult): SalesRankResult => {
+        const empty: SalesRankItem[] = []
+        if (!result.ok || result.data == null) return { ok: false, message: result.message, items: empty }
+        const data = jsonObject(result.data, 'data')
+        const rows = data == null ? null : jsonArray(data, 'items')
+        if (rows == null) return { ok: false, message: '销量榜数据不完整，请稍后再试', items: empty }
+        const items: SalesRankItem[] = []
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i] == null) return { ok: false, message: '销量榜数据异常，请稍后再试', items: empty }
+            const row = rows[i] as UTSJSONObject
+            const productId = jsonNumber(row, 'productId') ?? 0
+            const windowId = jsonNumber(row, 'windowId') ?? 0
+            const sales = jsonNumber(row, 'sales') ?? 0
+            const rank = jsonNumber(row, 'rank') ?? 0
+            if (productId <= 0 || windowId <= 0 || sales <= 0 || rank != i + 1
+                || productId % 1 != 0 || windowId % 1 != 0 || sales % 1 != 0) {
+                return { ok: false, message: '销量榜数据异常，请稍后再试', items: empty }
+            }
+            items.push({ rank: rank, productId: productId, windowId: windowId,
+                productName: jsonString(row, 'productName') ?? '菜品', sales: sales })
+        }
+        return { ok: true, message: '', items: items }
+    })
+}

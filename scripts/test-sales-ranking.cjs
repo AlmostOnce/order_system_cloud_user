@@ -1,0 +1,44 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const ts=require('D:/HBuilderX/plugins/compile-typescript/node_modules/typescript/lib/typescript.js');
+const root=path.resolve(__dirname,'..'),cache=new Map();
+const uuid='12345678-1234-4234-8234-123456789abc';
+let response={ok:true,message:'',data:{data:{items:[{rank:1,productId:7,windowId:1,productName:'鸡肉饭',sales:14}]}}};
+let logged=true,requests=[],navigation=[],windowResolve=null,windowDeferred=false,finishCount=0;
+global.uni={getWindowInfo:()=>({statusBarHeight:24}),reLaunch:o=>navigation.push(o.url),navigateTo:o=>navigation.push(o.url)};
+function load(file){
+ file=path.resolve(root,file);
+ if(file.endsWith(path.normalize('common/http.uts')))return{httpGet:async(url,auth)=>{requests.push({url,auth});return response;}};
+ if(file.endsWith(path.normalize('store/auth.uts')))return{isLoggedIn:()=>logged,currentUser:()=>({userUuid:uuid,roleCode:'CUSTOMER'})};
+ if(file.endsWith(path.normalize('common/refresh.uts')))return{refreshTimeLabel:()=> '本次时间',finishPullRefresh:(start,ok,done)=>{finishCount++;done(ok?'完成时间':'');}};
+ if(file.endsWith(path.normalize('api/product.uts')))return{listActiveWindows:()=>windowDeferred?new Promise(resolve=>{windowResolve=resolve}):Promise.resolve({ok:true,items:[{windowId:1,windowName:'一楼窗口'}]})};
+ if(file.endsWith(path.normalize('components/refresh-header/refresh-header.uvue')))return{default:{}};
+ if(cache.has(file))return cache.get(file);
+ let source=fs.readFileSync(file,'utf8');if(file.endsWith('.uvue'))source=source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
+ assert.equal(ts.createSourceFile(file+'.ts',source,ts.ScriptTarget.Latest,true).parseDiagnostics.length,0,file);
+ const mod={exports:{}};cache.set(file,mod.exports);
+ new Function('require','module','exports',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(p=>load(path.resolve(path.dirname(file),p)),mod,mod.exports);
+ return mod.exports;
+}
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+(async()=>{
+ const api=load('api/ranking.uts');
+ assert.equal((await api.fetchSalesRanking()).items[0].sales,14);assert.deepEqual(requests[0],{url:'/orders/rankings/sales?limit=50',auth:true});
+ response={ok:true,data:{data:{items:[]}}};assert.deepEqual((await api.fetchSalesRanking()).items,[]);
+ response={ok:true,data:{data:{}}};assert.equal((await api.fetchSalesRanking()).ok,false);
+ response={ok:false,message:'暂不可用',data:null};assert.equal((await api.fetchSalesRanking()).message,'暂不可用');
+ response={ok:true,data:{data:{items:[{rank:2,productId:7,windowId:1,sales:14}]}}};assert.equal((await api.fetchSalesRanking()).ok,false);
+ response={ok:true,message:'',data:{data:{items:[{rank:1,productId:7,windowId:1,productName:'鸡肉饭',sales:14}]}}};
+ const page=load('pages/ranking/ranking.uvue').default;
+ const vm={...page.data()};for(const[name,method]of Object.entries(page.methods))vm[name]=method.bind(vm);
+ page.onShow.call(vm);await flush();assert.equal(vm.items.length,1);assert.equal(vm.windowLabel(1),'一楼窗口');
+ vm.openWindow(vm.items[0]);assert.equal(navigation.pop(),'/pages/menu/menu?windowId=1');
+ windowDeferred=true;vm.refreshPage();vm.refreshPage();await flush();assert.equal(vm.refreshing,true);assert.equal(finishCount,0);
+ windowResolve({ok:true,items:[]});await flush();assert.equal(vm.refreshing,false);assert.equal(finishCount,1);
+ windowDeferred=false;response={ok:false,message:'连接失败',data:null};await vm.loadRanking();assert.equal(vm.items.length,1,'refresh error keeps previous ranking');assert.equal(vm.errorText,'连接失败');
+ logged=false;page.onShow.call(vm);assert.equal(navigation.pop(),'/pages/login/login');
+ const config=JSON.parse(fs.readFileSync(path.join(root,'pages.json'),'utf8').replace(/\/\/[^\n]*/g,''));
+ assert.deepEqual(config.tabBar.list.map(x=>x.text),['首页','排行榜','我的']);
+ for(const tab of config.tabBar.list)for(const icon of ['iconPath','selectedIconPath'])assert.ok(fs.existsSync(path.join(root,tab[icon])));
+ assert.ok(config.pages.some(p=>p.path==='pages/ranking/ranking'));
+ console.log('Sales ranking UI checks passed: authenticated API, success/empty/error/malformed states, navigation, refresh waits for all requests, duplicate guard, old data preserved, login guard and three tab icons/routes.');
+})().catch(e=>{console.error(e);process.exitCode=1});
