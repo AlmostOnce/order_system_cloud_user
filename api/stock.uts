@@ -1,0 +1,41 @@
+import { jsonArray, jsonBoolean, jsonNumber } from '../common/json.uts'
+/** 商品服务聚合的实时库存；不直接访问库存内部接口。 */
+import { httpGet, HttpResult } from '../common/http.uts'
+
+export type ProductStock = {
+	productId: number
+	availableQty: number
+	configured: boolean
+}
+
+export type StockListResult = {
+	ok: boolean
+	message: string
+	items: Array<ProductStock>
+}
+
+export function fetchWindowStocks(windowId: number): Promise<StockListResult> {
+	return new Promise<StockListResult>((resolve) => {
+		httpGet('/products/windows/' + windowId + '/stocks', true).then((result: HttpResult) => {
+			if (!result.ok || result.data == null) {
+				resolve({ ok: false, message: '库存暂时无法查询，请点击重试', items: [] } as StockListResult)
+				return
+			}
+			const rawList = jsonArray(result.data, 'data')
+			if (rawList == null) {
+				resolve({ ok: false, message: '库存响应异常，请点击重试', items: [] } as StockListResult)
+				return
+			}
+			const items: Array<ProductStock> = []
+			for (let i = 0; i < rawList.length; i++) {
+				const raw = rawList[i] as UTSJSONObject
+				items.push({
+					productId: jsonNumber(raw, 'productId') ?? 0,
+					availableQty: jsonNumber(raw, 'availableQty') ?? 0,
+					configured: jsonBoolean(raw, 'configured') ?? false
+				} as ProductStock)
+			}
+			resolve({ ok: true, message: '', items: items } as StockListResult)
+		})
+	})
+}

@@ -1,0 +1,47 @@
+import { httpGet, httpPost, httpPatch, HttpResult } from '../common/http.uts'
+import { jsonObject, jsonArray, jsonNumber, jsonString } from '../common/json.uts'
+
+export type OrderLine = { productId: number, productName: string, quantity: number, unitPrice: number, lineAmount: number }
+export type CustomerOrder = { orderId: number, orderNo: string, windowId: number, totalAmount: number, status: string, remark: string, pickupCode: string, createdAt: string, items: Array<OrderLine> }
+
+export function orderPayload(result: HttpResult): UTSJSONObject | null {
+    return result.ok && result.data != null ? jsonObject(result.data, 'data') : null
+}
+
+export function parseOrder(data: UTSJSONObject): CustomerOrder | null {
+    const id = jsonNumber(data, 'orderId')
+    const amount = jsonNumber(data, 'totalAmount')
+    const status = jsonString(data, 'status') ?? ''
+    const windowId = jsonNumber(data, 'windowId') ?? 0
+    if (id == null || id <= 0 || amount == null || amount < 0 || windowId <= 0 || status.length == 0) return null
+    const items: Array<OrderLine> = []
+    const rows = jsonArray(data, 'items')
+    if (rows != null) {
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i]
+            if (row == null || typeof row != 'object' || Array.isArray(row)) return null
+            const raw = row as UTSJSONObject
+            const productId = jsonNumber(raw, 'productId') ?? 0
+            const quantity = jsonNumber(raw, 'quantity') ?? 0
+            const unit = jsonNumber(raw, 'unitPrice')
+            const line = jsonNumber(raw, 'lineAmount')
+            if (productId <= 0 || quantity <= 0 || unit == null || line == null || unit < 0 || line < 0) return null
+            items.push({ productId: productId, productName: jsonString(raw, 'productName') ?? '菜品', quantity: quantity, unitPrice: unit, lineAmount: line })
+        }
+    }
+    return { orderId: id, orderNo: jsonString(data, 'orderNo') ?? '', windowId: windowId, totalAmount: amount, status: status,
+        remark: jsonString(data, 'remark') ?? '', pickupCode: jsonString(data, 'pickupCode') ?? '', createdAt: jsonString(data, 'createdAt') ?? '', items: items }
+}
+
+export function createOrder(body: UTSJSONObject, key: string): Promise<HttpResult> { return httpPost('/orders', body, true, key) }
+export function fetchOrders(): Promise<HttpResult> { return httpGet('/orders/list', true) }
+export function fetchOrder(id: number): Promise<HttpResult> { return httpGet('/orders/' + id, true) }
+export function cancelOrder(id: number): Promise<HttpResult> { return httpPatch('/orders/' + id + '/cancel', null, true) }
+export function payOrder(id: number, password: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { orderId: id, channelCode: 'BALANCE', payPassword: password }
+    return httpPost('/payments', body, true)
+}
+export function fetchOrderPayment(id: number): Promise<HttpResult> { return httpGet('/payments/order/' + id, true) }
+export function cleanupOrderCart(id: number, snapshot: UTSJSONObject): Promise<HttpResult> {
+    return httpPost('/cart/orders/' + id + '/cleanup', snapshot, true)
+}

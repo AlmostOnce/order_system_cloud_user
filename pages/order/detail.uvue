@@ -1,0 +1,137 @@
+<template>
+    <view class="account-page account-secondary">
+        <view class="account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav"><button class="account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">订单详情</text></view>
+        <scroll-view class="account-scroll" scroll-y="true"><view class="account-content">
+            <view v-if="order != null" class="order-status-card">
+                <text class="order-status-label">{{ order!.status }}</text>
+                <text class="order-status-note">{{ order!.status == '待支付' ? (paymentSuccess ? '支付已成功，订单状态确认中，请刷新' : '完成支付后，窗口将收到你的订单') : (order!.status == '已取消' ? '订单已取消' : '请留意订单进度，到窗口取餐') }}</text>
+                <text v-if="order!.pickupCode.length > 0 && order!.status != '待支付' && order!.status != '已取消'" class="order-pickup">取餐码 {{ order!.pickupCode }}</text>
+            </view>
+            <view v-if="order != null" class="account-card">
+                <text class="account-heading">本次用餐</text>
+                <view v-for="item in order!.items" :key="item.productId" class="order-line"><view class="order-line-copy"><text class="order-line-name">{{ item.productName }}</text><text class="account-muted">¥{{ item.unitPrice.toFixed(2) }} × {{ item.quantity }}</text></view><text class="order-line-price">¥{{ item.lineAmount.toFixed(2) }}</text></view>
+                <view class="order-total"><text class="account-muted">订单金额</text><text class="order-total-price">¥{{ order!.totalAmount.toFixed(2) }}</text></view>
+                <text class="account-note">订单号 {{ order!.orderNo }}</text><text class="account-note">下单时间 {{ formatDate(order!.createdAt) }}</text>
+                <text v-if="order!.remark.length > 0" class="account-note">备注：{{ order!.remark }}</text>
+            </view>
+            <view v-if="order != null && order!.status == '待支付' && !paymentSuccess" class="account-card">
+                <text class="account-heading">余额支付</text>
+                <text class="account-note">可用余额 {{ balanceReady ? '¥' + balanceText : '--' }}</text>
+                <input v-if="balanceReady && payPasswordSet" class="account-input order-password" type="text" :password="true" v-model="payPassword" :maxlength="20" :disabled="paying || loading" placeholder="请输入支付密码" confirm-type="done" @confirm="pay" />
+                <button v-if="balanceReady && !payPasswordSet" class="account-primary" :disabled="paying" @click="openPassword"><text class="account-primary-text">先设置支付密码</text></button>
+                <button v-else class="account-primary" :disabled="paying || loading || !balanceReady || !paymentReady" :class="paying || loading || !balanceReady || !paymentReady ? 'account-disabled' : ''" @click="pay"><text class="account-primary-text">{{ paying ? '正在确认支付…' : '确认支付' }}</text></button>
+                <button class="account-link" :disabled="paying" @click="openRecharge"><text class="account-link-text">前往充值</text></button>
+                <text v-if="!paymentReady" class="account-note">支付状态暂未确认，请刷新后继续。</text>
+                <text v-if="paymentUncertain" class="account-note">上次支付结果待确认，请刷新或重试同一订单，避免重复操作。</text>
+                <view v-if="cancelConfirm"><text class="account-note">确认取消这个待支付订单？</text><button class="account-primary" :disabled="paying || cancelling || loading" @click="cancel"><text class="account-primary-text">{{ cancelling ? '正在取消…' : '确认取消订单' }}</text></button><button class="account-link" :disabled="cancelling" @click="keepOrder"><text class="account-link-text">保留订单</text></button></view>
+                <button v-else class="account-link" :disabled="paying || loading || !paymentReady || paymentUncertain" @click="askCancel"><text class="account-muted">取消订单</text></button>
+            </view>
+            <text v-if="loading" class="account-note">正在获取订单…</text>
+            <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
+            <text v-if="cleanupMessage.length > 0" class="account-note">{{ cleanupMessage }}</text>
+            <button class="account-link" :disabled="loading || paying || cancelling" @click="refresh"><text class="account-link-text">刷新订单状态</text></button>
+            <button class="account-link" :disabled="paying || cancelling" @click="openOrders"><text class="account-link-text">查看我的订单</text></button>
+        </view></scroll-view>
+    </view>
+</template>
+<script lang="uts">
+    import { CustomerOrder, fetchOrder, fetchOrderPayment, payOrder, cancelOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts'
+    import { fetchMyBalance, walletPayload } from '../../api/wallet.uts'
+    import { HttpResult } from '../../common/http.uts'
+    import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts'
+    import { readStoredObject, cleanupKey } from '../../common/checkout.uts'
+    import { currentUser } from '../../store/auth.uts'
+    import { backToAccount, accountDate } from '../../common/account.uts'
+    export default {
+        data() { return { statusBarHeight: 0, orderId: 0, userId: 0, order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' } },
+        onLoad(options: OnLoadOptions) { this.orderId = Number(options['orderId'] ?? '0') },
+        onShow() {
+            this.statusBarHeight = uni.getWindowInfo().statusBarHeight
+            const user = currentUser()
+            if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
+            if (user.roleCode != 'CUSTOMER') { uni.switchTab({ url: '/pages/home/home' }); return }
+            this.userId = user.userId; this.refresh(); this.retryCleanup()
+        },
+        onHide() { this.payPassword = '' },
+        onUnload() { this.payPassword = '' },
+        methods: {
+            goBack() { if (!this.paying && !this.cancelling) backToAccount() },
+            formatDate(value: string): string { return accountDate(value) },
+            openOrders() { uni.navigateTo({ url: '/pages/order/list' }) },
+            openRecharge() { uni.navigateTo({ url: '/pages/wallet/recharge' }) },
+            openPassword() { uni.navigateTo({ url: '/pages/account/pay-password' }) },
+            keepOrder() { this.cancelConfirm = false },
+            askCancel() { if (!this.paymentUncertain && this.paymentReady && !this.paying && !this.loading) this.cancelConfirm = true },
+            refresh() {
+                if (this.loading || this.paying || this.cancelling) return
+                if (!Number.isInteger(this.orderId) || this.orderId <= 0) { this.errorText = '订单编号无效'; return }
+                this.loading = true; this.errorText = ''; this.paymentReady = false; this.cancelConfirm = false
+                fetchOrder(this.orderId).then((result: HttpResult) => {
+                    const data = orderPayload(result)
+                    const order = data == null ? null : parseOrder(data)
+                    if (order == null) { this.loading = false; this.order = null; this.errorText = result.message.length > 0 ? result.message : '订单信息异常'; return }
+                    this.order = order
+                    if (order.status != '待支付') { this.loading = false; this.paymentReady = true; return }
+                    fetchOrderPayment(this.orderId).then((payment: HttpResult) => {
+                        const payData = orderPayload(payment)
+                        this.paymentSuccess = this.paymentSuccess || (payData != null && jsonString(payData, 'status') == 'SUCCESS')
+                        const status = payData == null ? '' : (jsonString(payData, 'status') ?? '')
+                        this.paymentReady = status == 'SUCCESS' || status == 'CREATED' || status == 'FAILED' || status == 'CLOSED' || payment.statusCode == 404
+                        if (this.paymentSuccess || status == 'FAILED' || status == 'CLOSED') this.paymentUncertain = false
+                        if (!this.paymentReady) this.errorText = '支付状态获取失败，请刷新后继续'
+                        this.loading = false
+                    })
+                    this.loadBalance()
+                })
+            },
+            loadBalance() {
+                this.balanceReady = false
+                fetchMyBalance().then((result: HttpResult) => {
+                    const data = walletPayload(result)
+                    if (data == null || jsonNumber(data, 'balance') == null) { this.errorText = result.message.length > 0 ? result.message : '余额获取失败，请刷新'; return }
+                    this.balanceText = (jsonNumber(data, 'balance') ?? 0).toFixed(2)
+                    this.payPasswordSet = jsonBoolean(data, 'payPasswordSet') ?? false; this.balanceReady = true
+                })
+            },
+            retryCleanup() {
+                const key = cleanupKey(this.userId, this.orderId)
+                const snapshot = readStoredObject(key)
+                if (snapshot == null) return
+                cleanupOrderCart(this.orderId, snapshot).then((result: HttpResult) => {
+                    if (result.ok) { uni.removeStorageSync(key); this.cleanupMessage = '' }
+                    else this.cleanupMessage = '订单已保留，购物车清理暂未完成。刷新本页可重试。'
+                })
+            },
+            pay() {
+                if (this.paying || this.loading || this.cancelling || !this.balanceReady || !this.paymentReady || this.paymentSuccess || this.order == null || this.order!.status != '待支付') return
+                if (!this.payPasswordSet) { this.openPassword(); return }
+                if (this.payPassword.length == 0) { this.errorText = '请输入支付密码'; return }
+                this.paying = true; this.errorText = ''; this.cancelConfirm = false
+                const password = this.payPassword; this.payPassword = ''
+                payOrder(this.orderId, password).then((result: HttpResult) => {
+                    this.paying = false
+                    const data = orderPayload(result)
+                    const success = data != null && jsonString(data, 'status') == 'SUCCESS'
+                    this.paymentUncertain = !success && (result.statusCode == 0 || result.statusCode >= 500 || result.ok)
+                    const message = success ? '' : (result.message.length > 0 ? result.message : '支付结果待确认，请刷新')
+                    if (success) this.paymentSuccess = true
+                    this.refresh(); this.errorText = message
+                })
+            },
+            cancel() {
+                if (!this.cancelConfirm || this.paying || this.cancelling || this.loading || !this.paymentReady || this.paymentSuccess || this.paymentUncertain) return
+                this.cancelling = true; this.errorText = ''
+                cancelOrder(this.orderId).then((result: HttpResult) => {
+                    this.cancelling = false; this.cancelConfirm = false
+                    if (!result.ok) { this.errorText = result.message; return }
+                    this.refresh()
+                })
+            }
+        }
+    }
+</script>
+<style>
+    @import '../../styles/account.css';
+    @import '../../styles/order.css';
+</style>

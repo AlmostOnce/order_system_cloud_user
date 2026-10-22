@@ -1,0 +1,41 @@
+import { jsonArray, jsonNumber, jsonString, parseJsonObject } from './json.uts'
+
+export type CheckoutLine = { productId: number, productName: string, quantity: number, revision: string, unitPrice: number, lineAmount: number }
+export type CheckoutDraft = { key: string, windowId: number, windowName: string, remark: string, items: Array<CheckoutLine> }
+
+export function checkoutKey(userId: number): string { return 'order_pending_' + userId }
+export function cleanupKey(userId: number, orderId: number): string { return 'order_cleanup_' + userId + '_' + orderId }
+export function readStoredObject(key: string): UTSJSONObject | null {
+    const raw = uni.getStorageSync(key)
+    return typeof raw == 'string' ? parseJsonObject(raw as string) : null
+}
+export function readCheckout(userId: number): CheckoutDraft | null {
+    const raw = readStoredObject(checkoutKey(userId))
+    if (raw == null) return null
+    const key = jsonString(raw, 'key') ?? ''
+    const windowId = jsonNumber(raw, 'windowId') ?? 0
+    const items = jsonArray(raw, 'items')
+    if (key.length == 0 || windowId <= 0 || items == null || items.length == 0 || items.length > 100) return null
+    const lines: Array<CheckoutLine> = []
+    for (let i = 0; i < items.length; i++) {
+        if (items[i] == null || typeof items[i] != 'object' || Array.isArray(items[i])) return null
+        const row = items[i] as UTSJSONObject
+        const id = jsonNumber(row, 'productId') ?? 0
+        const qty = jsonNumber(row, 'quantity') ?? 0
+        const rev = jsonString(row, 'revision') ?? ''
+        if (id <= 0 || qty <= 0 || rev.length == 0) return null
+        lines.push({ productId: id, productName: jsonString(row, 'productName') ?? '菜品', quantity: qty, revision: rev,
+            unitPrice: jsonNumber(row, 'unitPrice') ?? 0, lineAmount: jsonNumber(row, 'lineAmount') ?? 0 })
+    }
+    return { key: key, windowId: windowId, windowName: jsonString(raw, 'windowName') ?? '', remark: jsonString(raw, 'remark') ?? '', items: lines }
+}
+export function orderBody(draft: CheckoutDraft): UTSJSONObject {
+    const items: Array<UTSJSONObject> = []
+    for (let i = 0; i < draft.items.length; i++) items.push({ productId: draft.items[i].productId, quantity: draft.items[i].quantity })
+    return { windowId: draft.windowId, remark: draft.remark, items: items }
+}
+export function cleanupBody(draft: CheckoutDraft): UTSJSONObject {
+    const items: Array<UTSJSONObject> = []
+    for (let i = 0; i < draft.items.length; i++) items.push({ productId: draft.items[i].productId, quantity: draft.items[i].quantity, revision: draft.items[i].revision })
+    return { windowId: draft.windowId, items: items }
+}
