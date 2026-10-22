@@ -1,3 +1,4 @@
+import { jsonArray, jsonNumber, jsonString, parseJsonObject } from './json.uts'
 /**
  * JWT 载荷解析工具。
  *
@@ -230,10 +231,13 @@ export function parseTokenPayload(accessToken: string): TokenPayload | null {
 
 	try {
 		// 把载荷文本解析为对象，非法 JSON 会抛异常由下面的 catch 兜住。
-		const payload = JSON.parse(payloadText) as UTSJSONObject
+		const payload = parseJsonObject(payloadText)
+		if (payload == null) {
+			return null
+		}
 
 		// 取 sub 声明作为用户 ID；缺失说明载荷不完整。
-		const subject = payload.getString('sub')
+		const subject = jsonString(payload, 'sub')
 		if (subject == null) {
 			return null
 		}
@@ -241,7 +245,7 @@ export function parseTokenPayload(accessToken: string): TokenPayload | null {
 		// roles 是数组，角色编码取第一个元素；缺失时留空，由页面做兜底展示。
 		let roleCode = ''
 		// 读取角色数组，可能不存在。
-		const roles = payload.getArray('roles')
+		const roles = jsonArray(payload, 'roles')
 		if (roles != null && roles.length > 0) {
 			// 只取第一个角色编码，本项目每个用户仅一个角色。
 			const firstRole = roles[0]
@@ -252,9 +256,9 @@ export function parseTokenPayload(accessToken: string): TokenPayload | null {
 		}
 
 		// 用户名缺失时留空；exp 缺失时按 0 处理（视为无法判定有效期）。
-		const username = payload.getString('username') ?? ''
+		const username = jsonString(payload, 'username') ?? ''
 		// exp 是 Unix 秒级时间戳，供预刷新判断令牌是否临近过期。
-		const expiresAt = payload.getNumber('exp') ?? 0
+		const expiresAt = jsonNumber(payload, 'exp') ?? 0
 
 		// 组装为强类型的身份信息对象返回。
 		const result: TokenPayload = {

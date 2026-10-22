@@ -1,0 +1,45 @@
+/** 使用跨端支持的下标访问，兼容 Web 普通对象与原生 UTSJSONObject。 */
+export function jsonString(source: UTSJSONObject, key: string): string | null {
+	const value = source[key]
+	return typeof value == 'string' ? value as string : null
+}
+
+export function jsonNumber(source: UTSJSONObject, key: string): number | null {
+	const value = source[key]
+	return typeof value == 'number' ? value as number : null
+}
+
+export function jsonBoolean(source: UTSJSONObject, key: string): boolean | null {
+	const value = source[key]
+	return typeof value == 'boolean' ? value as boolean : null
+}
+
+export function jsonObject(source: UTSJSONObject, key: string): UTSJSONObject | null {
+	const value = source[key]
+	if (value == null || typeof value != 'object' || Array.isArray(value)) {
+		return null
+	}
+	return value as UTSJSONObject
+}
+
+export function jsonArray(source: UTSJSONObject, key: string): Array<any> | null {
+	const value = source[key]
+	return Array.isArray(value) ? value as Array<any> : null
+}
+
+/** 无效、空白或非对象 JSON 都返回 null，不向请求回调抛异常。 */
+export function parseJsonObject(text: string): UTSJSONObject | null {
+	const content = text.trim()
+	if (content.length < 2 || !content.startsWith('{') || !content.endsWith('}')) {
+		return null
+	}
+	try {
+		const value = JSON.parse(content)
+		if (value == null || typeof value != 'object' || Array.isArray(value)) {
+			return null
+		}
+		return value as UTSJSONObject
+	} catch (error) {
+		return null
+	}
+}

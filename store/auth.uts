@@ -1,3 +1,4 @@
+import { jsonObject, jsonString } from '../common/json.uts'
 /**
  * 登录态管理。
  *
@@ -48,7 +49,7 @@ export function login(username: string, password: string, captchaId: string, cap
 			}
 
 			// 取 data 字段（登录 VO），其中应包含双令牌。
-			const rawPayload = envelope.getJSON('data')
+			const rawPayload = jsonObject(envelope, 'data')
 			// 缺 data 时无法落盘凭据，按失败提示。
 			if (rawPayload == null) {
 				resolve('登录响应缺少令牌，请稍后重试')
@@ -58,9 +59,9 @@ export function login(username: string, password: string, captchaId: string, cap
 			// data 是 any，断言为对象后按字段读取。
 			const payload = rawPayload as UTSJSONObject
 			// 取出访问令牌。
-			const accessToken = payload.getString('accessToken') ?? ''
+			const accessToken = jsonString(payload, 'accessToken') ?? ''
 			// 取出刷新令牌。
-			const refreshToken = payload.getString('refreshToken') ?? ''
+			const refreshToken = jsonString(payload, 'refreshToken') ?? ''
 			// 任一令牌缺失都说明登录未真正完成，不能落盘。
 			if (accessToken.length == 0 || refreshToken.length == 0) {
 				resolve('登录响应缺少令牌，请稍后重试')

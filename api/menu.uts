@@ -1,3 +1,4 @@
+import { jsonArray, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
 /**
  * 档口菜单（点餐详情）接口。
  *
@@ -55,6 +56,8 @@ export type WindowMenu = {
 	windowCode: string
 	/** 档口名称。 */
 	windowName: string
+	/** 窗口简介。 */
+	description: string
 	/** 档口位置。 */
 	location: string
 	/** 启用的分类，含空分类。 */
@@ -85,19 +88,19 @@ function toProduct(raw: UTSJSONObject): MenuProduct {
 	// 逐字段读取，缺失字段用类型安全的默认值兜底，避免页面出现 undefined。
 	const product: MenuProduct = {
 		// 菜品 ID，缺失按 0 处理。
-		productId: raw.getNumber('productId') ?? 0,
+		productId: jsonNumber(raw, 'productId') ?? 0,
 		// 菜品编码。
-		productCode: raw.getString('productCode') ?? '',
+		productCode: jsonString(raw, 'productCode') ?? '',
 		// 菜品名称。
-		productName: raw.getString('productName') ?? '',
+		productName: jsonString(raw, 'productName') ?? '',
 		// 菜品描述。
-		description: raw.getString('description') ?? '',
+		description: jsonString(raw, 'description') ?? '',
 		// 图片地址，可能为空，页面据此决定是否展示图片区。
-		imageUrl: raw.getString('imageUrl') ?? '',
+		imageUrl: jsonString(raw, 'imageUrl') ?? '',
 		// 价格，缺失按 0 处理。
-		price: raw.getNumber('price') ?? 0,
+		price: jsonNumber(raw, 'price') ?? 0,
 		// 排序值。
-		sortOrder: raw.getNumber('sortOrder') ?? 0
+		sortOrder: jsonNumber(raw, 'sortOrder') ?? 0
 	}
 	// 返回转换后的菜品。
 	return product
@@ -150,7 +153,7 @@ export function fetchWindowMenu(windowId: number): Promise<WindowMenuResult> {
 			}
 
 			// data 是菜单对象，缺失说明档口不存在或已停用。
-			const rawMenu = envelope.getJSON('data')
+			const rawMenu = jsonObject(envelope, 'data')
 			if (rawMenu == null) {
 				const missing: WindowMenuResult = { ok: false, message: '该档口暂无菜单', menu: null }
 				resolve(missing)
@@ -161,19 +164,19 @@ export function fetchWindowMenu(windowId: number): Promise<WindowMenuResult> {
 			const menuObject = rawMenu as UTSJSONObject
 			// 读取分类数组，逐个转换分类与其下菜品。
 			const categories: Array<MenuCategory> = []
-			const rawCategories = menuObject.getArray('categories')
+			const rawCategories = jsonArray(menuObject, 'categories')
 			if (rawCategories != null) {
 				for (let i = 0; i < rawCategories.length; i++) {
 					const rawCategory = rawCategories[i] as UTSJSONObject
 					const category: MenuCategory = {
 						// 分类 ID。
-						categoryId: rawCategory.getNumber('categoryId') ?? 0,
+						categoryId: jsonNumber(rawCategory, 'categoryId') ?? 0,
 						// 分类名称。
-						categoryName: rawCategory.getString('categoryName') ?? '',
+						categoryName: jsonString(rawCategory, 'categoryName') ?? '',
 						// 分类排序值。
-						sortOrder: rawCategory.getNumber('sortOrder') ?? 0,
+						sortOrder: jsonNumber(rawCategory, 'sortOrder') ?? 0,
 						// 分类下的菜品列表。
-						products: toProductList(rawCategory.getArray('products'))
+						products: toProductList(jsonArray(rawCategory, 'products'))
 					}
 					categories.push(category)
 				}
@@ -182,17 +185,19 @@ export function fetchWindowMenu(windowId: number): Promise<WindowMenuResult> {
 			// 组装强类型菜单快照。
 			const menu: WindowMenu = {
 				// 档口 ID。
-				windowId: menuObject.getNumber('windowId') ?? windowId,
+				windowId: jsonNumber(menuObject, 'windowId') ?? windowId,
 				// 档口编码。
-				windowCode: menuObject.getString('windowCode') ?? '',
+				windowCode: jsonString(menuObject, 'windowCode') ?? '',
 				// 档口名称。
-				windowName: menuObject.getString('windowName') ?? '',
+				windowName: jsonString(menuObject, 'windowName') ?? '',
+				// 窗口简介，未填写时不展示简介区域。
+				description: jsonString(menuObject, 'description') ?? '',
 				// 档口位置。
-				location: menuObject.getString('location') ?? '',
+				location: jsonString(menuObject, 'location') ?? '',
 				// 分类列表。
 				categories: categories,
 				// 未归类菜品。
-				uncategorizedProducts: toProductList(menuObject.getArray('uncategorizedProducts'))
+				uncategorizedProducts: toProductList(jsonArray(menuObject, 'uncategorizedProducts'))
 			}
 
 			// 返回成功结果。

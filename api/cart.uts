@@ -1,3 +1,4 @@
+import { jsonArray, jsonBoolean, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
 /**
  * 购物车服务接口。
  *
@@ -105,25 +106,25 @@ function toItem(raw: UTSJSONObject): CartItem {
 	// 逐字段读取，缺失字段用类型安全的默认值兜底，页面无需再判空。
 	const item: CartItem = {
 		// 菜品 ID。
-		productId: raw.getNumber('productId') ?? 0,
+		productId: jsonNumber(raw, 'productId') ?? 0,
 		// 菜品名称。
-		productName: raw.getString('productName') ?? '',
+		productName: jsonString(raw, 'productName') ?? '',
 		// 菜品编码。
-		productCode: raw.getString('productCode') ?? '',
+		productCode: jsonString(raw, 'productCode') ?? '',
 		// 购买数量。
-		quantity: raw.getNumber('quantity') ?? 0,
+		quantity: jsonNumber(raw, 'quantity') ?? 0,
 		// 勾选状态，缺失按未勾选处理，避免误结算。
-		checked: raw.getBoolean('checked') ?? false,
+		checked: jsonBoolean(raw, 'checked') ?? false,
 		// 条目版本。
-		revision: raw.getString('revision') ?? '',
+		revision: jsonString(raw, 'revision') ?? '',
 		// 是否可结算，缺失按不可售处理，避免把失效菜品算进金额。
-		available: raw.getBoolean('available') ?? false,
+		available: jsonBoolean(raw, 'available') ?? false,
 		// 不可售原因。
-		unavailableReason: raw.getString('unavailableReason') ?? '',
+		unavailableReason: jsonString(raw, 'unavailableReason') ?? '',
 		// 单价，后端可能返回 null，统一折算为 0。
-		unitPrice: raw.getNumber('unitPrice') ?? 0,
+		unitPrice: jsonNumber(raw, 'unitPrice') ?? 0,
 		// 行金额，后端可能返回 null，统一折算为 0。
-		lineAmount: raw.getNumber('lineAmount') ?? 0
+		lineAmount: jsonNumber(raw, 'lineAmount') ?? 0
 	}
 	// 返回转换后的条目。
 	return item
@@ -158,7 +159,7 @@ function toItemList(rawList: Array<any> | null): Array<CartItem> {
  */
 function parseCart(envelope: UTSJSONObject): CartData | null {
 	// data 是购物车对象，缺失说明响应异常。
-	const rawCart = envelope.getJSON('data')
+	const rawCart = jsonObject(envelope, 'data')
 	if (rawCart == null) {
 		return null
 	}
@@ -167,19 +168,19 @@ function parseCart(envelope: UTSJSONObject): CartData | null {
 
 	// 解析按窗口分组的分组列表。
 	const windows: Array<CartWindow> = []
-	const rawWindows = cartObject.getArray('windows')
+	const rawWindows = jsonArray(cartObject, 'windows')
 	if (rawWindows != null) {
 		for (let i = 0; i < rawWindows.length; i++) {
 			const rawWindow = rawWindows[i] as UTSJSONObject
 			const window: CartWindow = {
 				// 窗口 ID。
-				windowId: rawWindow.getNumber('windowId') ?? 0,
+				windowId: jsonNumber(rawWindow, 'windowId') ?? 0,
 				// 窗口启用状态。
-				windowActive: rawWindow.getBoolean('windowActive') ?? false,
+				windowActive: jsonBoolean(rawWindow, 'windowActive') ?? false,
 				// 窗口内条目。
-				items: toItemList(rawWindow.getArray('items')),
+				items: toItemList(jsonArray(rawWindow, 'items')),
 				// 本窗口已勾选金额。
-				checkedAmount: rawWindow.getNumber('checkedAmount') ?? 0
+				checkedAmount: jsonNumber(rawWindow, 'checkedAmount') ?? 0
 			}
 			windows.push(window)
 		}
@@ -190,11 +191,11 @@ function parseCart(envelope: UTSJSONObject): CartData | null {
 		// 按窗口分组。
 		windows: windows,
 		// 全部条目数量合计。
-		totalQuantity: cartObject.getNumber('totalQuantity') ?? 0,
+		totalQuantity: jsonNumber(cartObject, 'totalQuantity') ?? 0,
 		// 已勾选且可售数量合计。
-		checkedQuantity: cartObject.getNumber('checkedQuantity') ?? 0,
+		checkedQuantity: jsonNumber(cartObject, 'checkedQuantity') ?? 0,
 		// 已勾选且可售金额合计。
-		checkedAmount: cartObject.getNumber('checkedAmount') ?? 0
+		checkedAmount: jsonNumber(cartObject, 'checkedAmount') ?? 0
 	}
 	// 返回解析结果。
 	return cart

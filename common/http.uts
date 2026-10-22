@@ -1,3 +1,4 @@
+import { jsonObject, jsonString, parseJsonObject } from './json.uts'
 /**
  * HTTP 请求底座。
  *
@@ -106,19 +107,28 @@ function parseResponse(statusCode: number, raw: any): HttpResult {
 		return failureResult(transportErrorMessage(statusCode), statusCode)
 	}
 
-	// 平台返回的是 any，需显式断言为对象后才能按字段读取。
-	const envelope = raw as UTSJSONObject
+	// 请求统一按文本接收，在这里安全解析；也兼容已解析的对象。
+	let envelope: UTSJSONObject | null = null
+	if (typeof raw == 'string') {
+		envelope = parseJsonObject(raw as string)
+	} else if (typeof raw == 'object' && !Array.isArray(raw)) {
+		envelope = raw as UTSJSONObject
+	}
+	if (envelope == null) {
+		return failureResult(statusCode >= 200 && statusCode < 300
+			? '服务器返回的数据格式异常，请稍后重试' : transportErrorMessage(statusCode), statusCode)
+	}
 	// 取统一响应体的业务码；字段缺失时按空串处理。
-	const code = envelope.getString('code') ?? ''
+	const code = jsonString(envelope, 'code') ?? ''
 	// 业务码等于成功码才算真正成功，不单看 HTTP 状态。
-	if (code == SUCCESS_CODE) {
+	if (statusCode >= 200 && statusCode < 300 && code == SUCCESS_CODE) {
 		return successResult(envelope, statusCode)
 	}
 
 	// 业务失败时后端都会带统一响应体，message 已是可直接展示的文案
 	// （如账密错误返回「用户名或密码错误」）。必须先取后端 message，
 	// 否则会被 401 等状态码的通用提示覆盖，把登录失败误报成登录过期。
-	const businessMessage = envelope.getString('message')
+	const businessMessage = jsonString(envelope, 'message')
 	// 后端给出了非空文案时优先透传，保留最准确的错误语义。
 	if (businessMessage != null && businessMessage.length > 0) {
 		return failureResult(businessMessage, statusCode)
@@ -134,16 +144,19 @@ function parseResponse(statusCode: number, raw: any): HttpResult {
  * @param needAuth 是否需要携带 Bearer 令牌
  * @return 请求头
  */
-function buildHeader(needAuth: boolean): UTSJSONObject {
+function buildHeader(needAuth: boolean, idempotencyKey: string = ''): UTSJSONObject {
 	// 请求一律按 JSON 提交，后端接口均以 JSON 作为请求体格式。
 	const header: UTSJSONObject = { 'Content-Type': 'application/json' }
+	if (idempotencyKey.length > 0) {
+		header['Idempotency-Key'] = idempotencyKey
+	}
 	// 仅需要鉴权的请求才注入令牌，免登录接口不携带过期令牌。
 	if (needAuth) {
 		// 读取本地访问令牌。
 		const accessToken = getAccessToken()
 		// 有令牌时才拼装 Authorization 头，避免发送空 Bearer。
 		if (accessToken.length > 0) {
-			header.set('Authorization', 'Bearer ' + accessToken)
+			header['Authorization'] = 'Bearer ' + accessToken
 		}
 	}
 	// 返回最终请求头。
@@ -161,7 +174,8 @@ function buildHeader(needAuth: boolean): UTSJSONObject {
 function postOnce(
 	path: string,
 	body: UTSJSONObject | null,
-	needAuth: boolean
+	needAuth: boolean,
+	idempotencyKey: string = ''
 ): Promise<HttpResult> {
 	// 用 Promise 包住回调式请求，把 uni.request 的回调结果统一为 Promise 结果。
 	return new Promise<HttpResult>((resolve) => {
@@ -171,13 +185,13 @@ function postOnce(
 			// 固定使用 POST 字面量，避免把 method 作为字符串参数带来的类型问题。
 			method: 'POST',
 			// 请求头按是否需要鉴权动态拼装。
-			header: buildHeader(needAuth),
+			header: buildHeader(needAuth, idempotencyKey),
 			// POST 请求体，允许为空对象以外的 null（如无请求体接口）。
 			data: body,
 			// 使用全局统一超时时间。
 			timeout: API_TIMEOUT,
-			// 声明为 json 后由 uni 完成一次 JSON.parse，小程序与 App 行为一致。
-			dataType: 'json',
+			// 按文本接收，避免空白或非 JSON 响应在平台自动解析时抛异常。
+			dataType: 'text',
 			success: (res) => {
 				// 请求已到达服务端，按状态码与业务码解析统一响应体。
 				resolve(parseResponse(res.statusCode, res.data))
@@ -209,8 +223,8 @@ function getOnce(path: string, needAuth: boolean): Promise<HttpResult> {
 			header: buildHeader(needAuth),
 			// 使用全局统一超时时间。
 			timeout: API_TIMEOUT,
-			// 声明为 json 后由 uni 完成一次 JSON.parse，小程序与 App 行为一致。
-			dataType: 'json',
+			// 按文本接收，避免空白或非 JSON 响应在平台自动解析时抛异常。
+			dataType: 'text',
 			success: (res) => {
 				// 请求已到达服务端，按状态码与业务码解析统一响应体。
 				resolve(parseResponse(res.statusCode, res.data))
@@ -249,8 +263,41 @@ function putOnce(
 			data: body,
 			// 使用全局统一超时时间。
 			timeout: API_TIMEOUT,
-			// 声明为 json 后由 uni 完成一次 JSON.parse，小程序与 App 行为一致。
-			dataType: 'json',
+			// 按文本接收，避免空白或非 JSON 响应在平台自动解析时抛异常。
+			dataType: 'text',
+			success: (res) => {
+				// 请求已到达服务端，按状态码与业务码解析统一响应体。
+				resolve(parseResponse(res.statusCode, res.data))
+			},
+			fail: (err) => {
+				// 网络层失败（超时、断网、地址不可达）不会返回 HTTP 状态码。
+				resolve(failureResult('网络连接失败，请检查网络后重试', 0))
+			}
+		})
+	})
+}
+
+/** 发送一次 PATCH 请求，复用统一响应与鉴权处理。 */
+function patchOnce(
+	path: string,
+	body: UTSJSONObject | null,
+	needAuth: boolean
+): Promise<HttpResult> {
+	// 与 postOnce 结构一致，仅 method 不同，便于各自使用字面量类型。
+	return new Promise<HttpResult>((resolve) => {
+		uni.request({
+			// 网关地址与业务路径拼接，调用方只传服务自身路径。
+			url: API_BASE_URL + path,
+			// PATCH 用于取消订单等局部状态变更。
+			method: 'PATCH',
+			// 请求头按是否需要鉴权动态拼装。
+			header: buildHeader(needAuth),
+			// PATCH 请求体。
+			data: body,
+			// 使用全局统一超时时间。
+			timeout: API_TIMEOUT,
+			// 按文本接收，避免空白或非 JSON 响应在平台自动解析时抛异常。
+			dataType: 'text',
 			success: (res) => {
 				// 请求已到达服务端，按状态码与业务码解析统一响应体。
 				resolve(parseResponse(res.statusCode, res.data))
@@ -282,8 +329,8 @@ function deleteOnce(path: string, needAuth: boolean): Promise<HttpResult> {
 			header: buildHeader(needAuth),
 			// 使用全局统一超时时间。
 			timeout: API_TIMEOUT,
-			// 声明为 json 后由 uni 完成一次 JSON.parse，小程序与 App 行为一致。
-			dataType: 'json',
+			// 按文本接收，避免空白或非 JSON 响应在平台自动解析时抛异常。
+			dataType: 'text',
 			success: (res) => {
 				// 请求已到达服务端，按状态码与业务码解析统一响应体。
 				resolve(parseResponse(res.statusCode, res.data))
@@ -409,7 +456,7 @@ function performRefresh(): Promise<boolean> {
 			}
 
 			// 取 data 字段（登录 VO），缺令牌说明响应异常。
-			const rawPayload = envelope.getJSON('data')
+			const rawPayload = jsonObject(envelope, 'data')
 			// 缺 data 时无法取出令牌，按失败处理。
 			if (rawPayload == null) {
 				resolve(false)
@@ -419,9 +466,9 @@ function performRefresh(): Promise<boolean> {
 			// 平台返回的 data 是 any，需断言为对象后按字段读取。
 			const payload = rawPayload as UTSJSONObject
 			// 取出新访问令牌。
-			const accessToken = payload.getString('accessToken') ?? ''
+			const accessToken = jsonString(payload, 'accessToken') ?? ''
 			// 取出新刷新令牌（后端采用轮换策略，会返回新的一枚）。
-			const newRefreshToken = payload.getString('refreshToken') ?? ''
+			const newRefreshToken = jsonString(payload, 'refreshToken') ?? ''
 			// 任一令牌缺失都说明响应不完整，按失败处理且不落盘。
 			if (accessToken.length == 0 || newRefreshToken.length == 0) {
 				resolve(false)
@@ -454,10 +501,10 @@ function handleSessionExpired(): void {
  * @param needAuth 是否需要携带 Bearer 令牌
  * @return 请求结果
  */
-export function httpPost(path: string, body: UTSJSONObject | null, needAuth: boolean): Promise<HttpResult> {
+export function httpPost(path: string, body: UTSJSONObject | null, needAuth: boolean, idempotencyKey: string = ''): Promise<HttpResult> {
 	// 以闭包传入一次性的 POST 发送动作，由 sendWithRefresh 决定是否续期重试。
 	return sendWithRefresh(() => {
-		return postOnce(path, body, needAuth)
+		return postOnce(path, body, needAuth, idempotencyKey)
 	}, needAuth, true)
 }
 
@@ -502,4 +549,9 @@ export function httpDelete(path: string, needAuth: boolean): Promise<HttpResult>
 	return sendWithRefresh(() => {
 		return deleteOnce(path, needAuth)
 	}, needAuth, true)
+}
+
+/** PATCH 使用同样的令牌续期策略。 */
+export function httpPatch(path: string, body: UTSJSONObject | null, needAuth: boolean): Promise<HttpResult> {
+    return sendWithRefresh(() => { return patchOnce(path, body, needAuth) }, needAuth, true)
 }
