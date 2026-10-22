@@ -1,0 +1,12 @@
+<template><image class="business-image" :src="resolvedSource" mode="aspectFill" @error="onImageError"></image></template>
+<script lang="uts">
+    import { defaultImage, imageSource } from '../../common/images.uts'
+    export default {
+        props: { src: { type: String, default: '' }, kind: { type: String, default: 'product' } },
+        data() { return { failed: false } },
+        computed: { resolvedSource(): string { return this.failed ? defaultImage(this.kind) : imageSource(this.src, this.kind) } },
+        watch: { src(_value: string) { this.failed = false } },
+        methods: { onImageError() { this.failed = true } }
+    }
+</script>
+<style scoped>.business-image { width: 100%; height: 100%; }</style>

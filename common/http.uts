@@ -555,3 +555,22 @@ export function httpDelete(path: string, needAuth: boolean): Promise<HttpResult>
 export function httpPatch(path: string, body: UTSJSONObject | null, needAuth: boolean): Promise<HttpResult> {
     return sendWithRefresh(() => { return patchOnce(path, body, needAuth) }, needAuth, true)
 }
+
+/** 图片上传复用鉴权、响应解析与一次令牌续期，网络失败不自动重传。 */
+export function httpUploadImage(filePath: string, bizType: string, bizRef: number): Promise<HttpResult> {
+    return sendWithRefresh(() => {
+        return new Promise<HttpResult>((resolve) => {
+            const header: UTSJSONObject = {}
+            const token = getAccessToken()
+            if (token.length > 0) header['Authorization'] = 'Bearer ' + token
+            const form: UTSJSONObject = { bizType: bizType }
+            if (bizRef > 0) form['bizRef'] = '' + bizRef
+            uni.uploadFile({
+                url: API_BASE_URL + '/files/upload', filePath: filePath, name: 'file',
+                header: header, formData: form, timeout: API_TIMEOUT,
+                success: (res) => { resolve(parseResponse(res.statusCode, res.data)) },
+                fail: (_err) => { resolve(failureResult('图片上传失败，请检查网络后重试', 0)) }
+            })
+        })
+    }, true, true)
+}

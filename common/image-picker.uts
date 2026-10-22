@@ -1,0 +1,17 @@
+export type ImageChoice = { path: string, error: string }
+
+export function chooseLocalImage(): Promise<ImageChoice> {
+    return new Promise<ImageChoice>((resolve) => {
+        uni.chooseImage({
+            count: 1, sizeType: ['compressed'], sourceType: ['album', 'camera'],
+            success: (res) => {
+                if (res.tempFilePaths.length == 0) { resolve({ path: '', error: '' }); return }
+                if (res.tempFiles.length > 0 && res.tempFiles[0].size > 5 * 1024 * 1024) {
+                    resolve({ path: '', error: '图片不能超过 5MB，请选择较小的图片' }); return
+                }
+                resolve({ path: res.tempFilePaths[0], error: '' })
+            },
+            fail: (err) => { resolve({ path: '', error: err.errMsg.indexOf('cancel') >= 0 ? '' : '无法选择图片，请检查相册权限' }) }
+        })
+    })
+}

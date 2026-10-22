@@ -1,0 +1,146 @@
+<template>
+    <view class="account-page account-secondary">
+        <view class="account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav"><button class="account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">窗口与菜品图片</text></view>
+        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!uploading && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
+            <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            <view class="account-content">
+                <view class="account-banner"><view class="banner-copy"><text class="banner-kicker">商家图片管理</text><text class="banner-title">让好味道，先被看见</text><text class="banner-note">选择窗口，维护封面与菜品图片。支持 JPG、PNG、GIF、WebP，最大 5MB。</text></view></view>
+                <scroll-view v-if="windows.length > 0" class="media-window-tabs" direction="horizontal"><view class="media-window-row"><button v-for="item in windows" :key="item.id" class="media-window-tab" :class="item.id == windowId ? 'media-window-on' : ''" :disabled="loading || uploading || refreshing" @click="selectWindow(item)"><text class="media-window-label">{{ item.name }}</text></button></view></scroll-view>
+                <view v-if="windowId > 0" class="account-card">
+                    <text class="account-heading">{{ windowName }}</text><text class="account-note">窗口封面</text>
+                    <view class="media-window-image"><business-image :src="windowImage" kind="window"></business-image></view>
+                    <button class="account-primary" :disabled="loading || uploading || refreshing" @click="changeImage('window', windowId)"><text class="account-primary-text">更换窗口封面</text></button>
+                </view>
+                <text v-if="windowId > 0" class="account-section-label">菜品图片</text>
+                <view v-for="item in products" :key="item.id" class="media-product-card">
+                    <view class="media-product-image"><business-image :src="item.imageUrl" kind="product"></business-image></view>
+                    <view class="media-product-copy"><text class="account-entry-title">{{ item.name }}</text><text class="account-entry-note">{{ item.imageUrl.length > 0 ? '已设置图片' : '使用默认图片' }}</text></view>
+                    <button class="media-edit" :disabled="loading || uploading || refreshing" @click="changeImage('product', item.id)"><text class="account-link-text">更换</text></button>
+                </view>
+                <view v-if="!loading && errorText.length == 0 && windows.length == 0" class="account-card"><text class="account-heading">暂无可管理的窗口</text><text class="account-note">当前账号尚未分配窗口管理范围。</text></view>
+                <text v-if="!loading && windowId > 0 && products.length == 0 && errorText.length == 0" class="account-note">该窗口暂无菜品</text>
+                <text v-if="loading" class="account-note">正在获取图片资料…</text><text v-if="uploading" class="account-note">正在上传并保存图片，请稍候…</text>
+                <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text><text v-if="uploadError.length > 0" class="account-error">{{ uploadError }}</text>
+                <button v-if="pendingFileKey.length > 0 && !uploading" class="account-primary" @click="retrySave"><text class="account-primary-text">重试保存图片</text></button>
+                <text v-if="successText.length > 0" class="account-note">{{ successText }}</text>
+            </view>
+        </scroll-view>
+    </view>
+</template>
+<script lang="uts">
+    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+    import BusinessImage from '../../components/business-image/business-image.uvue'
+    import { fetchManagedWindows, fetchManagedProducts, uploadImage, saveCatalogImage } from '../../api/files.uts'
+    import { HttpResult } from '../../common/http.uts'
+    import { jsonArray, jsonNumber, jsonString } from '../../common/json.uts'
+    import { chooseLocalImage, ImageChoice } from '../../common/image-picker.uts'
+    import { currentUser } from '../../store/auth.uts'
+    import { backToAccount } from '../../common/account.uts'
+    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
+    type MediaItem = { id: number, name: string, imageUrl: string }
+    export default {
+        components: { RefreshHeader, BusinessImage },
+        data() { const windows: Array<MediaItem> = []; const products: Array<MediaItem> = []; return { statusBarHeight: 0, windows: windows, products: products, windowId: 0, windowName: '', windowImage: '', loading: false, uploading: false, refreshing: false, currentRefreshTime: '', errorText: '', uploadError: '', successText: '', pendingFileKey: '', pendingKind: '', pendingId: 0 } },
+        onShow() {
+            this.statusBarHeight = uni.getWindowInfo().statusBarHeight
+            const user = currentUser()
+            if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
+            if (user.roleCode != 'STALL_MANAGER' && user.roleCode != 'RESTAURANT_MANAGER') { uni.switchTab({ url: '/pages/mine/mine' }); return }
+            if (!this.uploading) this.load()
+        },
+        methods: {
+            goBack() { if (!this.uploading) backToAccount() },
+            parseItems(result: HttpResult, kind: string): Array<MediaItem> | null {
+                const rows = result.ok && result.data != null ? jsonArray(result.data, 'data') : null
+                if (rows == null) return null
+                const items: Array<MediaItem> = []
+                for (let i = 0; i < rows.length; i++) {
+                    if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) return null
+                    const row = rows[i] as UTSJSONObject
+                    const id = jsonNumber(row, kind == 'window' ? 'windowId' : 'productId') ?? 0
+                    if (id <= 0) return null
+                    items.push({ id: id, name: jsonString(row, kind == 'window' ? 'windowName' : 'productName') ?? '', imageUrl: jsonString(row, 'imageUrl') ?? '' })
+                }
+                return items
+            },
+            load(): Promise<void> {
+                if (this.loading || this.uploading) return Promise.resolve()
+                this.loading = true; this.errorText = ''
+                return fetchManagedWindows().then((result: HttpResult) => {
+                    const items = this.parseItems(result, 'window')
+                    if (items == null) { this.loading = false; this.errorText = result.message.length > 0 ? result.message : '窗口资料格式异常'; return }
+                    this.windows = items
+                    if (items.length == 0) { this.windowId = 0; this.products = []; this.loading = false; return }
+                    let selected = items[0]
+                    for (let i = 0; i < items.length; i++) if (items[i].id == this.windowId) selected = items[i]
+                    this.windowId = selected.id; this.windowName = selected.name; this.windowImage = selected.imageUrl
+                    return this.loadProducts()
+                })
+            },
+            selectWindow(item: MediaItem) {
+                if (this.loading || this.uploading || this.refreshing || this.windowId == item.id) return
+                this.windowId = item.id; this.windowName = item.name; this.windowImage = item.imageUrl
+                this.errorText = ''; this.products = []; this.loading = true; this.loadProducts()
+            },
+            loadProducts(): Promise<void> {
+                return fetchManagedProducts(this.windowId).then((result: HttpResult) => {
+                    this.loading = false
+                    const items = this.parseItems(result, 'product')
+                    if (items == null) { this.errorText = result.message.length > 0 ? result.message : '菜品资料格式异常'; this.products = []; return }
+                    this.products = items
+                })
+            },
+            refreshPage() {
+                if (this.refreshing || this.loading || this.uploading) return
+                this.refreshing = true
+                const startedAt = Date.now(); this.currentRefreshTime = refreshTimeLabel(startedAt)
+                this.load().then(() => { finishPullRefresh(startedAt, this.errorText.length == 0, (time: string) => { if (time.length > 0) this.currentRefreshTime = time; this.refreshing = false }) })
+                    .catch(() => { finishPullRefresh(startedAt, false, (_time: string) => { this.refreshing = false }) })
+            },
+            changeImage(kind: string, id: number) {
+                if (this.uploading || this.loading || this.refreshing) return
+                this.uploadError = ''; this.successText = ''; this.uploading = true
+                chooseLocalImage().then((choice: ImageChoice) => {
+                    if (choice.error.length > 0) { this.uploadError = choice.error; this.uploading = false; return }
+                    if (choice.path.length == 0) { this.uploading = false; return }
+                    this.uploading = true; this.pendingFileKey = ''; this.pendingKind = kind; this.pendingId = id
+                    uploadImage(choice.path, kind == 'window' ? 'WINDOW_IMAGE' : 'PRODUCT_IMAGE', id).then((result: HttpResult) => {
+                        const data = result.ok && result.data != null ? result.data['data'] : null
+                        if (data == null || typeof data != 'object' || Array.isArray(data)) { this.uploading = false; this.uploadError = result.message.length > 0 ? result.message : '上传结果异常'; return }
+                        this.pendingFileKey = jsonString(data as UTSJSONObject, 'fileKey') ?? ''
+                        if (this.pendingFileKey.length == 0) { this.uploading = false; this.uploadError = '上传结果缺少文件信息'; return }
+                        this.bindImage()
+                    })
+                })
+            },
+            retrySave() {
+                if (this.uploading || this.loading || this.refreshing || this.pendingFileKey.length == 0) return
+                this.uploading = true; this.uploadError = ''; this.bindImage()
+            },
+            bindImage() {
+                saveCatalogImage(this.pendingKind, this.pendingId, this.pendingFileKey).then((result: HttpResult) => {
+                    this.uploading = false
+                    if (!result.ok) { this.uploadError = result.message.length > 0 ? result.message : '图片尚未保存，请重试'; return }
+                    this.pendingFileKey = ''; this.successText = '图片已保存'; this.load()
+                })
+            }
+        }
+    }
+</script>
+<style>
+    @import '../../styles/account.css';
+    .media-window-tabs { margin-bottom: 16px; height: 44px; }
+    .media-window-row { display: flex; flex-direction: row; }
+    .media-window-tab { display: flex; align-items: center; justify-content: center; flex-shrink: 0; height: 40px; margin: 0 8px 0 0; padding: 0 14px; border-width: 0; border-radius: 12px; background-color: #F2E9E1; line-height: 20px; }
+    .media-window-on { background-color: #FBE3D5; }
+    .media-window-label { font-size: 13px; line-height: 20px; color: #C2410C; }
+    .media-window-image { height: 160px; margin-top: 14px; border-radius: 14px; overflow: hidden; }
+    .media-product-card { display: flex; flex-direction: row; align-items: center; margin-bottom: 12px; padding: 14px; border-radius: 16px; background-color: #FFFFFF; }
+    .media-product-image { flex-shrink: 0; width: 64px; height: 64px; border-radius: 12px; overflow: hidden; }
+    .media-product-copy { flex: 1; min-width: 0; margin-left: 12px; }
+    .media-edit { display: flex; align-items: center; justify-content: center; min-height: 44px; margin: 0 0 0 8px; padding: 0 8px; border-width: 0; background-color: transparent; line-height: 20px; }
+    /* #ifdef WEB */
+    .account-page .media-window-row, .account-page .media-product-card { flex-direction: row; }
+    /* #endif */
+</style>

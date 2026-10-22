@@ -1,0 +1,26 @@
+[
+  {
+    "file": "avatar.png",
+    "source": "https://commons.wikimedia.org/wiki/File:Profile_avatar_placeholder_large.png",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/7/7c/Profile_avatar_placeholder_large.png",
+    "license": "Chromium project, BSD license; see Chromium-LICENSE.txt",
+    "sha256": "39c4f0720c0b9f829e3dc8b644228be492ea900026f4057974840d54b149bb5d",
+    "size": 2011
+  },
+  {
+    "file": "window.jpg",
+    "source": "https://unsplash.com/license",
+    "download": "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=720&q=80&fit=crop",
+    "license": "Unsplash License",
+    "sha256": "56a56a841a29b17ca0c727b0a3e903f06a0c6a20edb8d01b08d5d2638438b40c",
+    "size": 125668
+  },
+  {
+    "file": "product.jpg",
+    "source": "https://unsplash.com/license",
+    "download": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=640&q=80&fit=crop",
+    "license": "Unsplash License",
+    "sha256": "c87a729ac4e222474a638813a0ce350ef458d0658c470d30bb329518e9cfeb79",
+    "size": 78460
+  }
+]

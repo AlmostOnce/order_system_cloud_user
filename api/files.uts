@@ -1,0 +1,16 @@
+import { httpUploadImage, httpPut, httpGet, HttpResult } from '../common/http.uts'
+
+/** 字段名与 file-service multipart 接口保持一致；不手工指定 multipart boundary。 */
+export function uploadImage(filePath: string, bizType: string, bizRef: number): Promise<HttpResult> {
+    return httpUploadImage(filePath, bizType, bizRef)
+}
+export function saveAvatar(fileKey: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { fileKey: fileKey }
+    return httpPut('/users/me/avatar', body, true)
+}
+export function saveCatalogImage(kind: string, id: number, fileKey: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { fileKey: fileKey }
+    return httpPut('/products/admin/' + (kind == 'window' ? 'windows' : 'products') + '/' + id + '/image', body, true)
+}
+export function fetchManagedWindows(): Promise<HttpResult> { return httpGet('/products/admin/windows', true) }
+export function fetchManagedProducts(windowId: number): Promise<HttpResult> { return httpGet('/products/admin/windows/' + windowId + '/products', true) }

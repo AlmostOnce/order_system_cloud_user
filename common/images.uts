@@ -1,0 +1,18 @@
+import { API_BASE_URL } from './config.uts'
+
+export function defaultImage(kind: string): string {
+    if (kind == 'avatar') return '/static/images/defaults/avatar.png'
+    if (kind == 'window') return '/static/images/defaults/window.jpg'
+    return '/static/images/defaults/product.jpg'
+}
+
+/** 文件地址统一指向当前网关，避免服务器返回 localhost 导致手机无法访问。 */
+export function imageSource(value: string, kind: string): string {
+    const source = value.trim()
+    if (source.length == 0) return defaultImage(kind)
+    const fileIndex = source.indexOf('/api/files/')
+    if (fileIndex >= 0) return API_BASE_URL.replace(/\/$/, '') + source.substring(fileIndex + 4)
+    if (source.startsWith('/files/')) return API_BASE_URL.replace(/\/$/, '') + source
+    if (source.startsWith('/static/') || source.startsWith('http://') || source.startsWith('https://') || source.startsWith('blob:') || source.startsWith('file:') || source.startsWith('wxfile:') || source.startsWith('_doc/')) return source
+    return defaultImage(kind)
+}
