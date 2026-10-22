@@ -1,0 +1,137 @@
+<template>
+	<view class="account-page account-secondary">
+		<view class="account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+		<view class="account-nav"><button class="account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">余额充值</text></view>
+		<scroll-view class="account-scroll" scroll-y="true">
+			<view class="account-content">
+            <view class="account-banner">
+                <view class="banner-copy">
+                    <text class="banner-kicker">校园钱包</text>
+                    <text class="banner-title">为下一餐，充点余额</text>
+                    <text class="banner-note">选择充值金额，输入支付密码即可到账。</text>
+                </view>
+                <view class="banner-symbol symbol-wallet" aria-hidden="true"><view class="symbol-part-one"></view><view class="symbol-part-two"></view><view class="symbol-part-three"></view></view>
+            </view>
+				<view v-if="successText.length > 0" class="account-success"><text class="account-success-text">充值成功</text><text class="account-note">{{ successText }}</text><button class="account-link" @click="openRecords"><text class="account-link-text">查看充值记录</text></button></view>
+				<view class="account-card recharge-summary">
+					<text class="account-muted">当前余额（元）</text><text class="recharge-balance">{{ loading ? '加载中…' : balanceText }}</text>
+					<text class="recharge-label">充值至账户余额</text>
+					<text class="account-note">选择金额并验证支付密码，即可充值到账。</text>
+					<button v-if="loadError.length > 0" class="account-link" @click="loadBalance"><text class="account-link-text">{{ loadError }} · 点击重试</text></button>
+				</view>
+				<view class="account-card">
+					<text class="account-heading">充值金额</text>
+					<view class="amount-grid"><button v-for="amount in amounts" :key="amount" class="amount-choice" :class="amountText == amount ? 'amount-choice-on' : ''" :disabled="submitting || pending" @click="chooseAmount(amount)"><text class="amount-choice-text">{{ amount }} 元</text></button></view>
+					<text class="account-label">自定义金额（元）</text><input class="account-input" type="digit" v-model="amountText" :disabled="submitting || pending" :maxlength="8" placeholder="0.01～10000，最多两位小数" />
+					<text class="account-label">支付密码</text><input class="account-input" type="text" :password="true" v-model="payPassword" :maxlength="20" :disabled="submitting" placeholder="请输入支付密码" confirm-type="done" @confirm="submit" />
+					<text v-if="pending" class="account-note">上次充值结果尚未确认，请保持金额不变并重新确认。</text>
+					<text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
+					<button class="account-primary" :disabled="loading || submitting || !balanceReady" :class="loading || submitting || !balanceReady ? 'account-disabled' : ''" @click="submit"><text class="account-primary-text">{{ submitting ? '正在确认…' : '确认充值' }}</text></button>
+					<button class="account-link" :disabled="submitting" @click="openPassword"><text class="account-link-text">设置或修改支付密码</text></button>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script lang="uts">
+	import { fetchMyBalance, rechargeBalance, walletPayload } from '../../api/wallet.uts'
+	import { HttpResult } from '../../common/http.uts'
+	import { jsonNumber, jsonBoolean } from '../../common/json.uts'
+	import { isLoggedIn, currentUser } from '../../store/auth.uts'
+	import { newRechargeKey, pendingRechargeKey, backToAccount } from '../../common/account.uts'
+
+	export default {
+		data() {
+			const amounts: string[] = ['20', '50', '100', '200']
+			return { statusBarHeight: 0, userId: 0, amounts: amounts, amountText: '50', payPassword: '',
+				balanceText: '--', balanceReady: false, loading: false, loadError: '', submitting: false,
+				errorText: '', successText: '', requestKey: '', pending: false, pageVisible: false }
+		},
+		onShow() {
+			this.pageVisible = true
+			this.statusBarHeight = uni.getWindowInfo().statusBarHeight
+			if (!isLoggedIn()) { uni.reLaunch({ url: '/pages/login/login' }); return }
+			const user = currentUser()
+			if (user == null || user.roleCode != 'CUSTOMER') { uni.switchTab({ url: '/pages/mine/mine' }); return }
+			this.userId = user.userId
+			const stored = uni.getStorageSync(pendingRechargeKey(this.userId))
+			if (typeof stored == 'string' && (stored as string).length > 0) {
+				const parts = (stored as string).split('|')
+				if (parts.length == 2) { this.amountText = parts[0]; this.requestKey = parts[1]; this.pending = true }
+			}
+			this.loadBalance()
+		},
+		onHide() { this.pageVisible = false; this.payPassword = '' },
+		onUnload() { this.pageVisible = false; this.payPassword = '' },
+		methods: {
+			goBack() { backToAccount() },
+			openRecords() { uni.navigateTo({ url: '/pages/wallet/records?type=RECHARGE' }) },
+			openPassword() { uni.navigateTo({ url: '/pages/account/pay-password' }) },
+			chooseAmount(value: string) { this.amountText = value; this.errorText = ''; this.successText = '' },
+			loadBalance() {
+				if (this.loading) return
+				this.loading = true
+				this.balanceReady = false
+				this.loadError = ''
+				fetchMyBalance().then((result: HttpResult) => {
+					this.loading = false
+					if (!this.pageVisible) return
+					const data = walletPayload(result)
+					if (data == null || jsonNumber(data, 'balance') == null) { this.loadError = result.message.length > 0 ? result.message : '余额获取失败'; return }
+					if (!(jsonBoolean(data, 'payPasswordSet') ?? false)) { uni.redirectTo({ url: '/pages/account/pay-password?next=recharge' }); return }
+					this.balanceText = (jsonNumber(data, 'balance') ?? 0).toFixed(2)
+					this.balanceReady = true
+				})
+			},
+			submit() {
+				if (this.submitting || this.loading || !this.balanceReady) return
+				this.errorText = ''
+				this.successText = ''
+				const text = this.amountText.trim()
+				if (!/^\d{1,5}(\.\d{1,2})?$/.test(text)) { this.errorText = '请输入正确金额，最多两位小数'; return }
+				const amount = Number(text)
+				if (amount < 0.01 || amount > 10000) { this.errorText = '单次充值金额为 0.01 至 10000 元'; return }
+				if (this.payPassword.length < 6 || this.payPassword.length > 20) { this.errorText = '请输入 6 至 20 位支付密码'; return }
+				if (this.requestKey.length == 0) this.requestKey = newRechargeKey()
+				// 发送前保存非敏感的重试信息，网络中断或离开页面后仍能安全重放。
+				uni.setStorageSync(pendingRechargeKey(this.userId), text + '|' + this.requestKey)
+				this.pending = true
+				this.submitting = true
+				rechargeBalance(amount, this.payPassword, this.requestKey).then((result: HttpResult) => {
+					this.submitting = false
+					this.payPassword = ''
+					const data = walletPayload(result)
+					if (data == null || jsonNumber(data, 'balanceAfter') == null) {
+						this.errorText = result.message.length > 0 ? result.message : '充值结果暂未确认，请重试'
+						// 已明确拒绝的请求没有入账，允许用户修改金额后重新提交。
+						if (result.statusCode >= 400 && result.statusCode < 500 && result.statusCode != 408) {
+							this.pending = false; this.requestKey = ''; uni.removeStorageSync(pendingRechargeKey(this.userId))
+						}
+						return
+					}
+					this.pending = false
+					this.requestKey = ''
+					uni.removeStorageSync(pendingRechargeKey(this.userId))
+					this.balanceText = (jsonNumber(data, 'balanceAfter') ?? 0).toFixed(2)
+					this.successText = '本次充值 ¥' + (jsonNumber(data, 'amount') ?? amount).toFixed(2) + '，入账后余额 ¥' + this.balanceText
+					if (this.pageVisible) this.loadBalance()
+				})
+			}
+		}
+	}
+</script>
+
+<style>
+	@import '../../styles/account.css';
+	.recharge-balance { margin-top: 8px; font-size: 32px; line-height: 42px; font-weight: bold; color: #211C18; }
+	.recharge-label { margin-top: 12px; font-size: 12px; line-height: 20px; color: #C2410C; }
+	.amount-grid { justify-content: space-between; flex-direction: row; flex-wrap: wrap; margin-top: 16px; }
+	.amount-choice { display: flex; width: 48%; height: 48px; margin: 0 0 12px 0; padding: 0; border-width: 1px; border-style: solid; border-color: #EFE1D6; border-radius: 10px; background-color: #FFFFFF; align-items: center; justify-content: center; }
+	.amount-choice-on { border-color: #E4572E; background-color: #FDF0E8; }
+	.amount-choice-text { font-size: 16px; font-weight: bold; color: #C2410C; }
+
+	/* #ifdef WEB */
+	.account-page .amount-grid { flex-direction: row; }
+	/* #endif */
+</style>

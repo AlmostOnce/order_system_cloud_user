@@ -1,0 +1,132 @@
+<template>
+	<view class="account-page account-secondary">
+		<view class="account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+		<view class="account-nav"><button class="account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">{{ recordType == 'RECHARGE' ? '充值记录' : (recordType == 'PAY' ? '消费记录' : '余额明细') }}</text></view>
+		<view class="record-tabs"><button class="record-tab" :class="recordType == '' ? 'record-tab-on' : ''" :disabled="loading" @click="selectType('')"><text class="record-tab-text">全部</text></button><button class="record-tab" :class="recordType == 'RECHARGE' ? 'record-tab-on' : ''" :disabled="loading" @click="selectType('RECHARGE')"><text class="record-tab-text">充值</text></button><button class="record-tab" :class="recordType == 'PAY' ? 'record-tab-on' : ''" :disabled="loading" @click="selectType('PAY')"><text class="record-tab-text">消费</text></button></view>
+		<scroll-view class="account-scroll" scroll-y="true"><view class="account-content">
+            <view class="account-banner">
+                <view class="banner-copy">
+                    <text class="banner-kicker">我的账单</text>
+                    <text class="banner-title">每一笔，都有记录</text>
+                    <text class="banner-note">充值、消费与退款，按时间清晰呈现。</text>
+                </view>
+                <view class="banner-symbol symbol-ledger" aria-hidden="true"><view class="symbol-part-one"></view><view class="symbol-part-two"></view><view class="symbol-part-three"></view></view>
+            </view>
+			<text class="records-intro">仅展示已入账的余额变动，最新记录在前</text>
+			<view v-for="item in records" :key="item.recordId" class="record-card">
+				<view class="record-main"><view class="record-type-mark" :class="item.changeType == 'PAY' ? 'record-mark-pay' : ''"><text class="record-mark-text">{{ item.changeType == 'PAY' ? '支' : (item.changeType == 'REFUND' ? '退' : '充') }}</text></view><text class="record-name">{{ item.title }}</text><text class="record-amount" :class="item.changeType == 'PAY' ? 'record-expense' : 'record-income'">{{ item.changeType == 'PAY' ? '−' : '+' }}¥{{ item.amountText }}</text></view>
+				<text class="record-date">{{ item.createdAt }}</text>
+				<text class="record-description">{{ item.remark }}</text>
+				<view class="record-bottom"><text class="record-reference">{{ item.bizRef }}</text><text class="record-after">余额 ¥{{ item.balanceText }}</text></view>
+			</view>
+			<view v-if="!loading && records.length == 0 && errorText.length == 0" class="account-card"><text class="account-heading">{{ recordType == 'RECHARGE' ? '还没有充值记录' : (recordType == 'PAY' ? '还没有消费记录' : '还没有余额变动') }}</text><text class="account-note">{{ recordType == 'PAY' ? '使用余额支付后，会在这里显示消费记录。' : '充值到账后，会在这里留下记录。' }}</text></view>
+			<text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
+			<button v-if="errorText.length > 0" class="account-link" :disabled="loading" @click="retry"><text class="account-link-text">重新加载</text></button>
+			<button v-if="loading || hasMore" class="account-link" :disabled="loading" @click="loadMore"><text class="account-link-text">{{ loading ? '正在加载…' : '加载更多' }}</text></button>
+			<text v-if="!loading && !hasMore && records.length > 0 && errorText.length == 0" class="records-end">已显示全部记录</text>
+		</view></scroll-view>
+	</view>
+</template>
+
+<script lang="uts">
+	import { fetchBalanceRecords, walletPayload } from '../../api/wallet.uts'
+	import { HttpResult } from '../../common/http.uts'
+	import { jsonArray, jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts'
+	import { isLoggedIn, currentUser } from '../../store/auth.uts'
+	import { accountDate, backToAccount } from '../../common/account.uts'
+
+	type WalletRecord = { recordId: number, changeType: string, title: string, amountText: string,
+		balanceText: string, createdAt: string, remark: string, bizRef: string }
+
+	export default {
+		data() {
+			const rows: Array<WalletRecord> = []
+			return { statusBarHeight: 0, recordType: '', records: rows, loading: false, errorText: '', nextCursor: 0, hasMore: false, retryReset: true }
+		},
+		onLoad(options: OnLoadOptions) {
+			if (options['type'] == 'RECHARGE') this.recordType = 'RECHARGE'
+			if (options['type'] == 'PAY') this.recordType = 'PAY'
+		},
+		onShow() {
+			this.statusBarHeight = uni.getWindowInfo().statusBarHeight
+			if (!isLoggedIn()) { uni.reLaunch({ url: '/pages/login/login' }); return }
+			const user = currentUser()
+			if (user == null || user.roleCode != 'CUSTOMER') { uni.switchTab({ url: '/pages/mine/mine' }); return }
+			this.loadRecords(true)
+		},
+		methods: {
+			goBack() { backToAccount() },
+			selectType(value: string) {
+				if (this.loading || this.recordType == value) return
+				this.recordType = value
+				const rows: Array<WalletRecord> = []; this.records = rows
+				this.nextCursor = 0; this.hasMore = false; this.loadRecords(true)
+			},
+			retry() { this.loadRecords(this.retryReset) },
+			loadMore() { if (this.hasMore) this.loadRecords(false) },
+			loadRecords(reset: boolean) {
+				if (this.loading) return
+				this.retryReset = reset
+				this.loading = true; this.errorText = ''
+				fetchBalanceRecords(this.recordType, reset ? 0 : this.nextCursor).then((result: HttpResult) => {
+					this.loading = false
+					const data = walletPayload(result)
+					if (data == null) { this.errorText = result.message.length > 0 ? result.message : '记录获取失败'; return }
+					const rawRows = jsonArray(data, 'items')
+					if (rawRows == null) { this.errorText = '记录格式异常，请重试'; return }
+					const converted: Array<WalletRecord> = []
+					for (let i = 0; i < rawRows.length; i++) {
+						if (rawRows[i] == null || typeof rawRows[i] != 'object' || Array.isArray(rawRows[i])) { this.errorText = '记录格式异常，请重试'; return }
+						const raw = rawRows[i] as UTSJSONObject
+						const type = jsonString(raw, 'changeType') ?? ''
+						const id = jsonNumber(raw, 'recordId')
+						const amount = jsonNumber(raw, 'amount')
+						const after = jsonNumber(raw, 'balanceAfter')
+						if (id == null || id <= 0 || amount == null || amount < 0 || after == null || after < 0 || (type != 'RECHARGE' && type != 'PAY' && type != 'REFUND')) { this.errorText = '记录格式异常，请重试'; return }
+						const item: WalletRecord = {
+							recordId: id, changeType: type,
+							title: type == 'RECHARGE' ? '余额充值' : (type == 'PAY' ? '余额消费' : '余额退款'),
+							amountText: amount.toFixed(2),
+							balanceText: after.toFixed(2),
+							createdAt: accountDate(jsonString(raw, 'createdAt') ?? ''),
+							remark: type == 'RECHARGE' ? '余额充值' : (jsonString(raw, 'remark') ?? ''), bizRef: jsonString(raw, 'bizRef') ?? ''
+						}
+						converted.push(item)
+					}
+					const cursor = jsonNumber(data, 'nextCursor') ?? 0
+					const more = jsonBoolean(data, 'hasMore') ?? false
+					if (more && (cursor <= 0 || converted.length == 0)) { this.errorText = '分页信息异常，请重试'; return }
+					if (reset) this.records = converted
+					else for (let i = 0; i < converted.length; i++) this.records.push(converted[i])
+					this.nextCursor = cursor; this.hasMore = more
+				})
+			}
+		}
+	}
+</script>
+
+<style>
+	@import '../../styles/account.css';
+	.record-tabs { flex-direction: row; padding: 8px 20px 12px 20px; background-color: #FFFFFF; }
+	.record-tab { display: flex; flex: 1; height: 40px; margin: 0 6px 0 0; padding: 0; border-width: 0; border-radius: 10px; background-color: #F7F2EE; align-items: center; justify-content: center; }
+	.record-tab-on { background-color: #FCE4D8; }
+	.record-tab-text { font-size: 14px; color: #C2410C; }
+	.records-intro { margin-bottom: 14px; font-size: 11px; line-height: 18px; color: #7A6C60; }
+	.record-card { margin-bottom: 12px; padding: 18px; border-radius: 16px; background-color: #FFFFFF; }
+	.record-main { flex-direction: row; align-items: center; justify-content: space-between; }
+	.record-name { flex: 1; font-size: 15px; line-height: 24px; font-weight: bold; color: #211C18; }
+	.record-amount { margin-left: 8px; font-size: 20px; line-height: 28px; font-weight: bold; }
+	.record-income { color: #386341; }
+	.record-expense { color: #211C18; }
+	.record-date { margin-top: 6px; font-size: 11px; line-height: 18px; color: #7A6C60; }
+	.record-description { margin-top: 4px; font-size: 12px; line-height: 18px; color: #7A6C60; }
+	.record-bottom { margin-top: 12px; padding-top: 10px; border-top-width: 1px; border-top-style: solid; border-top-color: #F4EBE4; }
+	.record-reference { font-size: 10px; line-height: 17px; color: #A2968B; }
+	.record-after { margin-top: 4px; font-size: 12px; line-height: 18px; color: #7A6C60; }
+	.records-end { padding: 12px; font-size: 12px; text-align: center; color: #A2968B; }
+
+	/* #ifdef WEB */
+	.account-page .record-tabs { flex-direction: row; }
+	.account-page .record-main { flex-direction: row; }
+	/* #endif */
+</style>

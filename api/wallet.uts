@@ -1,0 +1,38 @@
+import { httpGet, httpPost, httpPut, HttpResult } from '../common/http.uts'
+import { jsonObject } from '../common/json.uts'
+
+export function fetchMyProfile(): Promise<HttpResult> {
+	return httpGet('/users/me/profile', true)
+}
+
+export function fetchMyBalance(): Promise<HttpResult> {
+	return httpGet('/users/me/balance', true)
+}
+
+export function fetchBalanceRecords(type: string, beforeId: number): Promise<HttpResult> {
+	let path = '/users/me/balance/records?limit=20'
+	if (type.length > 0) {
+		path = path + '&type=' + type
+	}
+	if (beforeId > 0) {
+		path = path + '&beforeId=' + beforeId
+	}
+	return httpGet(path, true)
+}
+
+export function rechargeBalance(amount: number, payPassword: string, requestKey: string): Promise<HttpResult> {
+	const body: UTSJSONObject = { amount: amount, payPassword: payPassword }
+	return httpPost('/users/me/recharges', body, true, requestKey)
+}
+
+export function setPayPassword(loginPassword: string, oldPayPassword: string, newPayPassword: string): Promise<HttpResult> {
+	const body: UTSJSONObject = {
+		loginPassword: loginPassword, oldPayPassword: oldPayPassword, newPayPassword: newPayPassword
+	}
+	return httpPut('/users/pay-password', body, true)
+}
+
+/** 统一提取业务对象，避免把缺少 data 的异常响应展示为余额 0。 */
+export function walletPayload(result: HttpResult): UTSJSONObject | null {
+	return result.ok && result.data != null ? jsonObject(result.data, 'data') : null
+}

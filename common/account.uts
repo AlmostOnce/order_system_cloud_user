@@ -1,0 +1,27 @@
+/** 账户相关页面共用的角色文案。 */
+export function accountRoleLabel(code: string): string {
+	if (code == 'CUSTOMER') return '学生用户'
+	if (code == 'STALL_MANAGER') return '档口管理员'
+	if (code == 'RESTAURANT_MANAGER') return '餐厅经理'
+	if (code == 'GENERAL_MANAGER') return '食堂总经理'
+	if (code == 'SYSTEM_ADMIN') return '系统管理员'
+	return '校园用户'
+}
+
+/** 只持久化待确认充值的金额和请求标识，支付密码绝不保存。 */
+export function pendingRechargeKey(userId: number): string {
+	return 'wallet_pending_recharge_' + userId
+}
+
+export function newRechargeKey(): string {
+	return 'recharge-' + Date.now() + '-' + Math.floor(Math.random() * 1000000000)
+}
+
+export function accountDate(value: string): string {
+	return value.replace('T', ' ').substring(0, 19)
+}
+
+export function backToAccount(): void {
+	if (getCurrentPages().length > 1) uni.navigateBack()
+	else uni.switchTab({ url: '/pages/mine/mine' })
+}
