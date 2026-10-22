@@ -32,7 +32,26 @@
 			"style": {
 				"navigationStyle": "custom"
 			}
-		}
+		},
+		{
+			"path": "pages/wallet/recharge",
+			"style": { "navigationStyle": "custom" }
+		},
+		{
+			"path": "pages/wallet/records",
+			"style": { "navigationStyle": "custom" }
+		},
+		{
+			"path": "pages/account/pay-password",
+			"style": { "navigationStyle": "custom" }
+		},
+		{
+			"path": "pages/account/profile",
+			"style": { "navigationStyle": "custom" }
+		},
+		{ "path": "pages/order/confirm", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/order/detail", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/order/list", "style": { "navigationStyle": "custom" } }
 	],
 	"tabBar": {
 		// 未选中态使用暖灰，选中态使用项目主色柿子橙
