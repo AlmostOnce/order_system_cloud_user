@@ -2,7 +2,9 @@
     <view class="account-page account-secondary">
         <view class="account-status" :style="'height:' + statusBarHeight + 'px'"></view>
         <view class="account-nav"><button class="account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">确认订单</text></view>
-        <scroll-view class="account-scroll" scroll-y="true"><view class="account-content">
+        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!pending && !submitting && createdOrderId == 0 && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+<view class="account-content">
             <view class="account-banner"><view class="banner-copy"><text class="banner-kicker">校园食堂 · 到店取餐</text><text class="banner-title">确认这一餐</text><text class="banner-note">核对菜品与数量，提交后前往支付。</text></view></view>
             <view v-if="loading" class="account-card"><text class="account-muted">正在核对购物车…</text></view>
             <view v-if="items.length > 0" class="account-card">
@@ -20,12 +22,14 @@
             <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
             <button v-if="createdOrderId > 0" class="account-primary" @click="openCreated"><text class="account-primary-text">查看已提交订单</text></button>
             <button v-else-if="items.length > 0" class="account-primary" :disabled="submitting || loading" :class="submitting || loading ? 'account-disabled' : ''" @click="submit"><text class="account-primary-text">{{ submitting ? '正在提交…' : (pending ? '确认提交结果' : '提交订单') }}</text></button>
-            <button v-if="!pending && !submitting && createdOrderId == 0" class="account-link" @click="loadCart"><text class="account-link-text">重新核对购物车</text></button>
+
             <button class="account-link" :disabled="submitting" @click="openOrders"><text class="account-link-text">我的订单</text></button>
         </view></scroll-view>
     </view>
 </template>
 <script lang="uts">
+    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
     import { fetchCart, CartResult } from '../../api/cart.uts'
     import { createOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts'
     import { CheckoutLine, CheckoutDraft, checkoutKey, cleanupKey, readCheckout, orderBody, cleanupBody } from '../../common/checkout.uts'
@@ -33,7 +37,8 @@
     import { currentUser } from '../../store/auth.uts'
     import { backToAccount } from '../../common/account.uts'
     export default {
-        data() { const items: Array<CheckoutLine> = []; return { statusBarHeight: 0, userId: 0, windowId: 0, windowName: '', items: items, remark: '', totalText: '0.00', loading: false, submitting: false, pending: false, requestKey: '', errorText: '', createdOrderId: 0, pageVisible: false } },
+        components: { RefreshHeader },
+        data() { const items: Array<CheckoutLine> = []; return { refreshing: false, currentRefreshTime: '', statusBarHeight: 0, userUuid: '', windowId: 0, windowName: '', items: items, remark: '', totalText: '0.00', loading: false, submitting: false, pending: false, requestKey: '', errorText: '', createdOrderId: 0, pageVisible: false } },
         onLoad(options: OnLoadOptions) {
             this.windowId = Number(options['windowId'] ?? '0')
             const name = options['windowName']
@@ -45,9 +50,9 @@
             const user = currentUser()
             if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
             if (user.roleCode != 'CUSTOMER') { uni.switchTab({ url: '/pages/home/home' }); return }
-            this.userId = user.userId
+            this.userUuid = user.userUuid
             if (this.submitting || this.createdOrderId > 0) return
-            const draft = readCheckout(this.userId)
+            const draft = readCheckout(this.userUuid)
             if (draft != null) {
                 this.windowId = draft.windowId; this.windowName = draft.windowName; this.items = draft.items
                 this.remark = draft.remark; this.requestKey = draft.key; this.pending = true; this.updateTotal()
@@ -56,14 +61,28 @@
         onHide() { this.pageVisible = false },
         onUnload() { this.pageVisible = false },
         methods: {
+            refreshPage() {
+                if (this.refreshing || this.loading || this.submitting || this.pending || this.createdOrderId > 0) return
+                this.refreshing = true
+                const refreshStartedAt = Date.now()
+                this.currentRefreshTime = refreshTimeLabel(refreshStartedAt)
+                this.loadCart().then(() => {
+                    finishPullRefresh(refreshStartedAt, this.errorText.length == 0, (time: string) => {
+                        if (time.length > 0) this.currentRefreshTime = time
+                        this.refreshing = false
+                    })
+                }).catch(() => {
+                    finishPullRefresh(refreshStartedAt, false, (_time: string) => { this.refreshing = false })
+                })
+            },
             goBack() { if (!this.submitting) backToAccount() },
             openOrders() { uni.navigateTo({ url: '/pages/order/list' }) },
             openCreated() { uni.redirectTo({ url: '/pages/order/detail?orderId=' + this.createdOrderId }) },
             updateTotal() { let cents = 0; for (let i = 0; i < this.items.length; i++) cents += Math.round(this.items[i].lineAmount * 100); this.totalText = (cents / 100).toFixed(2) },
-            loadCart() {
-                if (this.loading || this.pending || this.submitting || this.createdOrderId > 0) return
+            loadCart(): Promise<void> {
+                if (this.loading || this.pending || this.submitting || this.createdOrderId > 0) return Promise.resolve()
                 this.loading = true; this.errorText = ''; this.items = []
-                fetchCart().then((result: CartResult) => {
+                return fetchCart().then((result: CartResult) => {
                     this.loading = false
                     if (!result.ok || result.cart == null) { this.errorText = result.message; return }
                     const cart = result.cart!
@@ -89,7 +108,7 @@
                 this.errorText = ''
                 if (!this.pending) this.requestKey = 'order-' + Date.now() + '-' + Math.floor(Math.random() * 1000000000)
                 const draft: CheckoutDraft = { key: this.requestKey, windowId: this.windowId, windowName: this.windowName, remark: this.remark, items: this.items }
-                try { uni.setStorageSync(checkoutKey(this.userId), JSON.stringify(draft)) }
+                try { uni.setStorageSync(checkoutKey(this.userUuid), JSON.stringify(draft)) }
                 catch (error) { this.errorText = '无法保存提交信息，请检查设备存储后重试'; return }
                 this.pending = true; this.submitting = true
                 createOrder(orderBody(draft), draft.key).then((result: HttpResult) => {
@@ -100,16 +119,16 @@
                         this.errorText = result.message.length > 0 ? result.message : '订单结果待确认，请重试'
                         // 5xx、超时、异常响应与幂等键冲突保留原始请求，避免创建第二笔。
                         if (!result.ok && (result.statusCode == 400 || result.statusCode == 403 || result.statusCode == 404 || result.statusCode == 422 || (result.statusCode == 409 && result.message.indexOf('Idempotency-Key') < 0))) {
-                            this.pending = false; this.requestKey = ''; uni.removeStorageSync(checkoutKey(this.userId))
+                            this.pending = false; this.requestKey = ''; uni.removeStorageSync(checkoutKey(this.userUuid))
                         }
                         return
                     }
                     this.createdOrderId = order.orderId; this.pending = false
                     const snapshot = cleanupBody(draft)
-                    try { uni.setStorageSync(cleanupKey(this.userId, order.orderId), JSON.stringify(snapshot)); uni.removeStorageSync(checkoutKey(this.userId)) }
+                    try { uni.setStorageSync(cleanupKey(this.userUuid, order.orderId), JSON.stringify(snapshot)); uni.removeStorageSync(checkoutKey(this.userUuid)) }
                     catch (error) { this.errorText = '订单已提交，购物车清理信息保存失败。请勿重复下单。' }
                     cleanupOrderCart(order.orderId, snapshot).then((cleaned: HttpResult) => {
-                        if (cleaned.ok) uni.removeStorageSync(cleanupKey(this.userId, order.orderId))
+                        if (cleaned.ok) uni.removeStorageSync(cleanupKey(this.userUuid, order.orderId))
                         if (this.pageVisible) this.openCreated()
                     })
                 })

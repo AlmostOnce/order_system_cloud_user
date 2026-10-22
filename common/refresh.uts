@@ -1,0 +1,19 @@
+/** 下拉动画至少展示 1.2 秒；请求较慢时以实际完成时间为准。 */
+export const MIN_REFRESH_DURATION = 1200
+
+function twoDigits(value: number): string { return value < 10 ? '0' + value : '' + value }
+
+export function refreshTimeLabel(timestamp: number): string {
+    const date = new Date(timestamp)
+    return date.getFullYear() + '-' + twoDigits(date.getMonth() + 1) + '-' + twoDigits(date.getDate()) + ' '
+        + twoDigits(date.getHours()) + ':' + twoDigits(date.getMinutes()) + ':' + twoDigits(date.getSeconds())
+}
+
+/** 成功时间记录数据返回的时刻，动画等待不改变数据更新时间。失败返回空字符串。 */
+export function finishPullRefresh(startedAt: number, success: boolean, done: (time: string) => void): void {
+    const completedAt = Date.now()
+    const label = success ? refreshTimeLabel(completedAt) : ''
+    const remaining = Math.max(0, MIN_REFRESH_DURATION - (completedAt - startedAt))
+    if (remaining == 0) { done(label); return }
+    setTimeout(() => { done(label) }, remaining)
+}

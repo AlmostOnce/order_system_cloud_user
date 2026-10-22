@@ -3,7 +3,9 @@
 		<view class="account-status" :style="'height:' + statusBarHeight + 'px'"></view>
 		<view class="account-nav"><button class="account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">{{ recordType == 'RECHARGE' ? '充值记录' : (recordType == 'PAY' ? '消费记录' : '余额明细') }}</text></view>
 		<view class="record-tabs"><button class="record-tab" :class="recordType == '' ? 'record-tab-on' : ''" :disabled="loading" @click="selectType('')"><text class="record-tab-text">全部</text></button><button class="record-tab" :class="recordType == 'RECHARGE' ? 'record-tab-on' : ''" :disabled="loading" @click="selectType('RECHARGE')"><text class="record-tab-text">充值</text></button><button class="record-tab" :class="recordType == 'PAY' ? 'record-tab-on' : ''" :disabled="loading" @click="selectType('PAY')"><text class="record-tab-text">消费</text></button></view>
-		<scroll-view class="account-scroll" scroll-y="true"><view class="account-content">
+		<scroll-view class="account-scroll" scroll-y="true" @scrolltolower="loadMore" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+<view class="account-content">
             <view class="account-banner">
                 <view class="banner-copy">
                     <text class="banner-kicker">我的账单</text>
@@ -21,14 +23,16 @@
 			</view>
 			<view v-if="!loading && records.length == 0 && errorText.length == 0" class="account-card"><text class="account-heading">{{ recordType == 'RECHARGE' ? '还没有充值记录' : (recordType == 'PAY' ? '还没有消费记录' : '还没有余额变动') }}</text><text class="account-note">{{ recordType == 'PAY' ? '使用余额支付后，会在这里显示消费记录。' : '充值到账后，会在这里留下记录。' }}</text></view>
 			<text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
-			<button v-if="errorText.length > 0" class="account-link" :disabled="loading" @click="retry"><text class="account-link-text">重新加载</text></button>
-			<button v-if="loading || hasMore" class="account-link" :disabled="loading" @click="loadMore"><text class="account-link-text">{{ loading ? '正在加载…' : '加载更多' }}</text></button>
+
+			<text v-if="loading || hasMore" class="records-end">{{ loading ? '正在加载…' : '上滑加载更多' }}</text>
 			<text v-if="!loading && !hasMore && records.length > 0 && errorText.length == 0" class="records-end">已显示全部记录</text>
 		</view></scroll-view>
 	</view>
 </template>
 
 <script lang="uts">
+    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 	import { fetchBalanceRecords, walletPayload } from '../../api/wallet.uts'
 	import { HttpResult } from '../../common/http.uts'
 	import { jsonArray, jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts'
@@ -39,9 +43,10 @@
 		balanceText: string, createdAt: string, remark: string, bizRef: string }
 
 	export default {
+        components: { RefreshHeader },
 		data() {
 			const rows: Array<WalletRecord> = []
-			return { statusBarHeight: 0, recordType: '', records: rows, loading: false, errorText: '', nextCursor: 0, hasMore: false, retryReset: true }
+			return { refreshing: false, currentRefreshTime: '', statusBarHeight: 0, recordType: '', records: rows, loading: false, errorText: '', nextCursor: 0, hasMore: false }
 		},
 		onLoad(options: OnLoadOptions) {
 			if (options['type'] == 'RECHARGE') this.recordType = 'RECHARGE'
@@ -55,6 +60,20 @@
 			this.loadRecords(true)
 		},
 		methods: {
+            refreshPage() {
+                if (this.refreshing || this.loading) return
+                this.refreshing = true
+                const refreshStartedAt = Date.now()
+                this.currentRefreshTime = refreshTimeLabel(refreshStartedAt)
+                this.loadRecords(true).then(() => {
+                    finishPullRefresh(refreshStartedAt, this.errorText.length == 0, (time: string) => {
+                        if (time.length > 0) this.currentRefreshTime = time
+                        this.refreshing = false
+                    })
+                }).catch(() => {
+                    finishPullRefresh(refreshStartedAt, false, (_time: string) => { this.refreshing = false })
+                })
+            },
 			goBack() { backToAccount() },
 			selectType(value: string) {
 				if (this.loading || this.recordType == value) return
@@ -62,13 +81,11 @@
 				const rows: Array<WalletRecord> = []; this.records = rows
 				this.nextCursor = 0; this.hasMore = false; this.loadRecords(true)
 			},
-			retry() { this.loadRecords(this.retryReset) },
 			loadMore() { if (this.hasMore) this.loadRecords(false) },
-			loadRecords(reset: boolean) {
-				if (this.loading) return
-				this.retryReset = reset
+			loadRecords(reset: boolean): Promise<void> {
+				if (this.loading) return Promise.resolve()
 				this.loading = true; this.errorText = ''
-				fetchBalanceRecords(this.recordType, reset ? 0 : this.nextCursor).then((result: HttpResult) => {
+				return fetchBalanceRecords(this.recordType, reset ? 0 : this.nextCursor).then((result: HttpResult) => {
 					this.loading = false
 					const data = walletPayload(result)
 					if (data == null) { this.errorText = result.message.length > 0 ? result.message : '记录获取失败'; return }

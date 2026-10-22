@@ -15,7 +15,7 @@ function load(relative) {
     const file = path.resolve(root, relative);
     if (cache.has(file)) return cache.get(file);
     if (file === path.resolve(root, 'common/http.uts')) return http;
-    if (file === path.resolve(root, 'store/auth.uts')) return { currentUser: () => ({ userId: 7, roleCode: 'CUSTOMER' }) };
+    if (file === path.resolve(root, 'store/auth.uts')) return { currentUser: () => ({ userUuid: '12345678-1234-4234-8234-123456789abc', roleCode: 'CUSTOMER' }) };
     if (file === path.resolve(root, 'common/account.uts')) return { accountDate: s => s, backToAccount() {} };
     let source = fs.readFileSync(file, 'utf8');
     if (file.endsWith('.uvue')) source = source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
@@ -47,12 +47,12 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
     assert.equal(api.parseOrder(orderData).items[0].lineAmount, 18);
 
     const { vm, component } = page('pages/order/confirm.uvue');
-    Object.assign(vm, { userId: 7, windowId: 2, windowName: draft.windowName, items: draft.items, remark: draft.remark });
+    Object.assign(vm, { userUuid: '12345678-1234-4234-8234-123456789abc', windowId: 2, windowName: draft.windowName, items: draft.items, remark: draft.remark });
     response = { ok: false, statusCode: 0, message: 'timeout' };
     vm.submit(); await flush();
     assert.equal(vm.pending, true);
     const first = calls.find(c => c.args[0] === '/orders');
-    const saved = checkout.readCheckout(7);
+    const saved = checkout.readCheckout('12345678-1234-4234-8234-123456789abc');
     assert.equal(saved.key, first.args[3]);
     vm.submit(); await flush();
     const submitted = calls.filter(c => c.args[0] === '/orders');
@@ -66,7 +66,7 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
     response = ok(orderData);
     vm.submit(); await flush();
     assert.equal(vm.createdOrderId, 11);
-    assert.equal(checkout.readCheckout(7), null);
+    assert.equal(checkout.readCheckout('12345678-1234-4234-8234-123456789abc'), null);
     const cleaned = calls.find(c => c.args[0] === '/cart/orders/11/cleanup');
     assert.deepEqual(cleaned.args[1], checkout.cleanupBody(draft));
     const count = calls.filter(c => c.args[0] === '/orders').length;
@@ -74,11 +74,11 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
     assert.equal(calls.filter(c => c.args[0] === '/orders').length, count, 'created order cannot be submitted again');
 
     const rejected = page('pages/order/confirm.uvue').vm;
-    Object.assign(rejected, { userId: 7, windowId: 2, items: draft.items });
+    Object.assign(rejected, { userUuid: '12345678-1234-4234-8234-123456789abc', windowId: 2, items: draft.items });
     response = { ok: false, statusCode: 400, message: '库存不足' };
     rejected.submit(); await flush();
     assert.equal(rejected.pending, false);
-    assert.equal(checkout.readCheckout(7), null);
+    assert.equal(checkout.readCheckout('12345678-1234-4234-8234-123456789abc'), null);
 
     response = { ok: false, statusCode: 409, message: '菜品库存不足' };
     rejected.submit(); await flush();
@@ -86,7 +86,7 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
     response = { ok: false, statusCode: 409, message: 'Idempotency-Key 已用于不同的订单请求' };
     rejected.submit(); await flush();
     assert.equal(rejected.pending, true, 'key conflict never silently starts another order');
-    storage.delete(checkout.checkoutKey(7));
+    storage.delete(checkout.checkoutKey('12345678-1234-4234-8234-123456789abc'));
     response = ok({ status: 'SUCCESS' });
     await api.payOrder(11, 'secret');
     const payment = calls.at(-1);
@@ -102,7 +102,7 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
     const before = calls.length; detail.vm.cancel(); await flush();
     assert.equal(calls.length, before, 'uncertain payment blocks cancellation');
     const state = page('pages/order/detail.uvue').vm;
-    Object.assign(state, { orderId: 11, userId: 7 });
+    Object.assign(state, { orderId: 11, userUuid: '12345678-1234-4234-8234-123456789abc' });
     response = route => route === '/orders/11' ? ok(orderData) : route === '/users/me/balance' ? ok({ balance: 25, payPasswordSet: true }) : { ok: false, statusCode: 404, message: '支付单不存在' };
     state.refresh(); await flush();
     assert.equal(state.paymentReady, true, 'no payment yet permits first payment');
@@ -120,14 +120,35 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
     assert.deepEqual(list.component.computed.visibleOrders.call(list.vm).map(o => o.status), ['已支付', '制作中', '待取货']);
     list.vm.selectFilter('completed');
     assert.deepEqual(list.component.computed.visibleOrders.call(list.vm).map(o => o.status), ['已完成']);
+    list.vm.selectFilter('cancelled');
+    assert.deepEqual(list.component.computed.visibleOrders.call(list.vm).map(o => o.status), ['已取消']);
+    list.component.onLoad.call(list.vm, { filter: 'cancelled' });
+    assert.equal(list.vm.selectedStatus, 'cancelled');
     list.vm.selectFilter('all');
     assert.equal(list.component.computed.visibleOrders.call(list.vm).length, 6, 'cancelled orders remain in all orders');
-    list.vm.selectFilter('invalid'); assert.equal(list.vm.filter, 'all');
+    list.vm.selectFilter('invalid'); assert.equal(list.vm.selectedStatus, 'all');
     const mine = page('pages/mine/mine.uvue');
     let url = ''; uni.navigateTo = options => { url = options.url; };
-    mine.vm.openPendingOrders(); assert.equal(url, '/pages/order/list?filter=pending');
-    mine.vm.openActiveOrders(); assert.equal(url, '/pages/order/list?filter=active');
-    mine.vm.openCompletedOrders(); assert.equal(url, '/pages/order/list?filter=completed');
-    mine.vm.openOrders(); assert.equal(url, '/pages/order/list');
+    const destinations = [
+        ['openPendingOrders', 'pending', ['待支付'], '待支付订单'],
+        ['openActiveOrders', 'active', ['已支付', '制作中', '待取货'], '进行中订单'],
+        ['openCompletedOrders', 'completed', ['已完成'], '已完成订单'],
+        ['openCancelledOrders', 'cancelled', ['已取消'], '已取消订单'],
+        ['openOrders', 'all', ['待支付', '已支付', '制作中', '待取货', '已完成', '已取消'], '全部订单']
+    ];
+    const config = ts.parseConfigFileTextToJson('pages.json', fs.readFileSync(path.join(root, 'pages.json'), 'utf8')).config;
+    for (const [method, status, expected, title] of destinations) {
+        mine.vm[method]();
+        assert.equal(url, '/pages/order/list?status=' + status);
+        const [pathname, search] = url.split('?');
+        assert.ok(config.pages.some(p => '/' + p.path === pathname), 'target page registered');
+        const destination = page('pages/order/list.uvue');
+        destination.vm.orders = list.vm.orders;
+        destination.component.onLoad.call(destination.vm, Object.fromEntries(new URLSearchParams(search)));
+        assert.equal(destination.vm.selectedStatus, status, method + ': selected tab');
+        assert.equal(destination.component.computed.pageTitle.call(destination.vm), title);
+        assert.deepEqual(destination.component.computed.visibleOrders.call(destination.vm).map(o => o.status), expected);
+    }
+    console.log('All 5 order shortcuts passed route registration, query parsing, selected tab, page title and result filtering checks.');
     console.log('Order flow assertions passed: price isolation, snapshot cleanup, idempotent retry/recovery, duplicate guard, rejection recovery, payment contract, cancellation guard, password clearing.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

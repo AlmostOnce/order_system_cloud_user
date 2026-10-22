@@ -1,0 +1,27 @@
+<template>
+    <view class="pull-refresh-header">
+        <view class="pull-refresh-indicator"><loading v-if="refreshing" class="pull-refresh-spinner"></loading></view>
+        <view class="pull-refresh-copy">
+            <text v-if="refreshing" class="pull-refresh-title">正在刷新…</text>
+            <text v-if="refreshing && currentRefreshTime.length > 0" class="pull-refresh-time">本次刷新：{{ currentRefreshTime }}</text>
+        </view>
+    </view>
+</template>
+
+<script lang="uts">
+    export default {
+        props: {
+            refreshing: { type: Boolean, default: false },
+            currentRefreshTime: { type: String, default: '' }
+        }
+    }
+</script>
+
+<style scoped>
+    .pull-refresh-header { display: flex; flex-direction: row; align-items: center; justify-content: center; height: 72px; width: 100%; background-color: #FDF6F0; }
+    .pull-refresh-indicator { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin-right: 8px; }
+    .pull-refresh-spinner { width: 20px; height: 20px; border-color: #C2410C; }
+    .pull-refresh-copy { display: flex; flex-direction: column; }
+    .pull-refresh-title { font-size: 12px; line-height: 20px; color: #6B5F56; }
+    .pull-refresh-time { font-size: 11px; line-height: 18px; color: #7A6C60; }
+</style>

@@ -1,0 +1,9 @@
+/** 订单中心入口、路由参数与列表筛选共用同一组状态编码。 */
+export function normalizeOrderStatusFilter(value: string): string {
+    if (value == 'pending' || value == 'active' || value == 'completed' || value == 'cancelled') return value
+    return 'all'
+}
+
+export function openOrderList(status: string): void {
+    uni.navigateTo({ url: '/pages/order/list?status=' + normalizeOrderStatusFilter(status) })
+}

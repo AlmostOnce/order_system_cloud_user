@@ -2,7 +2,9 @@
 	<view class="account-page account-secondary">
 		<view class="account-status" :style="'height:' + statusBarHeight + 'px'"></view>
 		<view class="account-nav"><button class="account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">余额充值</text></view>
-		<scroll-view class="account-scroll" scroll-y="true">
+		<scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!submitting && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+
 			<view class="account-content">
             <view class="account-banner">
                 <view class="banner-copy">
@@ -17,7 +19,8 @@
 					<text class="account-muted">当前余额（元）</text><text class="recharge-balance">{{ loading ? '加载中…' : balanceText }}</text>
 					<text class="recharge-label">充值至账户余额</text>
 					<text class="account-note">选择金额并验证支付密码，即可充值到账。</text>
-					<button v-if="loadError.length > 0" class="account-link" @click="loadBalance"><text class="account-link-text">{{ loadError }} · 点击重试</text></button>
+                    <text v-if="loadError.length > 0" class="account-error">{{ loadError }}</text>
+
 				</view>
 				<view class="account-card">
 					<text class="account-heading">充值金额</text>
@@ -35,6 +38,8 @@
 </template>
 
 <script lang="uts">
+    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 	import { fetchMyBalance, rechargeBalance, walletPayload } from '../../api/wallet.uts'
 	import { HttpResult } from '../../common/http.uts'
 	import { jsonNumber, jsonBoolean } from '../../common/json.uts'
@@ -42,9 +47,10 @@
 	import { newRechargeKey, pendingRechargeKey, backToAccount } from '../../common/account.uts'
 
 	export default {
+        components: { RefreshHeader },
 		data() {
 			const amounts: string[] = ['20', '50', '100', '200']
-			return { statusBarHeight: 0, userId: 0, amounts: amounts, amountText: '50', payPassword: '',
+			return { refreshing: false, currentRefreshTime: '', statusBarHeight: 0, userUuid: '', amounts: amounts, amountText: '50', payPassword: '',
 				balanceText: '--', balanceReady: false, loading: false, loadError: '', submitting: false,
 				errorText: '', successText: '', requestKey: '', pending: false, pageVisible: false }
 		},
@@ -54,8 +60,8 @@
 			if (!isLoggedIn()) { uni.reLaunch({ url: '/pages/login/login' }); return }
 			const user = currentUser()
 			if (user == null || user.roleCode != 'CUSTOMER') { uni.switchTab({ url: '/pages/mine/mine' }); return }
-			this.userId = user.userId
-			const stored = uni.getStorageSync(pendingRechargeKey(this.userId))
+			this.userUuid = user.userUuid
+			const stored = uni.getStorageSync(pendingRechargeKey(this.userUuid))
 			if (typeof stored == 'string' && (stored as string).length > 0) {
 				const parts = (stored as string).split('|')
 				if (parts.length == 2) { this.amountText = parts[0]; this.requestKey = parts[1]; this.pending = true }
@@ -65,16 +71,30 @@
 		onHide() { this.pageVisible = false; this.payPassword = '' },
 		onUnload() { this.pageVisible = false; this.payPassword = '' },
 		methods: {
+            refreshPage() {
+                if (this.refreshing || this.loading || this.submitting) return
+                this.refreshing = true
+                const refreshStartedAt = Date.now()
+                this.currentRefreshTime = refreshTimeLabel(refreshStartedAt)
+                this.loadBalance().then(() => {
+                    finishPullRefresh(refreshStartedAt, this.balanceReady && this.loadError.length == 0, (time: string) => {
+                        if (time.length > 0) this.currentRefreshTime = time
+                        this.refreshing = false
+                    })
+                }).catch(() => {
+                    finishPullRefresh(refreshStartedAt, false, (_time: string) => { this.refreshing = false })
+                })
+            },
 			goBack() { backToAccount() },
 			openRecords() { uni.navigateTo({ url: '/pages/wallet/records?type=RECHARGE' }) },
 			openPassword() { uni.navigateTo({ url: '/pages/account/pay-password' }) },
 			chooseAmount(value: string) { this.amountText = value; this.errorText = ''; this.successText = '' },
-			loadBalance() {
-				if (this.loading) return
+			loadBalance(): Promise<void> {
+				if (this.loading) return Promise.resolve()
 				this.loading = true
 				this.balanceReady = false
 				this.loadError = ''
-				fetchMyBalance().then((result: HttpResult) => {
+				return fetchMyBalance().then((result: HttpResult) => {
 					this.loading = false
 					if (!this.pageVisible) return
 					const data = walletPayload(result)
@@ -95,7 +115,7 @@
 				if (this.payPassword.length < 6 || this.payPassword.length > 20) { this.errorText = '请输入 6 至 20 位支付密码'; return }
 				if (this.requestKey.length == 0) this.requestKey = newRechargeKey()
 				// 发送前保存非敏感的重试信息，网络中断或离开页面后仍能安全重放。
-				uni.setStorageSync(pendingRechargeKey(this.userId), text + '|' + this.requestKey)
+				uni.setStorageSync(pendingRechargeKey(this.userUuid), text + '|' + this.requestKey)
 				this.pending = true
 				this.submitting = true
 				rechargeBalance(amount, this.payPassword, this.requestKey).then((result: HttpResult) => {
@@ -106,13 +126,13 @@
 						this.errorText = result.message.length > 0 ? result.message : '充值结果暂未确认，请重试'
 						// 已明确拒绝的请求没有入账，允许用户修改金额后重新提交。
 						if (result.statusCode >= 400 && result.statusCode < 500 && result.statusCode != 408) {
-							this.pending = false; this.requestKey = ''; uni.removeStorageSync(pendingRechargeKey(this.userId))
+							this.pending = false; this.requestKey = ''; uni.removeStorageSync(pendingRechargeKey(this.userUuid))
 						}
 						return
 					}
 					this.pending = false
 					this.requestKey = ''
-					uni.removeStorageSync(pendingRechargeKey(this.userId))
+					uni.removeStorageSync(pendingRechargeKey(this.userUuid))
 					this.balanceText = (jsonNumber(data, 'balanceAfter') ?? 0).toFixed(2)
 					this.successText = '本次充值 ¥' + (jsonNumber(data, 'amount') ?? amount).toFixed(2) + '，入账后余额 ¥' + this.balanceText
 					if (this.pageVisible) this.loadBalance()
