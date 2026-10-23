@@ -28,23 +28,16 @@
             </view>
         </scroll-view>
 
-		<!-- 菜单主体：左侧分类栏 + 右侧菜品列表，两侧各自独立滚动 -->
+		<!-- 菜单主体：左侧分类导航与右侧连续菜单联动 -->
 		<view v-else class="catalog">
 			<!-- 左侧分类栏：纵向排列，选中项带主色竖条与实色底 -->
-			<scroll-view class="rail" scroll-y="true">
-				<view
-					class="rail-item"
-					:class="activeCategoryId == 0 ? 'rail-item-on' : ''"
-					hover-class="rail-item-hover"
-					@click="selectCategory(0)"
-				>
-					<text class="rail-text" :class="activeCategoryId == 0 ? 'rail-text-on' : ''">全部</text>
-				</view>
+			<scroll-view class="rail" direction="vertical" :scroll-into-view="railAnchor">
 				<view
 					class="rail-item"
 					:class="activeCategoryId == group.categoryId ? 'rail-item-on' : ''"
 					hover-class="rail-item-hover"
 					v-for="group in groups"
+					:id="categoryRailId(group.categoryId)"
 					:key="group.categoryId"
 					@click="selectCategory(group.categoryId)"
 				>
@@ -53,7 +46,7 @@
 			</scroll-view>
 
 			<!-- 右侧菜品区 -->
-			<scroll-view class="dishes" scroll-y="true" :refresher-enabled="!mutating && (refreshing || (!loading && !stockLoading && !cartLoading))" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+			<scroll-view class="dishes" direction="vertical" :scroll-into-view="dishesAnchor" :scroll-with-animation="false" @scroll="onDishesScroll" :refresher-enabled="!mutating && (refreshing || (!loading && !stockLoading && !cartLoading))" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
                 <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
 
 				<view v-if="stockLoading || stockLoadError.length > 0" class="stock-status">
@@ -63,14 +56,14 @@
 				<view class="menu-window-cover"><business-image :src="windowImageUrl" kind="window"></business-image></view>
                 <window-message :content="windowDescription"></window-message>
 				<!-- 空菜单 / 当前分类无菜品 -->
-				<view v-if="visibleGroups().length == 0" class="state state-inline">
-					<text class="state-text">{{ activeCategoryId == 0 ? '该档口暂无在售菜品' : '该分类暂无在售菜品' }}</text>
-					<text class="state-hint">换一个分类或稍后再来看看</text>
+				<view v-if="groups.length == 0" class="state state-inline">
+					<text class="state-text">该档口暂无在售菜品</text>
+					<text class="state-hint">稍后再来看看</text>
 				</view>
 
 				<!-- 菜品列表：按分类分组展示，组内菜品依次浮入 -->
 				<view v-else class="menu">
-					<view class="group" v-for="group in visibleGroups()" :key="group.categoryId">
+					<view class="group" :id="categorySectionId(group.categoryId)" v-for="group in groups" :key="group.categoryId">
 						<view class="group-head">
 							<text class="group-title">{{ group.categoryName }}</text>
 							<text class="group-count">{{ group.products.length }} 款</text>
@@ -114,6 +107,7 @@
 								</view>
 						</view>
 					</view>
+                    <view class="menu-tail" :style="'height:' + categoryTailHeight + 'px'" aria-hidden="true"></view>
 				</view>
 			</scroll-view>
 		</view>
@@ -189,7 +183,7 @@
 </template>
 
 <script setup lang="uts">
-import { reactive, toRefs } from 'vue'
+import { reactive, toRefs, nextTick, watch, getCurrentInstance } from 'vue'
 import WindowMessage from '../../components/window-message/window-message.uvue';
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
@@ -223,6 +217,8 @@ type MenuGroup = {
  * 页面用「菜品 ID → 数量」的扁平列表保存购物车中的数量，
  * 避免在菜品对象上直接写数量导致菜单快照被污染。
  */
+type CategoryOffset = { categoryId: number, top: number };
+
 type QuantityEntry = {
     /** 菜品 ID。 */
     productId: number;
@@ -265,6 +261,11 @@ const initialEmptyGroups: Array<MenuGroup> = [];
 const initialEmptyQuantities: Array<QuantityEntry> = [];
 const initialEmptyCartItems: Array<CartItem> = [];
 const initialEmptyStocks: Array<ProductStock> = [];
+const initialCategoryOffsets: Array<CategoryOffset> = [];
+const menuInstance = getCurrentInstance();
+let measurementScheduled = false;
+let layoutVersion = 0;
+let menuDisposed = false;
 const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTime: '', cartLoading: false,
     // 状态栏高度（px），用于顶部占位。
     statusBarHeight: 0,
@@ -286,8 +287,9 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     loadError: '',
     // 菜品分组，已过滤掉没有菜品的空分类。
     groups: initialEmptyGroups,
-    // 当前选中的分类 ID，0 表示「全部」。
+    // 当前滚动到的分类，0 表示暂无分类。
     activeCategoryId: 0,
+    dishesAnchor: '', railAnchor: '', dishesScrollTop: 0, categoryTailHeight: 0, categoryOffsets: initialCategoryOffsets,
     // 购物车中该窗口的菜品数量，按菜品 ID 记录。
     quantities: initialEmptyQuantities,
     // 该窗口购物车条目明细，供购物车清单面板展示。
@@ -307,7 +309,7 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     // 菜品卡片是否已就绪，控制依次浮入。
     listReady: false })
 
-const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHeight, windowId, stocks, stockLoading, stockRequestVersion, stockLoadError, windowName, windowImageUrl, windowLocation, windowDescription, loading, loadError, groups, activeCategoryId, quantities, cartItems, cartQuantity, cartAmount, cartPanelVisible, cartPanelReady, mutating, entered, listReady } = toRefs(state)
+const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHeight, windowId, stocks, stockLoading, stockRequestVersion, stockLoadError, windowName, windowImageUrl, windowLocation, windowDescription, loading, loadError, groups, activeCategoryId, dishesAnchor, railAnchor, dishesScrollTop, categoryTailHeight, categoryOffsets, quantities, cartItems, cartQuantity, cartAmount, cartPanelVisible, cartPanelReady, mutating, entered, listReady } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.loading || state.stockLoading || state.cartLoading || state.mutating)
@@ -402,8 +404,8 @@ function loadMenu(): Promise<void> {
         }
         // 写回分组列表，驱动页面渲染。
         state.groups = converted;
-        // 回到「全部」标签，避免重载后停留在不存在的分类。
-        state.activeCategoryId = 0;
+        // 重新建立完整菜单的分类导航，不做单组过滤。
+        resetCategoryNavigation();
         // 菜单渲染完成后再切到「已入场」，菜品卡片才会依次浮入。
         setTimeout(() => {
             state.listReady = true;
@@ -526,30 +528,118 @@ function loadCart(): Promise<void> {
     });
 }
 
-function selectCategory(categoryId: number) {
-    // 分类切换本身只是本地过滤，无需请求后端。
-    state.activeCategoryId = categoryId;
-    // 重播一次入场动画，让新分类的菜品重新依次浮入。
-    state.listReady = false;
-    setTimeout(() => {
-        state.listReady = true;
-    }, 60);
+function categorySectionId(categoryId: number): string {
+    return 'menu-category-' + (categoryId < 0 ? 'other' : categoryId.toString());
 }
 
-function visibleGroups(): Array<MenuGroup> {
-    // 「全部」标签直接展示所有分组。
-    if (state.activeCategoryId == 0) {
-        return state.groups;
-    }
-    // 其它标签只保留匹配的分组。
-    const result: Array<MenuGroup> = [];
-    for (let i = 0; i < state.groups.length; i++) {
-        if (state.groups[i].categoryId == state.activeCategoryId) {
-            result.push(state.groups[i]);
-        }
-    }
-    return result;
+function categoryRailId(categoryId: number): string {
+    return 'menu-rail-' + (categoryId < 0 ? 'other' : categoryId.toString());
 }
+
+function resetCategoryNavigation() {
+    state.categoryOffsets = [];
+    state.categoryTailHeight = 0;
+    state.dishesAnchor = '';
+    state.dishesScrollTop = 0;
+    state.activeCategoryId = state.groups.length > 0 ? state.groups[0].categoryId : 0;
+    state.railAnchor = state.groups.length > 0 ? categoryRailId(state.activeCategoryId) : '';
+    scheduleCategoryMeasurement();
+}
+
+function selectCategory(categoryId: number) {
+    if (!state.groups.some((group: MenuGroup): boolean => group.categoryId == categoryId)) return;
+    state.activeCategoryId = categoryId;
+    state.railAnchor = categoryRailId(categoryId);
+    // 清空后下一帧重新赋值，重复点击同一分类也能重新定位其标题。
+    state.dishesAnchor = '';
+    nextTick(() => {
+        if (!menuDisposed && state.activeCategoryId == categoryId)
+            state.dishesAnchor = categorySectionId(categoryId);
+    });
+}
+
+function syncCategoryFromScroll(scrollTop: number) {
+    if (state.categoryOffsets.length == 0) return;
+    let current = state.categoryOffsets[0].categoryId;
+    for (let i = 0; i < state.categoryOffsets.length; i++) {
+        if (state.categoryOffsets[i].top <= scrollTop + 2) current = state.categoryOffsets[i].categoryId;
+        else break;
+    }
+    if (current != state.activeCategoryId) {
+        state.activeCategoryId = current;
+        state.railAnchor = categoryRailId(current);
+    }
+}
+
+function onDishesScroll(event: UniScrollEvent) {
+    state.dishesScrollTop = Math.max(0, event.detail.scrollTop);
+    syncCategoryFromScroll(state.dishesScrollTop);
+}
+
+function applyCategoryLayout(viewportTop: number, viewportHeight: number, scrollTop: number, rectangles: Array<NodeInfo>, bottomSpacing: number = 0) {
+    if (viewportHeight <= 0 || rectangles.length != state.groups.length || state.groups.length == 0) return;
+    const offsets: Array<CategoryOffset> = [];
+    let lastHeight = 0;
+    for (let i = 0; i < state.groups.length; i++) {
+        const id = categorySectionId(state.groups[i].categoryId);
+        const rectangle = rectangles.find((rect: NodeInfo): boolean => rect.id == id);
+        if (rectangle == null || rectangle.top == null || rectangle.height == null) return;
+        offsets.push({ categoryId: state.groups[i].categoryId, top: Math.max(0, rectangle.top! - viewportTop + scrollTop) });
+        lastHeight = rectangle.height!;
+    }
+    state.dishesScrollTop = Math.max(0, scrollTop);
+    state.categoryOffsets = offsets;
+    // 最后一组较短时也能把标题滚到顶部，避免点击末分类却高亮前一组。
+    state.categoryTailHeight = Math.max(0, viewportHeight - lastHeight - bottomSpacing);
+    syncCategoryFromScroll(state.dishesScrollTop);
+}
+
+function measureCategoryLayout() {
+    if (menuDisposed || menuInstance == null || menuInstance.proxy == null || state.loading || state.loadError.length > 0 || state.groups.length == 0) return;
+    const version = layoutVersion;
+    let measuredScrollTop = state.dishesScrollTop;
+    const measuredTailHeight = state.categoryTailHeight;
+    const query = uni.createSelectorQuery().in(menuInstance.proxy);
+    query.selectAll('.dishes').boundingClientRect();
+    query.selectAll('.group').boundingClientRect();
+    query.selectAll('.dishes').scrollOffset((offsets: any) => {
+        const values = offsets as Array<NodeInfo>;
+        if (values.length > 0) measuredScrollTop = values[0].scrollTop ?? measuredScrollTop;
+    });
+    query.selectAll('.menu').boundingClientRect();
+    query.exec((results: Array<any>) => {
+        if (menuDisposed || version != layoutVersion || results.length < 4) return;
+        const viewports = results[0] as Array<NodeInfo>;
+        const rectangles = results[1] as Array<NodeInfo>;
+        const menus = results[3] as Array<NodeInfo>;
+        if (viewports.length == 0) return;
+        const lastId = categorySectionId(state.groups[state.groups.length - 1].categoryId);
+        const last = rectangles.find((rect: NodeInfo): boolean => rect.id == lastId);
+        const bottomSpacing = menus.length > 0 && last != null
+            ? Math.max(0, (menus[0].bottom ?? 0) - (last.bottom ?? 0) - measuredTailHeight) : 0;
+        applyCategoryLayout(viewports[0].top ?? 0, viewports[0].height ?? 0,
+            measuredScrollTop, rectangles, bottomSpacing);
+    });
+}
+
+function scheduleCategoryMeasurement() {
+    layoutVersion++;
+    if (measurementScheduled || menuDisposed) return;
+    measurementScheduled = true;
+    nextTick(() => {
+        measurementScheduled = false;
+        measureCategoryLayout();
+    });
+}
+
+// 库存提示、购物车错误或菜单变化会影响分组位置，布局完成后重新测量。
+watch(() => state.groups, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
+watch(() => state.loading, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
+watch(() => state.stockLoading, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
+watch(() => state.stockLoadError, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
+watch(() => state.cartLoadError, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
+onResize(() => { scheduleCategoryMeasurement(); });
+onUnload(() => { menuDisposed = true; layoutVersion++; });
 
 function quantityOf(productId: number): number {
     // 遍历扁平数量列表，命中即返回。
@@ -946,10 +1036,12 @@ onReady(() => {
 
 	/* ---------- 分类栏与菜品区 ---------- */
 
-	/* 主体：左侧固定宽度分类栏 + 右侧菜品区，左右各自滚动。
+	/* 主体：左侧固定宽度分类导航 + 右侧连续菜品区。
 	   显式声明 align-items: stretch，让两个滚动区自动撑满剩余高度，
 	   否则 scroll-view 高度收缩为内容高度，无法滚动 */
 	.catalog {
+        min-height: 0;
+        overflow: hidden;
 		flex: 1;
 		flex-direction: row;
 		align-items: stretch;
@@ -1000,9 +1092,12 @@ onReady(() => {
 
 	/* 右侧菜品区：白底，底部留出购物车栏高度，最后一张卡片不被遮挡 */
 	.dishes {
+        min-width: 0;
 		flex: 1;
 		background-color: #FFFFFF;
 	}
+
+    .menu-tail { flex-shrink: 0; width: 100%; }
 
 	/* ---------- 状态区 ---------- */
 
