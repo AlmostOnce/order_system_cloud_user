@@ -33,7 +33,7 @@ function load(file) {
     if (file.endsWith(path.normalize('common/config.uts'))) return { API_BASE_URL: 'https://gateway.example/api', API_TIMEOUT: 10000, SUCCESS_CODE: 'COMMON_000' };
     if (cache.has(file)) return cache.get(file);
     let source = fs.readFileSync(file, 'utf8');
-    if (file.endsWith('.uvue')) source = source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
+    if (file.endsWith('.uvue')) { const setup = require('./setup-harness.cjs').loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1], p => load(path.resolve(path.dirname(file), p))); cache.set(file, setup); return setup; }
     assert.equal(ts.createSourceFile(file + '.ts', source, ts.ScriptTarget.Latest, true).parseDiagnostics.length, 0, file);
     const mod = { exports: {} }; cache.set(file, mod.exports);
     const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
@@ -47,11 +47,11 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     assert.equal(images.imageSource('http://localhost:9090/api/files/' + KEY + '/content', 'avatar'), 'https://gateway.example/api/files/' + KEY + '/content');
     assert.equal(images.imageSource('/api/files/' + KEY + '/content', 'window'), 'https://gateway.example/api/files/' + KEY + '/content');
     assert.equal(images.imageSource('javascript:alert(1)', 'product'), '/static/images/defaults/product.jpg');
-    const component = load('components/business-image/business-image.uvue').default;
-    const vm = { ...component.data(), src: 'https://invalid/photo', kind: 'product' };
-    component.methods.onImageError.call(vm);
-    assert.equal(component.computed.resolvedSource.call(vm), images.defaultImage('product'));
-    component.watch.src.call(vm, 'new-photo'); assert.equal(vm.failed, false);
+    const component = load('components/business-image/business-image.uvue');
+    const vm = component.create({ src: 'https://invalid/photo', kind: 'product' });
+    vm.onImageError();
+    assert.equal(vm.resolvedSource, images.defaultImage('product'));
+    vm.src = 'new-photo'; await flush(); assert.equal(vm.failed, false);
 
     uploadMode = 'expired'; const uploaded = await files.uploadImage('blob:local-photo', 'USER_AVATAR', 0);
     assert.equal(uploaded.ok, true); assert.equal(token, 'new-token');
@@ -64,9 +64,9 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     chooseMode = 'large'; assert.ok((await picker.chooseLocalImage()).error.length > 0);
     chooseMode = 'cancel'; assert.deepEqual(await picker.chooseLocalImage(), { path: '', error: '' });
 
-    const profile = load('pages/account/profile.uvue').default;
-    const user = { ...profile.data(), loading: false, userUuid: '12345678-1234-4234-8234-123456789abc', avatarUrl: 'old-avatar' };
-    for (const [name, fn] of Object.entries(profile.methods)) user[name] = fn.bind(user);
+    const profile = load('pages/account/profile.uvue');
+    const user = Object.assign(profile.create(), { loading: false, userUuid: '12345678-1234-4234-8234-123456789abc', avatarUrl: 'old-avatar' });
+
     uploadMode = 'success'; saveMode = 'fail'; chooseMode = 'success'; calls.length = 0;
     user.openAvatarPreview();
     assert.equal(user.avatarPreviewVisible, true); assert.equal(calls.length, 0, 'preview never opens picker or starts upload');
@@ -81,7 +81,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     assert.equal(user.avatarUrl, '/api/files/' + KEY + '/content'); assert.equal(user.pendingAvatarKey, '');
     assert.equal(calls.filter(c => c.type === 'upload').length, uploads, 'binding retries reuse uploaded file');
     user.closeAvatarPreview(); assert.equal(user.avatarPreviewVisible, false);
-    profile.onLoad.call(user, { avatar: 'preview' }); assert.equal(user.avatarPreviewVisible, true, 'mine avatar deep link opens preview');
+    user.$hooks.onLoad.call(user, { avatar: 'preview' }); assert.equal(user.avatarPreviewVisible, true, 'mine avatar deep link opens preview');
     chooseMode = 'cancel'; calls.length = 0; user.changeAvatar(); await flush();
     assert.equal(user.avatarChoosing, false); assert.equal(user.avatarUploading, false);
     assert.equal(calls.filter(c => c.type === 'upload').length, 0, 'cancelled picker does not upload');
@@ -92,13 +92,13 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     assert.ok(template.indexOf('@click="changeAvatar"') > template.indexOf('v-if="avatarPreviewVisible"'), 'change option belongs to preview only');
     await files.saveCatalogImage('window', 2, KEY); assert.ok(calls.at(-1).options.url.endsWith('/products/admin/windows/2/image'));
     await files.saveCatalogImage('product', 3, KEY); assert.ok(calls.at(-1).options.url.endsWith('/products/admin/products/3/image'));
-    const management = load('pages/manage/images.uvue').default;
-    const state = management.data();
-    const parsedWindows = management.methods.parseItems.call(state, { ok: true, data: { data: [{ windowId: 2, windowName: '窗口', imageUrl: '' }] } }, 'window');
+    const management = load('pages/manage/images.uvue').create();
+
+    const parsedWindows = management.parseItems( { ok: true, data: { data: [{ windowId: 2, windowName: '窗口', imageUrl: '' }] } }, 'window');
     assert.deepEqual(parsedWindows, [{ id: 2, name: '窗口', imageUrl: '' }]);
-    const parsedProducts = management.methods.parseItems.call(state, { ok: true, data: { data: [{ productId: 3, productName: '菜品', imageUrl: '' }] } }, 'product');
+    const parsedProducts = management.parseItems( { ok: true, data: { data: [{ productId: 3, productName: '菜品', imageUrl: '' }] } }, 'product');
     assert.deepEqual(parsedProducts, [{ id: 3, name: '菜品', imageUrl: '' }]);
-    assert.equal(management.methods.parseItems.call(state, { ok: true, data: { data: [null] } }, 'product'), null);
+    assert.equal(management.parseItems( { ok: true, data: { data: [null] } }, 'product'), null);
     for (const kind of ['avatar', 'window', 'product']) assert.ok(fs.statSync(path.join(root, images.defaultImage(kind))).size > 1000);
     console.log('Image integration checks passed: multipart/auth renewal, no network auto-retry, 5MB/cancel handling, ownership binding contract, failed-save recovery, gateway URL normalization, default and broken-image fallback.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

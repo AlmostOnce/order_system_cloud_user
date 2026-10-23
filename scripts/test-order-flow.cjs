@@ -18,7 +18,7 @@ function load(relative) {
     if (file === path.resolve(root, 'store/auth.uts')) return { currentUser: () => ({ userUuid: '12345678-1234-4234-8234-123456789abc', roleCode: 'CUSTOMER' }) };
     if (file === path.resolve(root, 'common/account.uts')) return { accountDate: s => s, backToAccount() {} };
     let source = fs.readFileSync(file, 'utf8');
-    if (file.endsWith('.uvue')) source = source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
+    if (file.endsWith('.uvue')) { const setup = require('./setup-harness.cjs').loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1], p => load(path.relative(root, path.resolve(path.dirname(file), p)))); cache.set(file, setup); return setup; }
     const parsed = ts.createSourceFile(file + '.ts', source, ts.ScriptTarget.Latest, true);
     assert.equal(parsed.parseDiagnostics.length, 0, relative + ': syntax');
     const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
@@ -27,10 +27,8 @@ function load(relative) {
     cache.set(file, mod.exports); return mod.exports;
 }
 function page(relative) {
-    const component = load(relative).default;
-    const vm = component.data();
-    for (const [name, fn] of Object.entries(component.methods)) vm[name] = fn.bind(vm);
-    return { vm, component };
+    const vm = load(relative).create();
+    return { vm, component: vm.$hooks };
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const ok = data => ({ ok: true, data: { data }, message: '', statusCode: 200 });
@@ -115,17 +113,17 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
     const list = page('pages/order/list.uvue');
     list.vm.orders = ['待支付', '已支付', '制作中', '待取货', '已完成', '已取消'].map((status, index) => ({ ...api.parseOrder(orderData), orderId: index + 1, status }));
     list.component.onLoad.call(list.vm, { filter: 'pending' });
-    assert.deepEqual(list.component.computed.visibleOrders.call(list.vm).map(o => o.status), ['待支付']);
+    assert.deepEqual(list.vm.visibleOrders.map(o => o.status), ['待支付']);
     list.vm.selectFilter('active');
-    assert.deepEqual(list.component.computed.visibleOrders.call(list.vm).map(o => o.status), ['已支付', '制作中', '待取货']);
+    assert.deepEqual(list.vm.visibleOrders.map(o => o.status), ['已支付', '制作中', '待取货']);
     list.vm.selectFilter('completed');
-    assert.deepEqual(list.component.computed.visibleOrders.call(list.vm).map(o => o.status), ['已完成']);
+    assert.deepEqual(list.vm.visibleOrders.map(o => o.status), ['已完成']);
     list.vm.selectFilter('cancelled');
-    assert.deepEqual(list.component.computed.visibleOrders.call(list.vm).map(o => o.status), ['已取消']);
+    assert.deepEqual(list.vm.visibleOrders.map(o => o.status), ['已取消']);
     list.component.onLoad.call(list.vm, { filter: 'cancelled' });
     assert.equal(list.vm.selectedStatus, 'cancelled');
     list.vm.selectFilter('all');
-    assert.equal(list.component.computed.visibleOrders.call(list.vm).length, 6, 'cancelled orders remain in all orders');
+    assert.equal(list.vm.visibleOrders.length, 6, 'cancelled orders remain in all orders');
     list.vm.selectFilter('invalid'); assert.equal(list.vm.selectedStatus, 'all');
     const mine = page('pages/mine/mine.uvue');
     let url = ''; uni.navigateTo = options => { url = options.url; };
@@ -146,8 +144,8 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
         destination.vm.orders = list.vm.orders;
         destination.component.onLoad.call(destination.vm, Object.fromEntries(new URLSearchParams(search)));
         assert.equal(destination.vm.selectedStatus, status, method + ': selected tab');
-        assert.equal(destination.component.computed.pageTitle.call(destination.vm), title);
-        assert.deepEqual(destination.component.computed.visibleOrders.call(destination.vm).map(o => o.status), expected);
+        assert.equal(destination.vm.pageTitle, title);
+        assert.deepEqual(destination.vm.visibleOrders.map(o => o.status), expected);
     }
     console.log('All 5 order shortcuts passed route registration, query parsing, selected tab, page title and result filtering checks.');
     console.log('Order flow assertions passed: price isolation, snapshot cleanup, idempotent retry/recovery, duplicate guard, rejection recovery, payment contract, cancellation guard, password clearing.');

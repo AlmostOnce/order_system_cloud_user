@@ -126,400 +126,348 @@
 	</view>
 </template>
 
-<script lang="uts">
-    import BusinessImage from '../../components/business-image/business-image.uvue'
-    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
-    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
-	// 导入登录态：登录判断与当前身份读取（退出入口已迁到「我的」页）。
-	import { isLoggedIn, currentUser } from '../../store/auth.uts'
-	// 导入商品查询与结果类型：档口列表、餐厅列表及其返回结构。
-	import { listActiveWindows, listActiveRestaurants, WindowItem, WindowListResult, RestaurantItem, RestaurantListResult } from '../../api/product.uts'
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import { onShow, onReady } from '@dcloudio/uni-app'
+import BusinessImage from '../../components/business-image/business-image.uvue';
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
+// 导入登录态：登录判断与当前身份读取（退出入口已迁到「我的」页）。
+import { isLoggedIn, currentUser } from '../../store/auth.uts';
+// 导入商品查询与结果类型：档口列表、餐厅列表及其返回结构。
+import { listActiveWindows, listActiveRestaurants, WindowItem, WindowListResult, RestaurantItem, RestaurantListResult } from '../../api/product.uts';
+/** 表示「全部餐厅」的哨兵值，与任何真实餐厅 ID 都不会冲突。 */
+const ALL_RESTAURANTS: number = 0;
+/** 「全部餐厅」的展示名称。 */
+const ALL_RESTAURANTS_NAME: string = '全部餐厅';
+/**
+ * 按当前时刻生成问候语。
+ *
+ * 首页不再展示任何个人信息，问候语只按时段变化，不拼用户名。
+ *
+ * @return 纯时段问候语
+ */
+function buildGreeting(): string {
+    // 取本机当前小时数，用于选择时段问候语。
+    const hour = new Date().getHours();
+    // 默认按晚间问候，再由时段判断覆盖。
+    let prefix = '晚上好';
+    // 深夜 0-5 点。
+    if (hour < 6) {
+        prefix = '夜里好';
+    }
+    else if (hour < 11) {
+        // 早晨 6-10 点。
+        prefix = '早上好';
+    }
+    else if (hour < 14) {
+        // 中午 11-13 点。
+        prefix = '中午好';
+    }
+    else if (hour < 18) {
+        // 下午 14-17 点。
+        prefix = '下午好';
+    }
+    // 直接返回时段问候，不拼接用户名等个人信息。
+    return prefix;
+}
+/**
+ * 名称过长时截断，避免把品牌区第一行撑破。
+ *
+ * @param name 原始名称
+ * @return 展示用名称
+ */
+function shortenName(name: string): string {
+    // 超过 8 个字符时截断并追加省略号。
+    if (name.length > 8) {
+        return name.substring(0, 8) + '…';
+    }
+    // 未超长则原样返回。
+    return name;
+}
 
-	/** 表示「全部餐厅」的哨兵值，与任何真实餐厅 ID 都不会冲突。 */
-	const ALL_RESTAURANTS: number = 0
+// 档口列表与可见档口共用同一份空数组，避免先渲染时出现 undefined。
+const initialEmptyWindows: Array<WindowItem> = [];
+// 餐厅列表的初始空数组。
+const initialEmptyRestaurants: Array<RestaurantItem> = [];
+const state = reactive({ refreshing: false, currentRefreshTime: '',
+    // 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
+    statusBarHeight: 0,
+    // 顶部问候语：初值必须保持为空字符串，不能在此调用依赖当前时间的函数。
+    // H5 端首屏会先做服务端预渲染再在客户端 hydrate，data() 里的 new Date()
+    // 在两端取值可能不一致，会触发 hydration mismatch 警告。
+    greeting: '',
+    // 当前角色编码，用于模板判断是否展示档口列表。
+    roleCode: '',
+    // 后端返回的档口全量列表。
+    windows: initialEmptyWindows,
+    // 按当前选中餐厅筛选后、供页面渲染的档口列表。
+    visibleWindows: initialEmptyWindows,
+    // 后端返回的餐厅列表，供选择面板渲染。
+    restaurants: initialEmptyRestaurants,
+    // 当前选中的餐厅 ID，0 表示「全部餐厅」。
+    selectedRestaurantId: ALL_RESTAURANTS,
+    // 当前选中餐厅的展示名称。
+    selectedRestaurantName: ALL_RESTAURANTS_NAME,
+    // 是否正在加载档口与餐厅数据。
+    loading: true,
+    // 加载失败的错误文案，非空时页面展示错误态。
+    loadError: '',
+    // 是否已进入入场动画终态，切换后驱动各元素的过渡。
+    entered: false,
+    // 档口列表是否已就绪，控制卡片依次浮入的过渡。
+    listReady: false,
+    // 餐厅选择面板是否已挂载显示。
+    pickerVisible: false,
+    // 餐厅选择面板是否已进入终态，控制其滑入滑出过渡。
+    pickerReady: false })
 
-	/** 「全部餐厅」的展示名称。 */
-	const ALL_RESTAURANTS_NAME: string = '全部餐厅'
+const { refreshing, currentRefreshTime, statusBarHeight, greeting, roleCode, windows, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, listReady, pickerVisible, pickerReady } = toRefs(state)
 
-	/**
-	 * 按当前时刻生成问候语。
-	 *
-	 * 首页不再展示任何个人信息，问候语只按时段变化，不拼用户名。
-	 *
-	 * @return 纯时段问候语
-	 */
-	function buildGreeting(): string {
-		// 取本机当前小时数，用于选择时段问候语。
-		const hour = new Date().getHours()
-		// 默认按晚间问候，再由时段判断覆盖。
-		let prefix = '晚上好'
-		// 深夜 0-5 点。
-		if (hour < 6) {
-			prefix = '夜里好'
-		} else if (hour < 11) {
-			// 早晨 6-10 点。
-			prefix = '早上好'
-		} else if (hour < 14) {
-			// 中午 11-13 点。
-			prefix = '中午好'
-		} else if (hour < 18) {
-			// 下午 14-17 点。
-			prefix = '下午好'
-		}
-		// 直接返回时段问候，不拼接用户名等个人信息。
-		return prefix
-	}
+function refreshPage() {
+    if (state.refreshing || state.loading || state.pickerVisible || state.roleCode != 'CUSTOMER')
+        return;
+    state.refreshing = true;
+    const refreshStartedAt = Date.now();
+    state.currentRefreshTime = refreshTimeLabel(refreshStartedAt);
+    loadCatalog().then(() => {
+        finishPullRefresh(refreshStartedAt, state.loadError.length == 0, (time: string) => {
+            if (time.length > 0)
+                state.currentRefreshTime = time;
+            state.refreshing = false;
+        });
+    }).catch(() => {
+        finishPullRefresh(refreshStartedAt, false, (_time: string) => { state.refreshing = false; });
+    });
+}
 
-	/**
-	 * 名称过长时截断，避免把品牌区第一行撑破。
-	 *
-	 * @param name 原始名称
-	 * @return 展示用名称
-	 */
-	function shortenName(name: string): string {
-		// 超过 8 个字符时截断并追加省略号。
-		if (name.length > 8) {
-			return name.substring(0, 8) + '…'
-		}
-		// 未超长则原样返回。
-		return name
-	}
+function stallDelay(index: number): string {
+    // 预置各档位的延迟秒数，下标即卡片序号。
+    const delays: string[] = ['0.34s', '0.40s', '0.46s', '0.52s', '0.58s', '0.64s', '0.70s', '0.76s'];
+    // 下标异常（负数）时退回第一档，避免取值越界。
+    if (index < 0) {
+        return 'transition-delay: 0.34s';
+    }
+    // 超出预设档位的卡片统一沿用最后一档，防止等待时间无限增长。
+    if (index >= delays.length) {
+        return 'transition-delay: 0.76s';
+    }
+    // 正常档位：拼出内联的 transition-delay 声明。
+    return 'transition-delay: ' + delays[index];
+}
 
-	export default {
-        components: { RefreshHeader, BusinessImage },
-		data() {
-			// 档口列表与可见档口共用同一份空数组，避免先渲染时出现 undefined。
-			const emptyWindows: Array<WindowItem> = []
-			// 餐厅列表的初始空数组。
-			const emptyRestaurants: Array<RestaurantItem> = []
+function sheetListStyle(): string {
+    // 每项固定 52px，首项是「全部餐厅」，故条目数为餐厅数加一。
+    const total = state.restaurants.length + 1;
+    // 面板最多展示 6 条，超出部分靠内部滚动查看。
+    const visible = total > 6 ? 6 : total;
+    // 按可见条目数换算出面板高度。
+    return 'height: ' + (visible * 52) + 'px';
+}
 
-			return { refreshing: false, currentRefreshTime: '',
-				// 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
-				statusBarHeight: 0,
-				// 顶部问候语：初值必须保持为空字符串，不能在此调用依赖当前时间的函数。
-				// H5 端首屏会先做服务端预渲染再在客户端 hydrate，data() 里的 new Date()
-				// 在两端取值可能不一致，会触发 hydration mismatch 警告。
-				greeting: '',
-				// 当前角色编码，用于模板判断是否展示档口列表。
-				roleCode: '',
-				// 后端返回的档口全量列表。
-				windows: emptyWindows,
-				// 按当前选中餐厅筛选后、供页面渲染的档口列表。
-				visibleWindows: emptyWindows,
-				// 后端返回的餐厅列表，供选择面板渲染。
-				restaurants: emptyRestaurants,
-				// 当前选中的餐厅 ID，0 表示「全部餐厅」。
-				selectedRestaurantId: ALL_RESTAURANTS,
-				// 当前选中餐厅的展示名称。
-				selectedRestaurantName: ALL_RESTAURANTS_NAME,
-				// 是否正在加载档口与餐厅数据。
-				loading: true,
-				// 加载失败的错误文案，非空时页面展示错误态。
-				loadError: '',
-				// 是否已进入入场动画终态，切换后驱动各元素的过渡。
-				entered: false,
-				// 档口列表是否已就绪，控制卡片依次浮入的过渡。
-				listReady: false,
-				// 餐厅选择面板是否已挂载显示。
-				pickerVisible: false,
-				// 餐厅选择面板是否已进入终态，控制其滑入滑出过渡。
-				pickerReady: false
-			}
-		},
-		onShow() {
-			// 状态栏高度取不到时用 24px 兜底，避免顶部内容被系统栏遮挡。
-			const info = uni.getWindowInfo()
-			this.statusBarHeight = info.statusBarHeight > 0 ? info.statusBarHeight : 24
+function listTitle(): string {
+    // 选中「全部餐厅」时展示通用标题。
+    if (state.selectedRestaurantId == ALL_RESTAURANTS) {
+        return '全部档口';
+    }
+    // 否则直接以当前餐厅名作为区头标题。
+    return state.selectedRestaurantName;
+}
 
-			// 令牌被清空（如退出登录）时不允许停留在本页。
-			if (!isLoggedIn()) {
-				uni.reLaunch({ url: '/pages/login/login' })
-				return
-			}
-			this.loadProfile()
-		},
-		onReady() {
-			// 页面渲染完成后窗口信息才准确（app-android 尤其如此），此处再同步一次状态栏高度。
-			const readyInfo = uni.getWindowInfo()
-			this.statusBarHeight = readyInfo.statusBarHeight > 0 ? readyInfo.statusBarHeight : 24
+function emptyHint(): string {
+    // 「全部餐厅」下的空态：整体没有营业档口。
+    if (state.selectedRestaurantId == ALL_RESTAURANTS) {
+        return '当前没有正在营业的档口';
+    }
+    // 指定餐厅下的空态：把餐厅名拼进提示，明确是哪一个餐厅无档口。
+    return state.selectedRestaurantName + ' 暂无营业中的档口';
+}
 
-			// 首帧绘制完成后再切到「已入场」状态，属性变化才会驱动入场过渡动画。
-			setTimeout(() => {
-				this.entered = true
-			}, 60)
-		},
-		methods: {
-            refreshPage() {
-                if (this.refreshing || this.loading || this.pickerVisible || this.roleCode != 'CUSTOMER') return
-                this.refreshing = true
-                const refreshStartedAt = Date.now()
-                this.currentRefreshTime = refreshTimeLabel(refreshStartedAt)
-                this.loadCatalog().then(() => {
-                    finishPullRefresh(refreshStartedAt, this.loadError.length == 0, (time: string) => {
-                        if (time.length > 0) this.currentRefreshTime = time
-                        this.refreshing = false
-                    })
-                }).catch(() => {
-                    finishPullRefresh(refreshStartedAt, false, (_time: string) => { this.refreshing = false })
-                })
-            },
-			/**
-			 * 计算各档口卡片的入场延迟，让列表从上到下依次浮入。
-			 *
-			 * 直接列出各档位秒数，避免浮点运算产生冗长的小数文本；
-			 * 超出预设档位的一律沿用最后一档，防止长列表出现越来越长的等待。
-			 *
-			 * @param index 卡片下标
-			 * @return 内联的 transition-delay 声明
-			 */
-			stallDelay(index: number): string {
-				// 预置各档位的延迟秒数，下标即卡片序号。
-				const delays: string[] = ['0.34s', '0.40s', '0.46s', '0.52s', '0.58s', '0.64s', '0.70s', '0.76s']
-				// 下标异常（负数）时退回第一档，避免取值越界。
-				if (index < 0) {
-					return 'transition-delay: 0.34s'
-				}
-				// 超出预设档位的卡片统一沿用最后一档，防止等待时间无限增长。
-				if (index >= delays.length) {
-					return 'transition-delay: 0.76s'
-				}
-				// 正常档位：拼出内联的 transition-delay 声明。
-				return 'transition-delay: ' + delays[index]
-			},
-			/**
-			 * 计算餐厅面板的高度，按条目数自适应并最多展示 6 条。
-			 *
-			 * @return 内联的 height 声明
-			 */
-			sheetListStyle(): string {
-				// 每项固定 52px，首项是「全部餐厅」，故条目数为餐厅数加一。
-				const total = this.restaurants.length + 1
-				// 面板最多展示 6 条，超出部分靠内部滚动查看。
-				const visible = total > 6 ? 6 : total
-				// 按可见条目数换算出面板高度。
-				return 'height: ' + (visible * 52) + 'px'
-			},
-			/**
-			 * 区头标题，跟随当前选中的餐厅变化。
-			 *
-			 * @return 标题文案
-			 */
-			listTitle(): string {
-				// 选中「全部餐厅」时展示通用标题。
-				if (this.selectedRestaurantId == ALL_RESTAURANTS) {
-					return '全部档口'
-				}
-				// 否则直接以当前餐厅名作为区头标题。
-				return this.selectedRestaurantName
-			},
-			/**
-			 * 空态文案，区分「整体无营业档口」与「某个餐厅暂无营业档口」。
-			 *
-			 * @return 空态文案
-			 */
-			emptyHint(): string {
-				// 「全部餐厅」下的空态：整体没有营业档口。
-				if (this.selectedRestaurantId == ALL_RESTAURANTS) {
-					return '当前没有正在营业的档口'
-				}
-				// 指定餐厅下的空态：把餐厅名拼进提示，明确是哪一个餐厅无档口。
-				return this.selectedRestaurantName + ' 暂无营业中的档口'
-			},
-			/**
-			 * 取档口名称首字作为卡片标记，避免引入位图图标。
-			 *
-			 * @param item 档口
-			 * @return 单个汉字
-			 */
-			stallGlyph(item: WindowItem): string {
-				// 有名称时取首字作为标记。
-				if (item.windowName.length > 0) {
-					return item.windowName.substring(0, 1)
-				}
-				// 名称为空时用「档」兜底，保证标记区不出现空白。
-				return '档'
-			},
-			/**
-			 * 生成档口副标题，展示所属食堂及档口位置（楼层）。
-			 *
-			 * @param item 档口
-			 * @return 副标题文案
-			 */
-			stallMeta(item: WindowItem): string {
-				// 通过所属餐厅 ID 关联完整名称，不使用顶部筛选器的简称。
-				let restaurantName = ''
-				for (let i = 0; i < this.restaurants.length; i++) {
-					if (this.restaurants[i].restaurantId == item.restaurantId) {
-						restaurantName = this.restaurants[i].restaurantName.trim()
-						break
-					}
-				}
-				const location = item.location.trim()
-				if (restaurantName.length == 0) {
-					return '食堂待补充 · ' + (location.length > 0 ? location : '楼层待补充')
-				}
-				if (location.length == 0) {
-					return restaurantName + ' · 楼层待补充'
-				}
-				// 位置已包含完整食堂名称时，避免重复拼接。
-				if (location.indexOf(restaurantName) >= 0) {
-					return location
-				}
-				return restaurantName + ' · ' + location
-			},
-			loadProfile() {
-				// 从本地令牌解析出当前用户信息。
-				const profile = currentUser()
-				// 令牌存在但解析失败，说明凭据已不可用，回到登录页重新获取。
-				if (profile == null) {
-					uni.reLaunch({ url: '/pages/login/login' })
-					return
-				}
-				// 只保留角色编码用于判断是否展示档口列表，其余个人信息不在首页展示。
-				this.roleCode = profile.roleCode
-				// 每次进入页面按时段刷新问候语。
-				this.greeting = buildGreeting()
+function stallGlyph(item: WindowItem): string {
+    // 有名称时取首字作为标记。
+    if (item.windowName.length > 0) {
+        return item.windowName.substring(0, 1);
+    }
+    // 名称为空时用「档」兜底，保证标记区不出现空白。
+    return '档';
+}
 
-				// 仅顾客角色需要拉取档口与餐厅数据。
-				if (this.roleCode == 'CUSTOMER') {
-					this.loadCatalog()
-				} else {
-					// 后端餐厅与档口查询接口只放行顾客角色，其它角色在此直接给出说明，
-					// 省掉一次必然失败的请求，也不会在首页上摆一个错误提示。
-					this.loading = false
-					this.loadError = ''
-				}
-			},
-			/**
-			 * 拉取餐厅列表与档口列表。
-			 *
-			 * 先取餐厅再取档口：餐厅决定了选择面板的内容，接口语义上更靠前，
-			 * 顺序请求也让加载中的状态文案更直观。
-			 */
-			loadCatalog(): Promise<void> {
-				// 进入加载态并清掉上一次的错误文案。
-				this.loading = true
-				this.loadError = ''
-				// 归零列表就绪标记，数据回来后再重播入场。
-				this.listReady = false
+function stallMeta(item: WindowItem): string {
+    // 通过所属餐厅 ID 关联完整名称，不使用顶部筛选器的简称。
+    let restaurantName = '';
+    for (let i = 0; i < state.restaurants.length; i++) {
+        if (state.restaurants[i].restaurantId == item.restaurantId) {
+            restaurantName = state.restaurants[i].restaurantName.trim();
+            break;
+        }
+    }
+    const location = item.location.trim();
+    if (restaurantName.length == 0) {
+        return '食堂待补充 · ' + (location.length > 0 ? location : '楼层待补充');
+    }
+    if (location.length == 0) {
+        return restaurantName + ' · 楼层待补充';
+    }
+    // 位置已包含完整食堂名称时，避免重复拼接。
+    if (location.indexOf(restaurantName) >= 0) {
+        return location;
+    }
+    return restaurantName + ' · ' + location;
+}
 
-				return listActiveRestaurants().then((restaurantResult: RestaurantListResult) => {
-					// 餐厅列表失败时直接落到错误态，不再发起档口请求。
-					if (!restaurantResult.ok) {
-						this.loading = false
-						this.loadError = restaurantResult.message
-						return
-					}
-					// 餐厅数据一次性写入，供选择面板渲染。
-					this.restaurants = restaurantResult.items
+function loadProfile() {
+    // 从本地令牌解析出当前用户信息。
+    const profile = currentUser();
+    // 令牌存在但解析失败，说明凭据已不可用，回到登录页重新获取。
+    if (profile == null) {
+        uni.reLaunch({ url: '/pages/login/login' });
+        return;
+    }
+    // 只保留角色编码用于判断是否展示档口列表，其余个人信息不在首页展示。
+    state.roleCode = profile.roleCode;
+    // 每次进入页面按时段刷新问候语。
+    state.greeting = buildGreeting();
+    // 仅顾客角色需要拉取档口与餐厅数据。
+    if (state.roleCode == 'CUSTOMER') {
+        loadCatalog();
+    }
+    else {
+        // 后端餐厅与档口查询接口只放行顾客角色，其它角色在此直接给出说明，
+        // 省掉一次必然失败的请求，也不会在首页上摆一个错误提示。
+        state.loading = false;
+        state.loadError = '';
+    }
+}
 
-					return listActiveWindows().then((windowResult: WindowListResult) => {
-						// 档口结果返回后统一结束加载态。
-						this.loading = false
-						// 档口列表失败时落到错误态。
-						if (!windowResult.ok) {
-							this.loadError = windowResult.message
-							return
-						}
-						// 写入档口全量数据。
-						this.windows = windowResult.items
-						// 按当前选中餐厅算出可见档口。
-						this.buildVisibleWindows()
-						// 列表渲染完成后再切到「已入场」，卡片才会依次浮入。
-						setTimeout(() => {
-							this.listReady = true
-						}, 60)
-					})
-				})
-			},
-			/**
-			 * 按当前选中的餐厅筛选档口。
-			 *
-			 * 档口全量只有几十条，一次拉全再本地筛选，避免为切换餐厅再开一个接口。
-			 */
-			buildVisibleWindows() {
-				// 选中「全部餐厅」时直接展示全量列表。
-				if (this.selectedRestaurantId == ALL_RESTAURANTS) {
-					this.visibleWindows = this.windows
-					return
-				}
+function loadCatalog(): Promise<void> {
+    // 进入加载态并清掉上一次的错误文案。
+    state.loading = true;
+    state.loadError = '';
+    // 归零列表就绪标记，数据回来后再重播入场。
+    state.listReady = false;
+    return listActiveRestaurants().then((restaurantResult: RestaurantListResult) => {
+        // 餐厅列表失败时直接落到错误态，不再发起档口请求。
+        if (!restaurantResult.ok) {
+            state.loading = false;
+            state.loadError = restaurantResult.message;
+            return;
+        }
+        // 餐厅数据一次性写入，供选择面板渲染。
+        state.restaurants = restaurantResult.items;
+        return listActiveWindows().then((windowResult: WindowListResult) => {
+            // 档口结果返回后统一结束加载态。
+            state.loading = false;
+            // 档口列表失败时落到错误态。
+            if (!windowResult.ok) {
+                state.loadError = windowResult.message;
+                return;
+            }
+            // 写入档口全量数据。
+            state.windows = windowResult.items;
+            // 按当前选中餐厅算出可见档口。
+            buildVisibleWindows();
+            // 列表渲染完成后再切到「已入场」，卡片才会依次浮入。
+            setTimeout(() => {
+                state.listReady = true;
+            }, 60);
+        });
+    });
+}
 
-				// 收集属于当前选中餐厅的档口。
-				const filtered: Array<WindowItem> = []
-				for (let i = 0; i < this.windows.length; i++) {
-					// 档口所属餐厅与选中餐厅一致时纳入可见列表。
-					if (this.windows[i].restaurantId == this.selectedRestaurantId) {
-						filtered.push(this.windows[i])
-					}
-				}
-				// 写回筛选结果，驱动页面重新渲染。
-				this.visibleWindows = filtered
-			},
-			togglePicker() {
-				// 面板已展开时点击入口即收起。
-				if (this.pickerVisible) {
-					this.closePicker()
-					return
-				}
-				// 面板未展开时点击入口即展开。
-				this.openPicker()
-			},
-			/**
-			 * 展开选择面板：先渲染初始态，下一帧再切终态以触发过渡。
-			 */
-			openPicker() {
-				// 先置为初始态，保证面板以「未就绪」的样子挂载。
-				this.pickerReady = false
-				// 挂载面板节点（此时还是初始态）。
-				this.pickerVisible = true
-				// 下一帧切到终态，属性变化驱动滑入过渡。
-				setTimeout(() => {
-					this.pickerReady = true
-				}, 30)
-			},
-			/**
-			 * 收起选择面板：先回落到初始态，等过渡结束再卸载节点。
-			 */
-			closePicker() {
-				// 面板本就未显示时无需处理。
-				if (!this.pickerVisible) {
-					return
-				}
-				// 先回落到初始态，触发滑出过渡。
-				this.pickerReady = false
-				// 等过渡播放完毕（240ms）再卸载节点，避免动画被截断。
-				setTimeout(() => {
-					this.pickerVisible = false
-				}, 240)
-			},
-			/**
-			 * 选择餐厅并刷新档口列表。
-			 *
-			 * @param restaurantId 餐厅 ID，取 0 表示全部餐厅
-			 * @param restaurantName 餐厅名称
-			 */
-			selectRestaurant(restaurantId: number, restaurantName: string) {
-				// 选中后立即收起选择面板。
-				this.closePicker()
-				// 记录选中的餐厅 ID。
-				this.selectedRestaurantId = restaurantId
-				// 名称过长时截断后再展示。
-				this.selectedRestaurantName = shortenName(restaurantName)
-				// 按新餐厅重新筛选可见档口。
-				this.buildVisibleWindows()
+function buildVisibleWindows() {
+    // 选中「全部餐厅」时直接展示全量列表。
+    if (state.selectedRestaurantId == ALL_RESTAURANTS) {
+        state.visibleWindows = state.windows;
+        return;
+    }
+    // 收集属于当前选中餐厅的档口。
+    const filtered: Array<WindowItem> = [];
+    for (let i = 0; i < state.windows.length; i++) {
+        // 档口所属餐厅与选中餐厅一致时纳入可见列表。
+        if (state.windows[i].restaurantId == state.selectedRestaurantId) {
+            filtered.push(state.windows[i]);
+        }
+    }
+    // 写回筛选结果，驱动页面重新渲染。
+    state.visibleWindows = filtered;
+}
 
-				// 重新筛选后重播一次入场：先归零再切终态，卡片会再次依次浮入。
-				this.listReady = false
-				setTimeout(() => {
-					this.listReady = true
-				}, 60)
-			},
-			openWindow(item: WindowItem) {
-				// 进入该档口的点餐详情页，由菜单页负责拉取菜单与购物车。
-				uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId })
-			}
-		}
-	}
+function togglePicker() {
+    // 面板已展开时点击入口即收起。
+    if (state.pickerVisible) {
+        closePicker();
+        return;
+    }
+    // 面板未展开时点击入口即展开。
+    openPicker();
+}
+
+function openPicker() {
+    // 先置为初始态，保证面板以「未就绪」的样子挂载。
+    state.pickerReady = false;
+    // 挂载面板节点（此时还是初始态）。
+    state.pickerVisible = true;
+    // 下一帧切到终态，属性变化驱动滑入过渡。
+    setTimeout(() => {
+        state.pickerReady = true;
+    }, 30);
+}
+
+function closePicker() {
+    // 面板本就未显示时无需处理。
+    if (!state.pickerVisible) {
+        return;
+    }
+    // 先回落到初始态，触发滑出过渡。
+    state.pickerReady = false;
+    // 等过渡播放完毕（240ms）再卸载节点，避免动画被截断。
+    setTimeout(() => {
+        state.pickerVisible = false;
+    }, 240);
+}
+
+function selectRestaurant(restaurantId: number, restaurantName: string) {
+    // 选中后立即收起选择面板。
+    closePicker();
+    // 记录选中的餐厅 ID。
+    state.selectedRestaurantId = restaurantId;
+    // 名称过长时截断后再展示。
+    state.selectedRestaurantName = shortenName(restaurantName);
+    // 按新餐厅重新筛选可见档口。
+    buildVisibleWindows();
+    // 重新筛选后重播一次入场：先归零再切终态，卡片会再次依次浮入。
+    state.listReady = false;
+    setTimeout(() => {
+        state.listReady = true;
+    }, 60);
+}
+
+function openWindow(item: WindowItem) {
+    // 进入该档口的点餐详情页，由菜单页负责拉取菜单与购物车。
+    uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId });
+}
+
+onShow(() => {
+    // 状态栏高度取不到时用 24px 兜底，避免顶部内容被系统栏遮挡。
+    const info = uni.getWindowInfo();
+    state.statusBarHeight = info.statusBarHeight > 0 ? info.statusBarHeight : 24;
+    // 令牌被清空（如退出登录）时不允许停留在本页。
+    if (!isLoggedIn()) {
+        uni.reLaunch({ url: '/pages/login/login' });
+        return;
+    }
+    loadProfile();
+})
+
+onReady(() => {
+    // 页面渲染完成后窗口信息才准确（app-android 尤其如此），此处再同步一次状态栏高度。
+    const readyInfo = uni.getWindowInfo();
+    state.statusBarHeight = readyInfo.statusBarHeight > 0 ? readyInfo.statusBarHeight : 24;
+    // 首帧绘制完成后再切到「已入场」状态，属性变化才会驱动入场过渡动画。
+    setTimeout(() => {
+        state.entered = true;
+    }, 60);
+})
 </script>
 
 <style>

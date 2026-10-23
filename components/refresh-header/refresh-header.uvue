@@ -8,13 +8,13 @@
     </view>
 </template>
 
-<script lang="uts">
-    export default {
-        props: {
-            refreshing: { type: Boolean, default: false },
-            currentRefreshTime: { type: String, default: '' }
-        }
-    }
+<script setup lang="uts">
+
+
+const props = defineProps({
+    refreshing: { type: Boolean, default: false },
+    currentRefreshTime: { type: String, default: '' }
+})
 </script>
 
 <style scoped>

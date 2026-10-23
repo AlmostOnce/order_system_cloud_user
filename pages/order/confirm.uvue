@@ -1,13 +1,13 @@
 <template>
     <view class="account-page account-secondary">
-        <view class="account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-        <view class="account-nav"><button class="account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">确认订单</text></view>
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">确认订单</text></view>
         <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!pending && !submitting && createdOrderId == 0 && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
                 <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
-<view class="account-content">
+<view class="account-content vapor-account-secondary--account-content">
             <view class="account-banner"><view class="banner-copy"><text class="banner-kicker">校园食堂 · 到店取餐</text><text class="banner-title">确认这一餐</text><text class="banner-note">核对菜品与数量，提交后前往支付。</text></view></view>
-            <view v-if="loading" class="account-card"><text class="account-muted">正在核对购物车…</text></view>
-            <view v-if="items.length > 0" class="account-card">
+            <view v-if="loading" class="account-card vapor-account-secondary--account-card"><text class="account-muted">正在核对购物车…</text></view>
+            <view v-if="items.length > 0" class="account-card vapor-account-secondary--account-card">
                 <text class="account-heading">{{ windowName.length > 0 ? windowName : '窗口 ' + windowId }}</text>
                 <text class="account-note">到店自取</text>
                 <view v-for="item in items" :key="item.productId" class="order-line">
@@ -17,124 +17,206 @@
                 <view class="order-total"><text class="account-muted">预估合计</text><text class="order-total-price">¥{{ totalText }}</text></view>
                 <text class="account-note">最终金额以提交后订单为准。</text>
             </view>
-            <view v-if="items.length > 0" class="account-card"><text class="account-heading">订单备注</text><textarea class="order-remark" v-model="remark" :maxlength="255" :disabled="submitting || pending" placeholder="口味偏好等，可选填" /><text class="account-muted">{{ remark.length }}/255</text></view>
+            <view v-if="items.length > 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">订单备注</text><textarea class="order-remark" v-model="remark" :maxlength="255" :disabled="submitting || pending" placeholder="口味偏好等，可选填" /><text class="account-muted">{{ remark.length }}/255</text></view>
             <text v-if="pending" class="account-note">上次提交结果待确认，菜品与备注已锁定。再次确认会查询同一笔订单。</text>
             <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
-            <button v-if="createdOrderId > 0" class="account-primary" @click="openCreated"><text class="account-primary-text">查看已提交订单</text></button>
-            <button v-else-if="items.length > 0" class="account-primary" :disabled="submitting || loading" :class="submitting || loading ? 'account-disabled' : ''" @click="submit"><text class="account-primary-text">{{ submitting ? '正在提交…' : (pending ? '确认提交结果' : '提交订单') }}</text></button>
+            <button v-if="createdOrderId > 0" class="account-primary vapor-account-secondary--account-primary" @click="openCreated"><text class="account-primary-text">查看已提交订单</text></button>
+            <button v-else-if="items.length > 0" class="account-primary vapor-account-secondary--account-primary" :disabled="submitting || loading" :class="submitting || loading ? 'account-disabled' : ''" @click="submit"><text class="account-primary-text">{{ submitting ? '正在提交…' : (pending ? '确认提交结果' : '提交订单') }}</text></button>
 
             <button class="account-link" :disabled="submitting" @click="openOrders"><text class="account-link-text">我的订单</text></button>
         </view></scroll-view>
     </view>
 </template>
-<script lang="uts">
-    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
-    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
-    import { fetchCart, CartResult } from '../../api/cart.uts'
-    import { createOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts'
-    import { CheckoutLine, CheckoutDraft, checkoutKey, cleanupKey, readCheckout, orderBody, cleanupBody } from '../../common/checkout.uts'
-    import { HttpResult } from '../../common/http.uts'
-    import { currentUser } from '../../store/auth.uts'
-    import { backToAccount } from '../../common/account.uts'
-    export default {
-        components: { RefreshHeader },
-        data() { const items: Array<CheckoutLine> = []; return { refreshing: false, currentRefreshTime: '', statusBarHeight: 0, userUuid: '', windowId: 0, windowName: '', items: items, remark: '', totalText: '0.00', loading: false, submitting: false, pending: false, requestKey: '', errorText: '', createdOrderId: 0, pageVisible: false } },
-        onLoad(options: OnLoadOptions) {
-            this.windowId = Number(options['windowId'] ?? '0')
-            const name = options['windowName']
-            if (name != null) this.windowName = name as string
-        },
-        onShow() {
-            this.pageVisible = true
-            this.statusBarHeight = uni.getWindowInfo().statusBarHeight
-            const user = currentUser()
-            if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
-            if (user.roleCode != 'CUSTOMER') { uni.switchTab({ url: '/pages/home/home' }); return }
-            this.userUuid = user.userUuid
-            if (this.submitting || this.createdOrderId > 0) return
-            const draft = readCheckout(this.userUuid)
-            if (draft != null) {
-                this.windowId = draft.windowId; this.windowName = draft.windowName; this.items = draft.items
-                this.remark = draft.remark; this.requestKey = draft.key; this.pending = true; this.updateTotal()
-            } else this.loadCart()
-        },
-        onHide() { this.pageVisible = false },
-        onUnload() { this.pageVisible = false },
-        methods: {
-            refreshPage() {
-                if (this.refreshing || this.loading || this.submitting || this.pending || this.createdOrderId > 0) return
-                this.refreshing = true
-                const refreshStartedAt = Date.now()
-                this.currentRefreshTime = refreshTimeLabel(refreshStartedAt)
-                this.loadCart().then(() => {
-                    finishPullRefresh(refreshStartedAt, this.errorText.length == 0, (time: string) => {
-                        if (time.length > 0) this.currentRefreshTime = time
-                        this.refreshing = false
-                    })
-                }).catch(() => {
-                    finishPullRefresh(refreshStartedAt, false, (_time: string) => { this.refreshing = false })
-                })
-            },
-            goBack() { if (!this.submitting) backToAccount() },
-            openOrders() { uni.navigateTo({ url: '/pages/order/list' }) },
-            openCreated() { uni.redirectTo({ url: '/pages/order/detail?orderId=' + this.createdOrderId }) },
-            updateTotal() { let cents = 0; for (let i = 0; i < this.items.length; i++) cents += Math.round(this.items[i].lineAmount * 100); this.totalText = (cents / 100).toFixed(2) },
-            loadCart(): Promise<void> {
-                if (this.loading || this.pending || this.submitting || this.createdOrderId > 0) return Promise.resolve()
-                this.loading = true; this.errorText = ''; this.items = []
-                return fetchCart().then((result: CartResult) => {
-                    this.loading = false
-                    if (!result.ok || result.cart == null) { this.errorText = result.message; return }
-                    const cart = result.cart!
-                    for (let i = 0; i < cart.windows.length; i++) {
-                        const group = cart.windows[i]
-                        if (group.windowId != this.windowId) continue
-                        if (!group.windowActive) { this.errorText = '该窗口暂不可下单'; return }
-                        const lines: Array<CheckoutLine> = []
-                        for (let j = 0; j < group.items.length; j++) {
-                            const item = group.items[j]
-                            if (!item.checked) continue
-                            if (!item.available || item.revision.length == 0) { this.errorText = item.productName + ' 暂不可下单，请返回购物车调整'; return }
-                            lines.push({ productId: item.productId, productName: item.productName, quantity: item.quantity, revision: item.revision, unitPrice: item.unitPrice, lineAmount: item.lineAmount })
-                        }
-                        if (lines.length > 100) { this.errorText = '每单最多 100 项菜品'; return }
-                        this.items = lines; this.updateTotal()
-                    }
-                    if (this.items.length == 0) this.errorText = '没有可提交的已勾选菜品，请返回选择'
-                })
-            },
-            submit() {
-                if (this.submitting || this.loading || this.items.length == 0 || this.createdOrderId > 0) return
-                this.errorText = ''
-                if (!this.pending) this.requestKey = 'order-' + Date.now() + '-' + Math.floor(Math.random() * 1000000000)
-                const draft: CheckoutDraft = { key: this.requestKey, windowId: this.windowId, windowName: this.windowName, remark: this.remark, items: this.items }
-                try { uni.setStorageSync(checkoutKey(this.userUuid), JSON.stringify(draft)) }
-                catch (error) { this.errorText = '无法保存提交信息，请检查设备存储后重试'; return }
-                this.pending = true; this.submitting = true
-                createOrder(orderBody(draft), draft.key).then((result: HttpResult) => {
-                    this.submitting = false
-                    const data = orderPayload(result)
-                    const order = data == null ? null : parseOrder(data)
-                    if (order == null) {
-                        this.errorText = result.message.length > 0 ? result.message : '订单结果待确认，请重试'
-                        // 5xx、超时、异常响应与幂等键冲突保留原始请求，避免创建第二笔。
-                        if (!result.ok && (result.statusCode == 400 || result.statusCode == 403 || result.statusCode == 404 || result.statusCode == 422 || (result.statusCode == 409 && result.message.indexOf('Idempotency-Key') < 0))) {
-                            this.pending = false; this.requestKey = ''; uni.removeStorageSync(checkoutKey(this.userUuid))
-                        }
-                        return
-                    }
-                    this.createdOrderId = order.orderId; this.pending = false
-                    const snapshot = cleanupBody(draft)
-                    try { uni.setStorageSync(cleanupKey(this.userUuid, order.orderId), JSON.stringify(snapshot)); uni.removeStorageSync(checkoutKey(this.userUuid)) }
-                    catch (error) { this.errorText = '订单已提交，购物车清理信息保存失败。请勿重复下单。' }
-                    cleanupOrderCart(order.orderId, snapshot).then((cleaned: HttpResult) => {
-                        if (cleaned.ok) uni.removeStorageSync(cleanupKey(this.userUuid, order.orderId))
-                        if (this.pageVisible) this.openCreated()
-                    })
-                })
-            }
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
+import { fetchCart, CartResult } from '../../api/cart.uts';
+import { createOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts';
+import { CheckoutLine, CheckoutDraft, checkoutKey, cleanupKey, readCheckout, orderBody, cleanupBody } from '../../common/checkout.uts';
+import { HttpResult } from '../../common/http.uts';
+import { currentUser } from '../../store/auth.uts';
+import { backToAccount } from '../../common/account.uts';
+
+const initialItems: Array<CheckoutLine> = [];
+const state = reactive({ refreshing: false, currentRefreshTime: '', statusBarHeight: 0, userUuid: '', windowId: 0, windowName: '', items: initialItems, remark: '', totalText: '0.00', loading: false, submitting: false, pending: false, requestKey: '', errorText: '', createdOrderId: 0, pageVisible: false })
+
+const { refreshing, currentRefreshTime, statusBarHeight, userUuid, windowId, windowName, items, remark, totalText, loading, submitting, pending, requestKey, errorText, createdOrderId, pageVisible } = toRefs(state)
+
+function refreshPage() {
+    if (state.refreshing || state.loading || state.submitting || state.pending || state.createdOrderId > 0)
+        return;
+    state.refreshing = true;
+    const refreshStartedAt = Date.now();
+    state.currentRefreshTime = refreshTimeLabel(refreshStartedAt);
+    loadCart().then(() => {
+        finishPullRefresh(refreshStartedAt, state.errorText.length == 0, (time: string) => {
+            if (time.length > 0)
+                state.currentRefreshTime = time;
+            state.refreshing = false;
+        });
+    }).catch(() => {
+        finishPullRefresh(refreshStartedAt, false, (_time: string) => { state.refreshing = false; });
+    });
+}
+
+function goBack() {
+    if (!state.submitting)
+        backToAccount();
+}
+
+function openOrders() {
+    uni.navigateTo({ url: '/pages/order/list' });
+}
+
+function openCreated() {
+    uni.redirectTo({ url: '/pages/order/detail?orderId=' + state.createdOrderId });
+}
+
+function updateTotal() {
+    let cents = 0;
+    for (let i = 0; i < state.items.length; i++)
+        cents += Math.round(state.items[i].lineAmount * 100);
+    state.totalText = (cents / 100).toFixed(2);
+}
+
+function loadCart(): Promise<void> {
+    if (state.loading || state.pending || state.submitting || state.createdOrderId > 0)
+        return Promise.resolve();
+    state.loading = true;
+    state.errorText = '';
+    state.items = [];
+    return fetchCart().then((result: CartResult) => {
+        state.loading = false;
+        if (!result.ok || result.cart == null) {
+            state.errorText = result.message;
+            return;
         }
+        const cart = result.cart!;
+        for (let i = 0; i < cart.windows.length; i++) {
+            const group = cart.windows[i];
+            if (group.windowId != state.windowId)
+                continue;
+            if (!group.windowActive) {
+                state.errorText = '该窗口暂不可下单';
+                return;
+            }
+            const lines: Array<CheckoutLine> = [];
+            for (let j = 0; j < group.items.length; j++) {
+                const item = group.items[j];
+                if (!item.checked)
+                    continue;
+                if (!item.available || item.revision.length == 0) {
+                    state.errorText = item.productName + ' 暂不可下单，请返回购物车调整';
+                    return;
+                }
+                lines.push({ productId: item.productId, productName: item.productName, quantity: item.quantity, revision: item.revision, unitPrice: item.unitPrice, lineAmount: item.lineAmount });
+            }
+            if (lines.length > 100) {
+                state.errorText = '每单最多 100 项菜品';
+                return;
+            }
+            state.items = lines;
+            updateTotal();
+        }
+        if (state.items.length == 0)
+            state.errorText = '没有可提交的已勾选菜品，请返回选择';
+    });
+}
+
+function submit() {
+    if (state.submitting || state.loading || state.items.length == 0 || state.createdOrderId > 0)
+        return;
+    state.errorText = '';
+    if (!state.pending)
+        state.requestKey = 'order-' + Date.now() + '-' + Math.floor(Math.random() * 1000000000);
+    const draft: CheckoutDraft = { key: state.requestKey, windowId: state.windowId, windowName: state.windowName, remark: state.remark, items: state.items };
+    try {
+        uni.setStorageSync(checkoutKey(state.userUuid), JSON.stringify(draft));
     }
+    catch (error) {
+        state.errorText = '无法保存提交信息，请检查设备存储后重试';
+        return;
+    }
+    state.pending = true;
+    state.submitting = true;
+    createOrder(orderBody(draft), draft.key).then((result: HttpResult) => {
+        state.submitting = false;
+        const data = orderPayload(result);
+        const order = data == null ? null : parseOrder(data);
+        if (order == null) {
+            state.errorText = result.message.length > 0 ? result.message : '订单结果待确认，请重试';
+            // 5xx、超时、异常响应与幂等键冲突保留原始请求，避免创建第二笔。
+            if (!result.ok && (result.statusCode == 400 || result.statusCode == 403 || result.statusCode == 404 || result.statusCode == 422 || (result.statusCode == 409 && result.message.indexOf('Idempotency-Key') < 0))) {
+                state.pending = false;
+                state.requestKey = '';
+                uni.removeStorageSync(checkoutKey(state.userUuid));
+            }
+            return;
+        }
+        state.createdOrderId = order.orderId;
+        state.pending = false;
+        const snapshot = cleanupBody(draft);
+        try {
+            uni.setStorageSync(cleanupKey(state.userUuid, order.orderId), JSON.stringify(snapshot));
+            uni.removeStorageSync(checkoutKey(state.userUuid));
+        }
+        catch (error) {
+            state.errorText = '订单已提交，购物车清理信息保存失败。请勿重复下单。';
+        }
+        cleanupOrderCart(order.orderId, snapshot).then((cleaned: HttpResult) => {
+            if (cleaned.ok)
+                uni.removeStorageSync(cleanupKey(state.userUuid, order.orderId));
+            if (state.pageVisible)
+                openCreated();
+        });
+    });
+}
+
+onLoad((options: OnLoadOptions) => {
+    state.windowId = Number(options['windowId'] ?? '0');
+    const name = options['windowName'];
+    if (name != null)
+        state.windowName = name as string;
+})
+
+onShow(() => {
+    state.pageVisible = true;
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
+    const user = currentUser();
+    if (user == null) {
+        uni.reLaunch({ url: '/pages/login/login' });
+        return;
+    }
+    if (user.roleCode != 'CUSTOMER') {
+        uni.switchTab({ url: '/pages/home/home' });
+        return;
+    }
+    state.userUuid = user.userUuid;
+    if (state.submitting || state.createdOrderId > 0)
+        return;
+    const draft = readCheckout(state.userUuid);
+    if (draft != null) {
+        state.windowId = draft.windowId;
+        state.windowName = draft.windowName;
+        state.items = draft.items;
+        state.remark = draft.remark;
+        state.requestKey = draft.key;
+        state.pending = true;
+        updateTotal();
+    }
+    else
+        loadCart();
+})
+
+onHide(() => {
+    state.pageVisible = false;
+})
+
+onUnload(() => {
+    state.pageVisible = false;
+})
 </script>
 <style>
     @import '../../styles/account.css';

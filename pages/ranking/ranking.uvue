@@ -15,7 +15,7 @@
                 <view v-if="!loading && errorText.length == 0 && items.length == 0" class="ranking-state"><text class="account-heading">好味道，等你发现</text><text class="account-note">有菜品售出后，就会出现在这里。</text></view>
                 <view v-if="items.length > 0" class="ranking-list">
                     <button v-for="item in items" :key="item.productId + ':' + item.windowId" class="ranking-row" :class="item.rank <= 3 ? 'ranking-row-leading' : ''" hover-class="ranking-row-pressed" :disabled="!canOrder" @click="openWindow(item)">
-                        <view class="ranking-number" :class="item.rank <= 3 ? 'ranking-number-leading' : ''"><text class="ranking-number-text">{{ item.rank < 10 ? '0' + item.rank : '' + item.rank }}</text></view>
+                        <view class="ranking-number" :class="item.rank <= 3 ? 'ranking-number-leading' : ''"><text :class="(item.rank <= 3 ? 'vapor-ranking-number-leading--ranking-number-text' : '')" class="ranking-number-text">{{ item.rank < 10 ? '0' + item.rank : '' + item.rank }}</text></view>
                         <view class="ranking-dish"><text class="ranking-dish-name">{{ item.productName }}</text><text class="ranking-window">{{ windowLabel(item.windowId) }}</text></view>
                         <view class="ranking-sales"><view class="ranking-sales-value"><text class="ranking-count">{{ item.sales }}</text><text class="ranking-unit">份</text></view><text class="ranking-sales-label">累计售出</text></view>
                     </button>
@@ -26,67 +26,82 @@
     </view>
 </template>
 
-<script lang="uts">
-    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
-    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
-    import { isLoggedIn, currentUser } from '../../store/auth.uts'
-    import { fetchSalesRanking, SalesRankItem, SalesRankResult } from '../../api/ranking.uts'
-    import { listActiveWindows, WindowItem, WindowListResult } from '../../api/product.uts'
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
+import { isLoggedIn, currentUser } from '../../store/auth.uts';
+import { fetchSalesRanking, SalesRankItem, SalesRankResult } from '../../api/ranking.uts';
+import { listActiveWindows, WindowItem, WindowListResult } from '../../api/product.uts';
 
-    export default {
-        components: { RefreshHeader },
-        data() {
-            const items: SalesRankItem[] = []
-            const windows: WindowItem[] = []
-            return { statusBarHeight: 0, loading: false, refreshing: false, currentRefreshTime: '', errorText: '', items: items, windows: windows, canOrder: false }
-        },
-        onShow() {
-            if (!isLoggedIn()) { uni.reLaunch({ url: '/pages/login/login' }); return }
-            this.statusBarHeight = uni.getWindowInfo().statusBarHeight
-            const user = currentUser()
-            this.canOrder = user != null && user.roleCode == 'CUSTOMER'
-            this.loadRanking()
-        },
-        methods: {
-            loadRanking(): Promise<void> {
-                if (this.loading) return Promise.resolve()
-                this.loading = true
-                this.errorText = ''
-                const ranking = fetchSalesRanking().then((result: SalesRankResult) => {
-                    if (!result.ok) { this.errorText = result.message.length > 0 ? result.message : '销量榜暂时无法获取'; return }
-                    this.items = result.items
-                })
-                const windows = this.canOrder ? listActiveWindows().then((result: WindowListResult) => {
-                    if (result.ok) this.windows = result.items
-                }) : Promise.resolve()
-                return Promise.all([ranking, windows]).then(() => { this.loading = false }).catch(() => {
-                    this.loading = false; this.errorText = '销量榜暂时无法获取，请稍后再试'
-                })
-            },
-            refreshPage() {
-                if (this.loading || this.refreshing) return
-                this.refreshing = true
-                const startedAt = Date.now()
-                this.currentRefreshTime = refreshTimeLabel(startedAt)
-                this.loadRanking().then(() => {
-                    finishPullRefresh(startedAt, this.errorText.length == 0, (time: string) => {
-                        if (time.length > 0) this.currentRefreshTime = time
-                        this.refreshing = false
-                    })
-                })
-            },
-            windowLabel(windowId: number): string {
-                for (let i = 0; i < this.windows.length; i++) {
-                    if (this.windows[i].windowId == windowId) return this.windows[i].windowName
-                }
-                return '食堂窗口'
-            },
-            openWindow(item: SalesRankItem) {
-                if (!this.canOrder) return
-                uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId })
-            }
+const initialItems: SalesRankItem[] = [];
+const initialWindows: WindowItem[] = [];
+const state = reactive({ statusBarHeight: 0, loading: false, refreshing: false, currentRefreshTime: '', errorText: '', items: initialItems, windows: initialWindows, canOrder: false })
+
+const { statusBarHeight, loading, refreshing, currentRefreshTime, errorText, items, windows, canOrder } = toRefs(state)
+
+function loadRanking(): Promise<void> {
+    if (state.loading)
+        return Promise.resolve();
+    state.loading = true;
+    state.errorText = '';
+    const ranking = fetchSalesRanking().then((result: SalesRankResult) => {
+        if (!result.ok) {
+            state.errorText = result.message.length > 0 ? result.message : '销量榜暂时无法获取';
+            return;
         }
+        state.items = result.items;
+    });
+    const windows = state.canOrder ? listActiveWindows().then((result: WindowListResult) => {
+        if (result.ok)
+            state.windows = result.items;
+    }) : Promise.resolve();
+    return Promise.all([ranking, windows]).then(() => { state.loading = false; }).catch(() => {
+        state.loading = false;
+        state.errorText = '销量榜暂时无法获取，请稍后再试';
+    });
+}
+
+function refreshPage() {
+    if (state.loading || state.refreshing)
+        return;
+    state.refreshing = true;
+    const startedAt = Date.now();
+    state.currentRefreshTime = refreshTimeLabel(startedAt);
+    loadRanking().then(() => {
+        finishPullRefresh(startedAt, state.errorText.length == 0, (time: string) => {
+            if (time.length > 0)
+                state.currentRefreshTime = time;
+            state.refreshing = false;
+        });
+    });
+}
+
+function windowLabel(windowId: number): string {
+    for (let i = 0; i < state.windows.length; i++) {
+        if (state.windows[i].windowId == windowId)
+            return state.windows[i].windowName;
     }
+    return '食堂窗口';
+}
+
+function openWindow(item: SalesRankItem) {
+    if (!state.canOrder)
+        return;
+    uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId });
+}
+
+onShow(() => {
+    if (!isLoggedIn()) {
+        uni.reLaunch({ url: '/pages/login/login' });
+        return;
+    }
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
+    const user = currentUser();
+    state.canOrder = user != null && user.roleCode == 'CUSTOMER';
+    loadRanking();
+})
 </script>
 
 <style>
@@ -107,7 +122,7 @@
     .ranking-row-pressed { background-color: #FDF0E8; }
     .ranking-number { flex-shrink: 0; width: 34px; margin-right: 12px; }
     .ranking-number-text { font-size: 20px; line-height: 28px; font-weight: bold; color: #7A6C60; }
-    .ranking-number-leading .ranking-number-text { color: #C2410C; }
+    .vapor-ranking-number-leading--ranking-number-text { color: #C2410C; }
     .ranking-dish { flex: 1; min-width: 0; }
     .ranking-dish-name { font-size: 15px; line-height: 22px; font-weight: bold; color: #211C18; }
     .ranking-window { margin-top: 5px; font-size: 11px; line-height: 18px; color: #7A6C60; }
@@ -123,4 +138,9 @@
     .ranking-row[disabled] { opacity: 1; cursor: default; }
     .ranking-row:focus-visible { outline: 2px solid #C2410C; outline-offset: -3px; }
     /* #endif */
+
+/* #ifdef WEB */
+/* Preserve VDOM Web specificity; native uses explicit vapor-* classes above. */
+.ranking-number-leading .ranking-number-text { color: #C2410C; }
+/* #endif */
 </style>

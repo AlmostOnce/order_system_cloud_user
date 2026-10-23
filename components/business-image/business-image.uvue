@@ -1,12 +1,24 @@
 <template><image class="business-image" :src="resolvedSource" mode="aspectFill" @error="onImageError"></image></template>
-<script lang="uts">
-    import { defaultImage, imageSource } from '../../common/images.uts'
-    export default {
-        props: { src: { type: String, default: '' }, kind: { type: String, default: 'product' } },
-        data() { return { failed: false } },
-        computed: { resolvedSource(): string { return this.failed ? defaultImage(this.kind) : imageSource(this.src, this.kind) } },
-        watch: { src(_value: string) { this.failed = false } },
-        methods: { onImageError() { this.failed = true } }
-    }
+<script setup lang="uts">
+import { reactive, toRefs, computed, watch } from 'vue'
+import { defaultImage, imageSource } from '../../common/images.uts';
+
+const props = defineProps({ src: { type: String, default: '' }, kind: { type: String, default: 'product' } })
+
+const state = reactive({ failed: false })
+
+const { failed } = toRefs(state)
+
+const resolvedSource = computed((): string => {
+    return state.failed ? defaultImage(props.kind) : imageSource(props.src, props.kind);
+})
+
+function onImageError() {
+    state.failed = true;
+}
+
+watch(() => props.src, (_value: string) => {
+    state.failed = false;
+})
 </script>
 <style scoped>.business-image { width: 100%; height: 100%; }</style>

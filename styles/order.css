@@ -24,7 +24,12 @@
 .order-filter { display: flex; flex: 1; min-width: 0; height: 42px; align-items: center; justify-content: center; margin: 0 4px; padding: 0; border-width: 0; border-radius: 12px; background-color: #F2E9E1; line-height: 20px; }
 .order-filter-on { background-color: #E4572E; }
 .order-filter-text { font-size: 13px; line-height: 20px; color: #7A6C60; }
-.order-filter-on .order-filter-text { color: #FFFFFF; font-weight: bold; }
+.vapor-order-filter-on--order-filter-text { color: #FFFFFF; font-weight: bold; }
 /* #ifdef WEB */
 .account-page .order-filter-bar { flex-direction: row; }
+/* #endif */
+
+/* #ifdef WEB */
+/* Preserve VDOM Web specificity; native uses explicit vapor-* classes above. */
+.order-filter-on .order-filter-text { color: #FFFFFF; font-weight: bold; }
 /* #endif */

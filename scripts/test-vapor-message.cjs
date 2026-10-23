@@ -1,0 +1,20 @@
+const fs=require('fs'),assert=require('assert/strict');
+const{loadSetup}=require('./setup-harness.cjs');
+let now=0,next=0;const intervals=new Map();
+Date.now=()=>now;global.setInterval=fn=>{intervals.set(++next,fn);return next};global.clearInterval=id=>intervals.delete(id);
+const source=fs.readFileSync('components/window-message/window-message.uvue','utf8').match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
+const vm=loadSetup(source,()=>({jsonNumber:(data,key)=>data[key]??null})).create({content:'欢迎。\n用餐愉快！'});
+const advance=ms=>{now+=ms;for(const fn of [...intervals.values()])fn()};
+(async()=>{
+ assert.equal(vm.message,'欢迎。 用餐愉快！');
+ vm.$hooks.onMounted();assert.equal(intervals.size,1);
+ advance(33);assert.ok(vm.offset>0);
+ vm.pause();const paused=vm.offset;advance(33);assert.equal(vm.offset,paused);
+ vm.resume();advance(33);assert.ok(vm.offset>paused);
+ vm.offset=vm.copyWidth-0.5;advance(33);assert.ok(vm.offset<1,'continuous seamless wrapping');
+ vm.$hooks.onHide();assert.equal(intervals.size,0);
+ vm.$hooks.onShow();assert.equal(intervals.size,1);
+ vm.content='';await new Promise(resolve=>setImmediate(resolve));assert.equal(intervals.size,0);
+ vm.$hooks.onBeforeUnmount();assert.equal(intervals.size,0);
+ console.log('Vapor marquee checks passed: continuous horizontal motion, pause/resume, wrapping, page hide/show and unmount timer cleanup, empty content.');
+})().catch(e=>{console.error(e);process.exitCode=1});

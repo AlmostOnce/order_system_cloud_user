@@ -13,7 +13,7 @@ function load(file){
  if(file.endsWith(path.normalize('api/product.uts')))return{listActiveWindows:()=>windowDeferred?new Promise(resolve=>{windowResolve=resolve}):Promise.resolve({ok:true,items:[{windowId:1,windowName:'一楼窗口'}]})};
  if(file.endsWith(path.normalize('components/refresh-header/refresh-header.uvue')))return{default:{}};
  if(cache.has(file))return cache.get(file);
- let source=fs.readFileSync(file,'utf8');if(file.endsWith('.uvue'))source=source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
+ let source=fs.readFileSync(file,'utf8');if(file.endsWith('.uvue')) { const setup=require('./setup-harness.cjs').loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1],p=>load(path.resolve(path.dirname(file),p)));cache.set(file,setup);return setup; }
  assert.equal(ts.createSourceFile(file+'.ts',source,ts.ScriptTarget.Latest,true).parseDiagnostics.length,0,file);
  const mod={exports:{}};cache.set(file,mod.exports);
  new Function('require','module','exports',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(p=>load(path.resolve(path.dirname(file),p)),mod,mod.exports);
@@ -28,14 +28,14 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  response={ok:false,message:'暂不可用',data:null};assert.equal((await api.fetchSalesRanking()).message,'暂不可用');
  response={ok:true,data:{data:{items:[{rank:2,productId:7,windowId:1,sales:14}]}}};assert.equal((await api.fetchSalesRanking()).ok,false);
  response={ok:true,message:'',data:{data:{items:[{rank:1,productId:7,windowId:1,productName:'鸡肉饭',sales:14}]}}};
- const page=load('pages/ranking/ranking.uvue').default;
- const vm={...page.data()};for(const[name,method]of Object.entries(page.methods))vm[name]=method.bind(vm);
- page.onShow.call(vm);await flush();assert.equal(vm.items.length,1);assert.equal(vm.windowLabel(1),'一楼窗口');
+ const page=load('pages/ranking/ranking.uvue');
+ const vm=page.create();
+ vm.$hooks.onShow.call(vm);await flush();assert.equal(vm.items.length,1);assert.equal(vm.windowLabel(1),'一楼窗口');
  vm.openWindow(vm.items[0]);assert.equal(navigation.pop(),'/pages/menu/menu?windowId=1');
  windowDeferred=true;vm.refreshPage();vm.refreshPage();await flush();assert.equal(vm.refreshing,true);assert.equal(finishCount,0);
  windowResolve({ok:true,items:[]});await flush();assert.equal(vm.refreshing,false);assert.equal(finishCount,1);
  windowDeferred=false;response={ok:false,message:'连接失败',data:null};await vm.loadRanking();assert.equal(vm.items.length,1,'refresh error keeps previous ranking');assert.equal(vm.errorText,'连接失败');
- logged=false;page.onShow.call(vm);assert.equal(navigation.pop(),'/pages/login/login');
+ logged=false;vm.$hooks.onShow.call(vm);assert.equal(navigation.pop(),'/pages/login/login');
  const config=JSON.parse(fs.readFileSync(path.join(root,'pages.json'),'utf8').replace(/\/\/[^\n]*/g,''));
  assert.deepEqual(config.tabBar.list.map(x=>x.text),['首页','排行榜','我的']);
  for(const tab of config.tabBar.list)for(const icon of ['iconPath','selectedIconPath'])assert.ok(fs.existsSync(path.join(root,tab[icon])));

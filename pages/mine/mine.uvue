@@ -61,100 +61,166 @@
 	</view>
 </template>
 
-<script lang="uts">
-    import BusinessImage from '../../components/business-image/business-image.uvue'
-    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
-    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
-	import { logout as doLogout, isLoggedIn, currentUser } from '../../store/auth.uts'
-	import { fetchMyProfile, fetchMyBalance, walletPayload } from '../../api/wallet.uts'
-	import { HttpResult } from '../../common/http.uts'
-	import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts'
-	import { accountRoleLabel } from '../../common/account.uts'
-    import { openOrderList } from '../../common/order-navigation.uts'
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import BusinessImage from '../../components/business-image/business-image.uvue';
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
+import { logout as doLogout, isLoggedIn, currentUser } from '../../store/auth.uts';
+import { fetchMyProfile, fetchMyBalance, walletPayload } from '../../api/wallet.uts';
+import { HttpResult } from '../../common/http.uts';
+import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts';
+import { accountRoleLabel } from '../../common/account.uts';
+import { openOrderList } from '../../common/order-navigation.uts';
 
-	export default {
-        components: { RefreshHeader, BusinessImage },
-		data() {
-			return { refreshing: false, currentRefreshTime: '', profileLoading: false, statusBarHeight: 0, username: '校园用户', roleName: '', roleCode: '', userUuid: '',
-				email: '', avatarUrl: '', profileError: '', balanceLoading: false, balanceReady: false,
-				balanceText: '--', balanceError: '', payPasswordSet: false, signOutConfirm: false, signingOut: false }
-		},
-		onShow() {
-			this.statusBarHeight = uni.getWindowInfo().statusBarHeight
-			if (!isLoggedIn()) { uni.reLaunch({ url: '/pages/login/login' }); return }
-			const user = currentUser()
-			if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
-			this.username = user.username.length > 0 ? user.username : '校园用户'
-			this.userUuid = user.userUuid
-			this.roleCode = user.roleCode
-			this.roleName = accountRoleLabel(user.roleCode)
-			this.loadProfile()
-			if (this.roleCode == 'CUSTOMER') this.loadBalance()
-		},
-		methods: {
-            refreshPage() {
-                if (this.refreshing || this.profileLoading || this.balanceLoading || this.signingOut) return
-                this.refreshing = true
-                const refreshStartedAt = Date.now()
-                this.currentRefreshTime = refreshTimeLabel(refreshStartedAt)
-                const tasks: Array<Promise<void>> = [this.loadProfile()]
-                if (this.roleCode == 'CUSTOMER') tasks.push(this.loadBalance())
-                Promise.all(tasks).then(() => {
-                    finishPullRefresh(refreshStartedAt, this.profileError.length == 0 && (this.roleCode != 'CUSTOMER' || this.balanceError.length == 0), (time: string) => {
-                        if (time.length > 0) this.currentRefreshTime = time
-                        this.refreshing = false
-                    })
-                }).catch(() => {
-                    finishPullRefresh(refreshStartedAt, false, (_time: string) => { this.refreshing = false })
-                })
-            },
-			loadProfile(): Promise<void> {
-				this.profileError = ''; this.profileLoading = true
-				return fetchMyProfile().then((result: HttpResult) => {
-                    this.profileLoading = false
-					const data = walletPayload(result)
-					if (data == null) { this.profileError = result.message.length > 0 ? result.message : '资料暂时无法获取，可进入个人资料重试'; return }
-					this.username = jsonString(data, 'username') ?? this.username
-					this.email = jsonString(data, 'email') ?? ''
-					this.avatarUrl = jsonString(data, 'avatarUrl') ?? ''
-				})
-			},
-			loadBalance(): Promise<void> {
-				if (this.balanceLoading) return Promise.resolve()
-				this.balanceLoading = true
-				this.balanceReady = false
-				this.balanceError = ''
-				return fetchMyBalance().then((result: HttpResult) => {
-					this.balanceLoading = false
-					const data = walletPayload(result)
-					if (data == null || jsonNumber(data, 'balance') == null) { this.balanceError = result.message.length > 0 ? result.message : '余额暂时无法获取'; return }
-					this.balanceText = (jsonNumber(data, 'balance') ?? 0).toFixed(2)
-					this.payPasswordSet = jsonBoolean(data, 'payPasswordSet') ?? false
-					this.balanceReady = true
-				})
-			},
-			openOrders() { openOrderList('all') },
-            openPendingOrders() { openOrderList('pending') },
-            openActiveOrders() { openOrderList('active') },
-            openCompletedOrders() { openOrderList('completed') },
-            openCancelledOrders() { openOrderList('cancelled') },
-			openImageManagement() { uni.navigateTo({ url: '/pages/manage/images' }) },
-            openAvatarPreview() { uni.navigateTo({ url: '/pages/account/profile?avatar=preview' }) },
-            openProfile() { uni.navigateTo({ url: '/pages/account/profile' }) },
-			openWallet() { uni.navigateTo({ url: '/pages/wallet/recharge' }) },
-			openAllRecords() { uni.navigateTo({ url: '/pages/wallet/records' }) },
-			openRechargeRecords() { uni.navigateTo({ url: '/pages/wallet/records?type=RECHARGE' }) },
-			openPayRecords() { uni.navigateTo({ url: '/pages/wallet/records?type=PAY' }) },
-			openPayPassword() { uni.navigateTo({ url: '/pages/account/pay-password' }) },
-			confirmSignOut() { this.signOutConfirm = true },
-			cancelSignOut() { this.signOutConfirm = false },
-			signOut() {
-				if (this.signingOut) return
-				this.signingOut = true
-				doLogout().then(() => { this.signingOut = false; uni.reLaunch({ url: '/pages/login/login' }) })
-			}
-		}
-	}
+const state = reactive({ refreshing: false, currentRefreshTime: '', profileLoading: false, statusBarHeight: 0, username: '校园用户', roleName: '', roleCode: '', userUuid: '',
+    email: '', avatarUrl: '', profileError: '', balanceLoading: false, balanceReady: false,
+    balanceText: '--', balanceError: '', payPasswordSet: false, signOutConfirm: false, signingOut: false })
+
+const { refreshing, currentRefreshTime, profileLoading, statusBarHeight, username, roleName, roleCode, userUuid, email, avatarUrl, profileError, balanceLoading, balanceReady, balanceText, balanceError, payPasswordSet, signOutConfirm, signingOut } = toRefs(state)
+
+function refreshPage() {
+    if (state.refreshing || state.profileLoading || state.balanceLoading || state.signingOut)
+        return;
+    state.refreshing = true;
+    const refreshStartedAt = Date.now();
+    state.currentRefreshTime = refreshTimeLabel(refreshStartedAt);
+    const tasks: Array<Promise<void>> = [loadProfile()];
+    if (state.roleCode == 'CUSTOMER')
+        tasks.push(loadBalance());
+    Promise.all(tasks).then(() => {
+        finishPullRefresh(refreshStartedAt, state.profileError.length == 0 && (state.roleCode != 'CUSTOMER' || state.balanceError.length == 0), (time: string) => {
+            if (time.length > 0)
+                state.currentRefreshTime = time;
+            state.refreshing = false;
+        });
+    }).catch(() => {
+        finishPullRefresh(refreshStartedAt, false, (_time: string) => { state.refreshing = false; });
+    });
+}
+
+function loadProfile(): Promise<void> {
+    state.profileError = '';
+    state.profileLoading = true;
+    return fetchMyProfile().then((result: HttpResult) => {
+        state.profileLoading = false;
+        const data = walletPayload(result);
+        if (data == null) {
+            state.profileError = result.message.length > 0 ? result.message : '资料暂时无法获取，可进入个人资料重试';
+            return;
+        }
+        state.username = jsonString(data, 'username') ?? state.username;
+        state.email = jsonString(data, 'email') ?? '';
+        state.avatarUrl = jsonString(data, 'avatarUrl') ?? '';
+    });
+}
+
+function loadBalance(): Promise<void> {
+    if (state.balanceLoading)
+        return Promise.resolve();
+    state.balanceLoading = true;
+    state.balanceReady = false;
+    state.balanceError = '';
+    return fetchMyBalance().then((result: HttpResult) => {
+        state.balanceLoading = false;
+        const data = walletPayload(result);
+        if (data == null || jsonNumber(data, 'balance') == null) {
+            state.balanceError = result.message.length > 0 ? result.message : '余额暂时无法获取';
+            return;
+        }
+        state.balanceText = (jsonNumber(data, 'balance') ?? 0).toFixed(2);
+        state.payPasswordSet = jsonBoolean(data, 'payPasswordSet') ?? false;
+        state.balanceReady = true;
+    });
+}
+
+function openOrders() {
+    openOrderList('all');
+}
+
+function openPendingOrders() {
+    openOrderList('pending');
+}
+
+function openActiveOrders() {
+    openOrderList('active');
+}
+
+function openCompletedOrders() {
+    openOrderList('completed');
+}
+
+function openCancelledOrders() {
+    openOrderList('cancelled');
+}
+
+function openImageManagement() {
+    uni.navigateTo({ url: '/pages/manage/images' });
+}
+
+function openAvatarPreview() {
+    uni.navigateTo({ url: '/pages/account/profile?avatar=preview' });
+}
+
+function openProfile() {
+    uni.navigateTo({ url: '/pages/account/profile' });
+}
+
+function openWallet() {
+    uni.navigateTo({ url: '/pages/wallet/recharge' });
+}
+
+function openAllRecords() {
+    uni.navigateTo({ url: '/pages/wallet/records' });
+}
+
+function openRechargeRecords() {
+    uni.navigateTo({ url: '/pages/wallet/records?type=RECHARGE' });
+}
+
+function openPayRecords() {
+    uni.navigateTo({ url: '/pages/wallet/records?type=PAY' });
+}
+
+function openPayPassword() {
+    uni.navigateTo({ url: '/pages/account/pay-password' });
+}
+
+function confirmSignOut() {
+    state.signOutConfirm = true;
+}
+
+function cancelSignOut() {
+    state.signOutConfirm = false;
+}
+
+function signOut() {
+    if (state.signingOut)
+        return;
+    state.signingOut = true;
+    doLogout().then(() => { state.signingOut = false; uni.reLaunch({ url: '/pages/login/login' }); });
+}
+
+onShow(() => {
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
+    if (!isLoggedIn()) {
+        uni.reLaunch({ url: '/pages/login/login' });
+        return;
+    }
+    const user = currentUser();
+    if (user == null) {
+        uni.reLaunch({ url: '/pages/login/login' });
+        return;
+    }
+    state.username = user.username.length > 0 ? user.username : '校园用户';
+    state.userUuid = user.userUuid;
+    state.roleCode = user.roleCode;
+    state.roleName = accountRoleLabel(user.roleCode);
+    loadProfile();
+    if (state.roleCode == 'CUSTOMER')
+        loadBalance();
+})
 </script>
 
 <style>

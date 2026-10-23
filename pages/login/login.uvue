@@ -141,235 +141,220 @@
 	</view>
 </template>
 
-<script lang="uts">
-	import { jsonObject, jsonString } from '../../common/json.uts'
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import { onLoad, onReady } from '@dcloudio/uni-app'
+import { jsonObject, jsonString } from '../../common/json.uts';
+// 导入本地存储读取：取上次「记住账号」保存的用户名。
+import { getRememberedUsername } from '../../common/storage.uts';
+// 导入轻量提示：普通提示与成功提示。
+import { toastSuccess, toast } from '../../common/feedback.uts';
+// 导入登录态：登录动作与是否已登录判断。
+import { login as doLogin, isLoggedIn } from '../../store/auth.uts';
+// 导入验证码接口：登录前必须先取到一次有效的图片验证码。
+import { fetchCaptcha } from '../../api/auth.uts';
+// 导入统一请求结果类型，用于标注验证码接口返回值。
+import { HttpResult } from '../../common/http.uts';
 
-	// 导入本地存储读取：取上次「记住账号」保存的用户名。
-	import { getRememberedUsername } from '../../common/storage.uts'
-	// 导入轻量提示：普通提示与成功提示。
-	import { toastSuccess, toast } from '../../common/feedback.uts'
-	// 导入登录态：登录动作与是否已登录判断。
-	import { login as doLogin, isLoggedIn } from '../../store/auth.uts'
-	// 导入验证码接口：登录前必须先取到一次有效的图片验证码。
-	import { fetchCaptcha } from '../../api/auth.uts'
-	// 导入统一请求结果类型，用于标注验证码接口返回值。
-	import { HttpResult } from '../../common/http.uts'
+// 品牌主标题按字拆分，便于逐字错峰入场（直接写死，避免运行时切分字符串）。
+const initialTitleChars: string[] = ['校', '园', '食', '堂'];
+const state = reactive({
+    // 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
+    statusBarHeight: 0,
+    // 账号输入框绑定值。
+    username: '',
+    // 密码输入框绑定值。
+    password: '',
+    // 密码是否明文显示，控制 input 的 password 属性。
+    showPassword: false,
+    // 是否勾选「记住账号」。
+    rememberUsername: false,
+    // 验证码输入框绑定值。
+    captchaCode: '',
+    // 当前验证码标识，登录时原样回传给后端校验。
+    captchaId: '',
+    // 验证码图片的 Base64 数据 URI，为空表示尚未取到。
+    captchaImage: '',
+    // 是否正在获取验证码，避免连续点击触发并发请求。
+    captchaLoading: false,
+    // 当前聚焦的字段名，用于驱动聚焦样式：''/username/password/captcha。
+    focusedField: '',
+    // 是否正在提交登录，用于置灰按钮并拦截重复点击。
+    submitting: false,
+    // 品牌标题的逐字数组，供模板 v-for 渲染。
+    titleChars: initialTitleChars,
+    // 是否已进入入场动画终态，切换后驱动各元素的过渡。
+    entered: false
+})
 
-	export default {
-		data() {
-			// 品牌主标题按字拆分，便于逐字错峰入场（直接写死，避免运行时切分字符串）。
-			const titleChars: string[] = ['校', '园', '食', '堂']
+const { statusBarHeight, username, password, showPassword, rememberUsername, captchaCode, captchaId, captchaImage, captchaLoading, focusedField, submitting, titleChars, entered } = toRefs(state)
 
-			return {
-				// 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
-				statusBarHeight: 0,
-				// 账号输入框绑定值。
-				username: '',
-				// 密码输入框绑定值。
-				password: '',
-				// 密码是否明文显示，控制 input 的 password 属性。
-				showPassword: false,
-				// 是否勾选「记住账号」。
-				rememberUsername: false,
-				// 验证码输入框绑定值。
-				captchaCode: '',
-				// 当前验证码标识，登录时原样回传给后端校验。
-				captchaId: '',
-				// 验证码图片的 Base64 数据 URI，为空表示尚未取到。
-				captchaImage: '',
-				// 是否正在获取验证码，避免连续点击触发并发请求。
-				captchaLoading: false,
-				// 当前聚焦的字段名，用于驱动聚焦样式：''/username/password/captcha。
-				focusedField: '',
-				// 是否正在提交登录，用于置灰按钮并拦截重复点击。
-				submitting: false,
-				// 品牌标题的逐字数组，供模板 v-for 渲染。
-				titleChars: titleChars,
-				// 是否已进入入场动画终态，切换后驱动各元素的过渡。
-				entered: false
-			}
-		},
-		onLoad() {
-			// 状态栏高度取不到时用 24px 兜底，避免顶部内容被系统栏遮挡。
-			const info = uni.getWindowInfo()
-			this.statusBarHeight = info.statusBarHeight > 0 ? info.statusBarHeight : 24
+function titleCharDelay(index: number): string {
+    const delays: string[] = ['0.12s', '0.18s', '0.24s', '0.30s'];
+    if (index < 0 || index >= delays.length) {
+        return 'transition-delay: 0.12s';
+    }
+    return 'transition-delay: ' + delays[index];
+}
 
-			// 已登录用户直接进入首页；onLoad 先于渲染执行，因此不会出现登录页闪现。
-			if (isLoggedIn()) {
-				uni.switchTab({ url: '/pages/home/home' })
-				return
-			}
+function onUsernameFocus() {
+    // 标记账号字段为聚焦，驱动其底线扫出动画与高亮。
+    state.focusedField = 'username';
+}
 
-			// 回填上次记住的账号，密码一律不落盘，需用户重新输入。
-			const remembered = getRememberedUsername()
-			if (remembered.length > 0) {
-				this.username = remembered
-				this.rememberUsername = true
-			}
+function onPasswordFocus() {
+    // 标记密码字段为聚焦，驱动其底线扫出动画与高亮。
+    state.focusedField = 'password';
+}
 
-			// 进入页面即预取一张验证码，避免用户填完账密后才等待图片加载。
-			this.loadCaptcha()
-		},
-		onReady() {
-			// 页面渲染完成后窗口信息才准确（app-android 尤其如此），此处再同步一次状态栏高度。
-			const readyInfo = uni.getWindowInfo()
-			this.statusBarHeight = readyInfo.statusBarHeight > 0 ? readyInfo.statusBarHeight : 24
+function onCaptchaFocus() {
+    // 标记验证码字段为聚焦，驱动其底线扫出动画与高亮。
+    state.focusedField = 'captcha';
+}
 
-			// 首帧绘制完成后再切到「已入场」状态，属性变化才会驱动入场过渡动画。
-			setTimeout(() => {
-				this.entered = true
-			}, 60)
-		},
-		methods: {
-			/**
-			 * 计算品牌标题每个字的入场延迟，让四个字依次弹入。
-			 *
-			 * 直接给出各档位秒数，避免浮点运算产生冗长的小数文本。
-			 *
-			 * @param index 字符下标
-			 * @return 内联的 transition-delay 声明
-			 */
-			titleCharDelay(index: number): string {
-				const delays: string[] = ['0.12s', '0.18s', '0.24s', '0.30s']
-				if (index < 0 || index >= delays.length) {
-					return 'transition-delay: 0.12s'
-				}
-				return 'transition-delay: ' + delays[index]
-			},
-			onUsernameFocus() {
-				// 标记账号字段为聚焦，驱动其底线扫出动画与高亮。
-				this.focusedField = 'username'
-			},
-			onPasswordFocus() {
-				// 标记密码字段为聚焦，驱动其底线扫出动画与高亮。
-				this.focusedField = 'password'
-			},
-			onCaptchaFocus() {
-				// 标记验证码字段为聚焦，驱动其底线扫出动画与高亮。
-				this.focusedField = 'captcha'
-			},
-			/**
-			 * 获取一张新的图片验证码。
-			 *
-			 * 点击图片、进入页面与登录失败后都会调用；失败时保留旧图并提示重试。
-			 */
-			loadCaptcha() {
-				// 正在请求时忽略重复触发，避免连点产生多张无效验证码。
-				if (this.captchaLoading) {
-					return
-				}
-				// 标记请求中，阻止并发获取。
-				this.captchaLoading = true
+function loadCaptcha() {
+    // 正在请求时忽略重复触发，避免连点产生多张无效验证码。
+    if (state.captchaLoading) {
+        return;
+    }
+    // 标记请求中，阻止并发获取。
+    state.captchaLoading = true;
+    // 验证码接口免鉴权，直接按统一结果结构处理。
+    fetchCaptcha().then((result: HttpResult) => {
+        // 请求结束，解除加载中状态。
+        state.captchaLoading = false;
+        // 接口失败或响应体缺失时提示用户点击重试。
+        if (!result.ok || result.data == null) {
+            const message = result.message.length > 0 ? result.message : '验证码加载失败，请点击重试';
+            toast(message);
+            return;
+        }
+        // 取出统一响应体中的 data 字段。
+        const rawPayload = jsonObject(result.data, 'data');
+        if (rawPayload == null) {
+            toast('验证码加载失败，请点击重试');
+            return;
+        }
+        // data 是 any，断言为对象后按字段读取。
+        const payload = rawPayload as UTSJSONObject;
+        // 验证码标识与图片缺一不可，缺失时按失败处理。
+        const captchaId = jsonString(payload, 'captchaId') ?? '';
+        const imageBase64 = jsonString(payload, 'imageBase64') ?? '';
+        if (captchaId.length == 0 || imageBase64.length == 0) {
+            toast('验证码加载失败，请点击重试');
+            return;
+        }
+        // 写入页面状态，旧输入随新图一起清空，避免答案错位。
+        state.captchaId = captchaId;
+        state.captchaImage = imageBase64;
+        state.captchaCode = '';
+    });
+}
 
-				// 验证码接口免鉴权，直接按统一结果结构处理。
-				fetchCaptcha().then((result: HttpResult) => {
-					// 请求结束，解除加载中状态。
-					this.captchaLoading = false
+function onFieldBlur() {
+    // 任意字段失焦即清除聚焦标记，收回高亮动画。
+    state.focusedField = '';
+}
 
-					// 接口失败或响应体缺失时提示用户点击重试。
-					if (!result.ok || result.data == null) {
-						const message = result.message.length > 0 ? result.message : '验证码加载失败，请点击重试'
-						toast(message)
-						return
-					}
+function onPasswordConfirm() {
+    // 键盘回车即提交，减少一步点击。
+    submit();
+}
 
-					// 取出统一响应体中的 data 字段。
-					const rawPayload = jsonObject(result.data, 'data')
-					if (rawPayload == null) {
-						toast('验证码加载失败，请点击重试')
-						return
-					}
+function togglePassword() {
+    // 在明文与密文之间切换密码显示。
+    state.showPassword = !state.showPassword;
+}
 
-					// data 是 any，断言为对象后按字段读取。
-					const payload = rawPayload as UTSJSONObject
-					// 验证码标识与图片缺一不可，缺失时按失败处理。
-					const captchaId = jsonString(payload, 'captchaId') ?? ''
-					const imageBase64 = jsonString(payload, 'imageBase64') ?? ''
-					if (captchaId.length == 0 || imageBase64.length == 0) {
-						toast('验证码加载失败，请点击重试')
-						return
-					}
+function toggleRemember() {
+    // 切换「记住账号」勾选状态，决定登录成功后是否记住用户名。
+    state.rememberUsername = !state.rememberUsername;
+}
 
-					// 写入页面状态，旧输入随新图一起清空，避免答案错位。
-					this.captchaId = captchaId
-					this.captchaImage = imageBase64
-					this.captchaCode = ''
-				})
-			},
-			onFieldBlur() {
-				// 任意字段失焦即清除聚焦标记，收回高亮动画。
-				this.focusedField = ''
-			},
-			onPasswordConfirm() {
-				// 键盘回车即提交，减少一步点击。
-				this.submit()
-			},
-			togglePassword() {
-				// 在明文与密文之间切换密码显示。
-				this.showPassword = !this.showPassword
-			},
-			toggleRemember() {
-				// 切换「记住账号」勾选状态，决定登录成功后是否记住用户名。
-				this.rememberUsername = !this.rememberUsername
-			},
-			submit() {
-				// 提交中忽略重复点击，避免并发请求触发网关限流。
-				if (this.submitting) {
-					return
-				}
+function submit() {
+    // 提交中忽略重复点击，避免并发请求触发网关限流。
+    if (state.submitting) {
+        return;
+    }
+    // 去掉首尾空格后再校验，避免把纯空白当成有效用户名。
+    const username = state.username.trim();
+    // 用户名为空：提示后直接返回，不发起请求。
+    if (username.length == 0) {
+        toast('请输入用户名');
+        return;
+    }
+    // 密码为空：提示后直接返回。
+    if (state.password.length == 0) {
+        toast('请输入登录密码');
+        return;
+    }
+    // 验证码图片尚未取到：重新获取并中止本次提交，避免提交空标识。
+    if (state.captchaId.length == 0 || state.captchaImage.length == 0) {
+        toast('验证码未加载，正在重新获取');
+        loadCaptcha();
+        return;
+    }
+    // 去掉首尾空格后再校验验证码，避免把纯空白当作有效输入。
+    const captchaCode = state.captchaCode.trim();
+    if (captchaCode.length == 0) {
+        toast('请输入验证码');
+        return;
+    }
+    // 置为提交中，按钮进入忙碌态并拦截重复点击。
+    state.submitting = true;
+    // 调用登录流程，返回空串表示成功，否则为错误提示。
+    doLogin(username, state.password, state.captchaId, captchaCode, state.rememberUsername).then((message: string) => {
+        // 请求结束，无论成败都先解除忙碌态。
+        state.submitting = false;
+        // 有错误提示说明登录失败，直接 toast 后结束。
+        if (message.length > 0) {
+            toast(message);
+            // 验证码提交一次即失效，失败后必须换新图，否则再次提交只会提示过期。
+            loadCaptcha();
+            return;
+        }
+        // 登录后清空密码，避免残留在页面状态里。
+        state.password = '';
+        // 给出成功提示。
+        toastSuccess('登录成功');
+        // 首页已是底部导航的 tab 页，必须用 switchTab 跳转并重置页面栈。
+        uni.switchTab({ url: '/pages/home/home' });
+    });
+}
 
-				// 去掉首尾空格后再校验，避免把纯空白当成有效用户名。
-				const username = this.username.trim()
-				// 用户名为空：提示后直接返回，不发起请求。
-				if (username.length == 0) {
-					toast('请输入用户名')
-					return
-				}
-				// 密码为空：提示后直接返回。
-				if (this.password.length == 0) {
-					toast('请输入登录密码')
-					return
-				}
-				// 验证码图片尚未取到：重新获取并中止本次提交，避免提交空标识。
-				if (this.captchaId.length == 0 || this.captchaImage.length == 0) {
-					toast('验证码未加载，正在重新获取')
-					this.loadCaptcha()
-					return
-				}
-				// 去掉首尾空格后再校验验证码，避免把纯空白当作有效输入。
-				const captchaCode = this.captchaCode.trim()
-				if (captchaCode.length == 0) {
-					toast('请输入验证码')
-					return
-				}
+function toRegister() {
+    // 跳转到注册页；用 navigateTo 保留返回栈以便返回登录。
+    uni.navigateTo({ url: '/pages/register/register' });
+}
 
-				// 置为提交中，按钮进入忙碌态并拦截重复点击。
-				this.submitting = true
-				// 调用登录流程，返回空串表示成功，否则为错误提示。
-				doLogin(username, this.password, this.captchaId, captchaCode, this.rememberUsername).then((message: string) => {
-					// 请求结束，无论成败都先解除忙碌态。
-					this.submitting = false
-					// 有错误提示说明登录失败，直接 toast 后结束。
-					if (message.length > 0) {
-						toast(message)
-						// 验证码提交一次即失效，失败后必须换新图，否则再次提交只会提示过期。
-						this.loadCaptcha()
-						return
-					}
-					// 登录后清空密码，避免残留在页面状态里。
-					this.password = ''
-					// 给出成功提示。
-					toastSuccess('登录成功')
-					// 首页已是底部导航的 tab 页，必须用 switchTab 跳转并重置页面栈。
-					uni.switchTab({ url: '/pages/home/home' })
-				})
-			},
-			toRegister() {
-				// 跳转到注册页；用 navigateTo 保留返回栈以便返回登录。
-				uni.navigateTo({ url: '/pages/register/register' })
-			}
-		}
-	}
+onLoad(() => {
+    // 状态栏高度取不到时用 24px 兜底，避免顶部内容被系统栏遮挡。
+    const info = uni.getWindowInfo();
+    state.statusBarHeight = info.statusBarHeight > 0 ? info.statusBarHeight : 24;
+    // 已登录用户直接进入首页；onLoad 先于渲染执行，因此不会出现登录页闪现。
+    if (isLoggedIn()) {
+        uni.switchTab({ url: '/pages/home/home' });
+        return;
+    }
+    // 回填上次记住的账号，密码一律不落盘，需用户重新输入。
+    const remembered = getRememberedUsername();
+    if (remembered.length > 0) {
+        state.username = remembered;
+        state.rememberUsername = true;
+    }
+    // 进入页面即预取一张验证码，避免用户填完账密后才等待图片加载。
+    loadCaptcha();
+})
+
+onReady(() => {
+    // 页面渲染完成后窗口信息才准确（app-android 尤其如此），此处再同步一次状态栏高度。
+    const readyInfo = uni.getWindowInfo();
+    state.statusBarHeight = readyInfo.statusBarHeight > 0 ? readyInfo.statusBarHeight : 24;
+    // 首帧绘制完成后再切到「已入场」状态，属性变化才会驱动入场过渡动画。
+    setTimeout(() => {
+        state.entered = true;
+    }, 60);
+})
 </script>
 
 <style>

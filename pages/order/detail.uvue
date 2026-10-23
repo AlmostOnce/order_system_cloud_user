@@ -1,32 +1,32 @@
 <template>
     <view class="account-page account-secondary">
-        <view class="account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-        <view class="account-nav"><button class="account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">订单详情</text></view>
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">订单详情</text></view>
         <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!paying && !cancelling && (refreshing || (!loading && !balanceLoading && !cleanupLoading))" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
                 <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
-<view class="account-content">
+<view class="account-content vapor-account-secondary--account-content">
             <view v-if="order != null" class="order-status-card">
                 <text class="order-status-label">{{ order!.status }}</text>
                 <text class="order-status-note">{{ order!.status == '待支付' ? (paymentSuccess ? '支付已成功，订单状态确认中' : '完成支付后，窗口将收到你的订单') : (order!.status == '已取消' ? '订单已取消' : '请留意订单进度，到窗口取餐') }}</text>
                 <text v-if="order!.pickupCode.length > 0 && order!.status != '待支付' && order!.status != '已取消'" class="order-pickup">取餐码 {{ order!.pickupCode }}</text>
             </view>
-            <view v-if="order != null" class="account-card">
+            <view v-if="order != null" class="account-card vapor-account-secondary--account-card">
                 <text class="account-heading">本次用餐</text>
                 <view v-for="item in order!.items" :key="item.productId" class="order-line"><view class="order-line-copy"><text class="order-line-name">{{ item.productName }}</text><text class="account-muted">¥{{ item.unitPrice.toFixed(2) }} × {{ item.quantity }}</text></view><text class="order-line-price">¥{{ item.lineAmount.toFixed(2) }}</text></view>
                 <view class="order-total"><text class="account-muted">订单金额</text><text class="order-total-price">¥{{ order!.totalAmount.toFixed(2) }}</text></view>
                 <text class="account-note">订单号 {{ order!.orderNo }}</text><text class="account-note">下单时间 {{ formatDate(order!.createdAt) }}</text>
                 <text v-if="order!.remark.length > 0" class="account-note">备注：{{ order!.remark }}</text>
             </view>
-            <view v-if="order != null && order!.status == '待支付' && !paymentSuccess" class="account-card">
+            <view v-if="order != null && order!.status == '待支付' && !paymentSuccess" class="account-card vapor-account-secondary--account-card">
                 <text class="account-heading">余额支付</text>
                 <text class="account-note">可用余额 {{ balanceReady ? '¥' + balanceText : '--' }}</text>
-                <input v-if="balanceReady && payPasswordSet" class="account-input order-password" type="text" :password="true" v-model="payPassword" :maxlength="20" :disabled="paying || loading" placeholder="请输入支付密码" confirm-type="done" @confirm="pay" />
-                <button v-if="balanceReady && !payPasswordSet" class="account-primary" :disabled="paying" @click="openPassword"><text class="account-primary-text">先设置支付密码</text></button>
-                <button v-else class="account-primary" :disabled="paying || loading || !balanceReady || !paymentReady" :class="paying || loading || !balanceReady || !paymentReady ? 'account-disabled' : ''" @click="pay"><text class="account-primary-text">{{ paying ? '正在确认支付…' : '确认支付' }}</text></button>
+                <input v-if="balanceReady && payPasswordSet" class="account-input order-password vapor-account-secondary--account-input" type="text" :password="true" v-model="payPassword" :maxlength="20" :disabled="paying || loading" placeholder="请输入支付密码" confirm-type="done" @confirm="pay" />
+                <button v-if="balanceReady && !payPasswordSet" class="account-primary vapor-account-secondary--account-primary" :disabled="paying" @click="openPassword"><text class="account-primary-text">先设置支付密码</text></button>
+                <button v-else class="account-primary vapor-account-secondary--account-primary" :disabled="paying || loading || !balanceReady || !paymentReady" :class="paying || loading || !balanceReady || !paymentReady ? 'account-disabled' : ''" @click="pay"><text class="account-primary-text">{{ paying ? '正在确认支付…' : '确认支付' }}</text></button>
                 <button class="account-link" :disabled="paying" @click="openRecharge"><text class="account-link-text">前往充值</text></button>
                 <text v-if="!paymentReady" class="account-note">支付状态暂未确认，请稍后查看。</text>
                 <text v-if="paymentUncertain" class="account-note">上次支付结果待确认，请稍后查看或重试同一订单，避免重复操作。</text>
-                <view v-if="cancelConfirm"><text class="account-note">确认取消这个待支付订单？</text><button class="account-primary" :disabled="paying || cancelling || loading" @click="cancel"><text class="account-primary-text">{{ cancelling ? '正在取消…' : '确认取消订单' }}</text></button><button class="account-link" :disabled="cancelling" @click="keepOrder"><text class="account-link-text">保留订单</text></button></view>
+                <view v-if="cancelConfirm"><text class="account-note">确认取消这个待支付订单？</text><button class="account-primary vapor-account-secondary--account-primary" :disabled="paying || cancelling || loading" @click="cancel"><text class="account-primary-text">{{ cancelling ? '正在取消…' : '确认取消订单' }}</text></button><button class="account-link" :disabled="cancelling" @click="keepOrder"><text class="account-link-text">保留订单</text></button></view>
                 <button v-else class="account-link" :disabled="paying || loading || !paymentReady || paymentUncertain" @click="askCancel"><text class="account-muted">取消订单</text></button>
             </view>
             <text v-if="loading" class="account-note">正在获取订单…</text>
@@ -37,122 +37,216 @@
         </view></scroll-view>
     </view>
 </template>
-<script lang="uts">
-    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
-    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
-    import { CustomerOrder, fetchOrder, fetchOrderPayment, payOrder, cancelOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts'
-    import { fetchMyBalance, walletPayload } from '../../api/wallet.uts'
-    import { HttpResult } from '../../common/http.uts'
-    import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts'
-    import { readStoredObject, cleanupKey } from '../../common/checkout.uts'
-    import { currentUser } from '../../store/auth.uts'
-    import { backToAccount, accountDate } from '../../common/account.uts'
-    export default {
-        components: { RefreshHeader },
-        data() { return { refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' } },
-        onLoad(options: OnLoadOptions) { this.orderId = Number(options['orderId'] ?? '0') },
-        onShow() {
-            this.statusBarHeight = uni.getWindowInfo().statusBarHeight
-            const user = currentUser()
-            if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
-            if (user.roleCode != 'CUSTOMER') { uni.switchTab({ url: '/pages/home/home' }); return }
-            this.userUuid = user.userUuid; this.refresh(); this.retryCleanup()
-        },
-        onHide() { this.payPassword = '' },
-        onUnload() { this.payPassword = '' },
-        methods: {
-            refreshPage() {
-                if (this.refreshing || this.loading || this.paying || this.cancelling || this.balanceLoading || this.cleanupLoading) return
-                this.refreshing = true
-                const refreshStartedAt = Date.now()
-                this.currentRefreshTime = refreshTimeLabel(refreshStartedAt)
-                Promise.all([this.refresh(), this.retryCleanup()]).then(() => {
-                    finishPullRefresh(refreshStartedAt, this.errorText.length == 0 && this.cleanupMessage.length == 0, (time: string) => {
-                        if (time.length > 0) this.currentRefreshTime = time
-                        this.refreshing = false
-                    })
-                }).catch(() => {
-                    finishPullRefresh(refreshStartedAt, false, (_time: string) => { this.refreshing = false })
-                })
-            },
-            goBack() { if (!this.paying && !this.cancelling) backToAccount() },
-            formatDate(value: string): string { return accountDate(value) },
-            openOrders() { uni.navigateTo({ url: '/pages/order/list' }) },
-            openRecharge() { uni.navigateTo({ url: '/pages/wallet/recharge' }) },
-            openPassword() { uni.navigateTo({ url: '/pages/account/pay-password' }) },
-            keepOrder() { this.cancelConfirm = false },
-            askCancel() { if (!this.paymentUncertain && this.paymentReady && !this.paying && !this.loading) this.cancelConfirm = true },
-            refresh(): Promise<void> {
-                if (this.loading || this.paying || this.cancelling) return Promise.resolve()
-                if (!Number.isInteger(this.orderId) || this.orderId <= 0) { this.errorText = '订单编号无效'; return Promise.resolve() }
-                this.loading = true; this.errorText = ''; this.paymentReady = false; this.cancelConfirm = false
-                return fetchOrder(this.orderId).then((result: HttpResult) => {
-                    const data = orderPayload(result)
-                    const order = data == null ? null : parseOrder(data)
-                    if (order == null) { this.loading = false; this.order = null; this.errorText = result.message.length > 0 ? result.message : '订单信息异常'; return }
-                    this.order = order
-                    if (order.status != '待支付') { this.loading = false; this.paymentReady = true; return }
-                    const paymentTask = fetchOrderPayment(this.orderId).then((payment: HttpResult) => {
-                        const payData = orderPayload(payment)
-                        this.paymentSuccess = this.paymentSuccess || (payData != null && jsonString(payData, 'status') == 'SUCCESS')
-                        const status = payData == null ? '' : (jsonString(payData, 'status') ?? '')
-                        this.paymentReady = status == 'SUCCESS' || status == 'CREATED' || status == 'FAILED' || status == 'CLOSED' || payment.statusCode == 404
-                        if (this.paymentSuccess || status == 'FAILED' || status == 'CLOSED') this.paymentUncertain = false
-                        if (!this.paymentReady) this.errorText = '支付状态获取失败，请稍后重试'
-                        this.loading = false
-                    })
-                    return Promise.all([paymentTask, this.loadBalance()]).then(() => {})
-                })
-            },
-            loadBalance(): Promise<void> {
-                this.balanceLoading = true
-                this.balanceReady = false
-                return fetchMyBalance().then((result: HttpResult) => {
-                    this.balanceLoading = false
-                    const data = walletPayload(result)
-                    if (data == null || jsonNumber(data, 'balance') == null) { this.errorText = result.message.length > 0 ? result.message : '余额获取失败，请稍后重试'; return }
-                    this.balanceText = (jsonNumber(data, 'balance') ?? 0).toFixed(2)
-                    this.payPasswordSet = jsonBoolean(data, 'payPasswordSet') ?? false; this.balanceReady = true
-                })
-            },
-            retryCleanup(): Promise<void> {
-                const key = cleanupKey(this.userUuid, this.orderId)
-                const snapshot = readStoredObject(key)
-                if (snapshot == null) return Promise.resolve()
-                this.cleanupLoading = true
-                return cleanupOrderCart(this.orderId, snapshot).then((result: HttpResult) => {
-                    this.cleanupLoading = false
-                    if (result.ok) { uni.removeStorageSync(key); this.cleanupMessage = '' }
-                    else this.cleanupMessage = '订单已保留，购物车清理暂未完成。'
-                })
-            },
-            pay() {
-                if (this.paying || this.loading || this.cancelling || !this.balanceReady || !this.paymentReady || this.paymentSuccess || this.order == null || this.order!.status != '待支付') return
-                if (!this.payPasswordSet) { this.openPassword(); return }
-                if (this.payPassword.length == 0) { this.errorText = '请输入支付密码'; return }
-                this.paying = true; this.errorText = ''; this.cancelConfirm = false
-                const password = this.payPassword; this.payPassword = ''
-                payOrder(this.orderId, password).then((result: HttpResult) => {
-                    this.paying = false
-                    const data = orderPayload(result)
-                    const success = data != null && jsonString(data, 'status') == 'SUCCESS'
-                    this.paymentUncertain = !success && (result.statusCode == 0 || result.statusCode >= 500 || result.ok)
-                    const message = success ? '' : (result.message.length > 0 ? result.message : '支付结果待确认，请稍后查看')
-                    if (success) this.paymentSuccess = true
-                    this.refresh(); this.errorText = message
-                })
-            },
-            cancel() {
-                if (!this.cancelConfirm || this.paying || this.cancelling || this.loading || !this.paymentReady || this.paymentSuccess || this.paymentUncertain) return
-                this.cancelling = true; this.errorText = ''
-                cancelOrder(this.orderId).then((result: HttpResult) => {
-                    this.cancelling = false; this.cancelConfirm = false
-                    if (!result.ok) { this.errorText = result.message; return }
-                    this.refresh()
-                })
-            }
-        }
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
+import { CustomerOrder, fetchOrder, fetchOrderPayment, payOrder, cancelOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts';
+import { fetchMyBalance, walletPayload } from '../../api/wallet.uts';
+import { HttpResult } from '../../common/http.uts';
+import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts';
+import { readStoredObject, cleanupKey } from '../../common/checkout.uts';
+import { currentUser } from '../../store/auth.uts';
+import { backToAccount, accountDate } from '../../common/account.uts';
+
+const state = reactive({ refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
+
+const { refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
+
+function refreshPage() {
+    if (state.refreshing || state.loading || state.paying || state.cancelling || state.balanceLoading || state.cleanupLoading)
+        return;
+    state.refreshing = true;
+    const refreshStartedAt = Date.now();
+    state.currentRefreshTime = refreshTimeLabel(refreshStartedAt);
+    Promise.all([refresh(), retryCleanup()]).then(() => {
+        finishPullRefresh(refreshStartedAt, state.errorText.length == 0 && state.cleanupMessage.length == 0, (time: string) => {
+            if (time.length > 0)
+                state.currentRefreshTime = time;
+            state.refreshing = false;
+        });
+    }).catch(() => {
+        finishPullRefresh(refreshStartedAt, false, (_time: string) => { state.refreshing = false; });
+    });
+}
+
+function goBack() {
+    if (!state.paying && !state.cancelling)
+        backToAccount();
+}
+
+function formatDate(value: string): string {
+    return accountDate(value);
+}
+
+function openOrders() {
+    uni.navigateTo({ url: '/pages/order/list' });
+}
+
+function openRecharge() {
+    uni.navigateTo({ url: '/pages/wallet/recharge' });
+}
+
+function openPassword() {
+    uni.navigateTo({ url: '/pages/account/pay-password' });
+}
+
+function keepOrder() {
+    state.cancelConfirm = false;
+}
+
+function askCancel() {
+    if (!state.paymentUncertain && state.paymentReady && !state.paying && !state.loading)
+        state.cancelConfirm = true;
+}
+
+function refresh(): Promise<void> {
+    if (state.loading || state.paying || state.cancelling)
+        return Promise.resolve();
+    if (!Number.isInteger(state.orderId) || state.orderId <= 0) {
+        state.errorText = '订单编号无效';
+        return Promise.resolve();
     }
+    state.loading = true;
+    state.errorText = '';
+    state.paymentReady = false;
+    state.cancelConfirm = false;
+    return fetchOrder(state.orderId).then((result: HttpResult) => {
+        const data = orderPayload(result);
+        const order = data == null ? null : parseOrder(data);
+        if (order == null) {
+            state.loading = false;
+            state.order = null;
+            state.errorText = result.message.length > 0 ? result.message : '订单信息异常';
+            return;
+        }
+        state.order = order;
+        if (order.status != '待支付') {
+            state.loading = false;
+            state.paymentReady = true;
+            return;
+        }
+        const paymentTask = fetchOrderPayment(state.orderId).then((payment: HttpResult) => {
+            const payData = orderPayload(payment);
+            state.paymentSuccess = state.paymentSuccess || (payData != null && jsonString(payData, 'status') == 'SUCCESS');
+            const status = payData == null ? '' : (jsonString(payData, 'status') ?? '');
+            state.paymentReady = status == 'SUCCESS' || status == 'CREATED' || status == 'FAILED' || status == 'CLOSED' || payment.statusCode == 404;
+            if (state.paymentSuccess || status == 'FAILED' || status == 'CLOSED')
+                state.paymentUncertain = false;
+            if (!state.paymentReady)
+                state.errorText = '支付状态获取失败，请稍后重试';
+            state.loading = false;
+        });
+        return Promise.all([paymentTask, loadBalance()]).then(() => { });
+    });
+}
+
+function loadBalance(): Promise<void> {
+    state.balanceLoading = true;
+    state.balanceReady = false;
+    return fetchMyBalance().then((result: HttpResult) => {
+        state.balanceLoading = false;
+        const data = walletPayload(result);
+        if (data == null || jsonNumber(data, 'balance') == null) {
+            state.errorText = result.message.length > 0 ? result.message : '余额获取失败，请稍后重试';
+            return;
+        }
+        state.balanceText = (jsonNumber(data, 'balance') ?? 0).toFixed(2);
+        state.payPasswordSet = jsonBoolean(data, 'payPasswordSet') ?? false;
+        state.balanceReady = true;
+    });
+}
+
+function retryCleanup(): Promise<void> {
+    const key = cleanupKey(state.userUuid, state.orderId);
+    const snapshot = readStoredObject(key);
+    if (snapshot == null)
+        return Promise.resolve();
+    state.cleanupLoading = true;
+    return cleanupOrderCart(state.orderId, snapshot).then((result: HttpResult) => {
+        state.cleanupLoading = false;
+        if (result.ok) {
+            uni.removeStorageSync(key);
+            state.cleanupMessage = '';
+        }
+        else
+            state.cleanupMessage = '订单已保留，购物车清理暂未完成。';
+    });
+}
+
+function pay() {
+    if (state.paying || state.loading || state.cancelling || !state.balanceReady || !state.paymentReady || state.paymentSuccess || state.order == null || state.order!.status != '待支付')
+        return;
+    if (!state.payPasswordSet) {
+        openPassword();
+        return;
+    }
+    if (state.payPassword.length == 0) {
+        state.errorText = '请输入支付密码';
+        return;
+    }
+    state.paying = true;
+    state.errorText = '';
+    state.cancelConfirm = false;
+    const password = state.payPassword;
+    state.payPassword = '';
+    payOrder(state.orderId, password).then((result: HttpResult) => {
+        state.paying = false;
+        const data = orderPayload(result);
+        const success = data != null && jsonString(data, 'status') == 'SUCCESS';
+        state.paymentUncertain = !success && (result.statusCode == 0 || result.statusCode >= 500 || result.ok);
+        const message = success ? '' : (result.message.length > 0 ? result.message : '支付结果待确认，请稍后查看');
+        if (success)
+            state.paymentSuccess = true;
+        refresh();
+        state.errorText = message;
+    });
+}
+
+function cancel() {
+    if (!state.cancelConfirm || state.paying || state.cancelling || state.loading || !state.paymentReady || state.paymentSuccess || state.paymentUncertain)
+        return;
+    state.cancelling = true;
+    state.errorText = '';
+    cancelOrder(state.orderId).then((result: HttpResult) => {
+        state.cancelling = false;
+        state.cancelConfirm = false;
+        if (!result.ok) {
+            state.errorText = result.message;
+            return;
+        }
+        refresh();
+    });
+}
+
+onLoad((options: OnLoadOptions) => {
+    state.orderId = Number(options['orderId'] ?? '0');
+})
+
+onShow(() => {
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
+    const user = currentUser();
+    if (user == null) {
+        uni.reLaunch({ url: '/pages/login/login' });
+        return;
+    }
+    if (user.roleCode != 'CUSTOMER') {
+        uni.switchTab({ url: '/pages/home/home' });
+        return;
+    }
+    state.userUuid = user.userUuid;
+    refresh();
+    retryCleanup();
+})
+
+onHide(() => {
+    state.payPassword = '';
+})
+
+onUnload(() => {
+    state.payPassword = '';
+})
 </script>
 <style>
     @import '../../styles/account.css';

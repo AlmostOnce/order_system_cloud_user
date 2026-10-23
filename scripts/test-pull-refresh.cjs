@@ -36,11 +36,8 @@ function page(name) {
     const script = source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
     const parsed = ts.createSourceFile(name + '.ts', script, ts.ScriptTarget.Latest, true);
     assert.equal(parsed.parseDiagnostics.length, 0, name + ': syntax');
-    const output = ts.transpileModule(script, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
-    const mod = { exports: {} };
-    new Function('require', 'module', 'exports', output)(request => request.endsWith('/refresh.uts') ? refreshModule.exports : {}, mod, mod.exports);
-    const component = mod.exports.default, vm = component.data();
-    for (const [key, value] of Object.entries(component.methods)) vm[key] = value.bind(vm);
+    const setup = require('./setup-harness.cjs').loadSetup(script, request => request.endsWith('/refresh.uts') ? refreshModule.exports : {});
+    const vm = setup.create();
     return vm;
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));

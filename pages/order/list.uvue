@@ -1,111 +1,166 @@
 <template>
     <view class="account-page account-secondary">
-        <view class="account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-        <view class="account-nav"><button class="account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">{{ pageTitle }}</text></view>
-        <view class="order-filter-bar"><button v-for="tab in filterTabs" :key="tab.code" class="order-filter" :class="selectedStatus == tab.code ? 'order-filter-on' : ''" @click="selectFilter(tab.code)"><text class="order-filter-text">{{ tab.label }}</text></button></view>
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">{{ pageTitle }}</text></view>
+        <view class="order-filter-bar"><button v-for="tab in filterTabs" :key="tab.code" class="order-filter" :class="selectedStatus == tab.code ? 'order-filter-on' : ''" @click="selectFilter(tab.code)"><text :class="(selectedStatus == tab.code ? 'vapor-order-filter-on--order-filter-text' : '')" class="order-filter-text">{{ tab.label }}</text></button></view>
         <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
                 <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
-<view class="account-content">
+<view class="account-content vapor-account-secondary--account-content">
             <view class="account-banner"><view class="banner-copy"><text class="banner-kicker">校园食堂 · 用餐记录</text><text class="banner-title">这一餐，进行到哪了</text><text class="banner-note">查看订单进度，继续支付或到窗口取餐。</text></view></view>
-            <view v-if="pendingWindowId > 0" class="account-card"><text class="account-heading">有一笔提交结果待确认</text><text class="account-note">继续确认原订单，避免重复下单。</text><button class="account-primary" @click="resume"><text class="account-primary-text">继续确认</text></button></view>
+            <view v-if="pendingWindowId > 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">有一笔提交结果待确认</text><text class="account-note">继续确认原订单，避免重复下单。</text><button class="account-primary vapor-account-secondary--account-primary" @click="resume"><text class="account-primary-text">继续确认</text></button></view>
             <button v-for="item in visibleOrders" :key="item.orderId" class="order-list-card" @click="openOrder(item.orderId)">
                 <view class="order-list-top"><text class="order-line-name">窗口 {{ item.windowId }}</text><text class="order-list-status">{{ item.status }}</text></view>
                 <text class="account-muted order-list-date">{{ formatDate(item.createdAt) }}</text>
                 <text class="account-muted">订单号 {{ item.orderNo }}</text>
                 <view class="order-list-top order-list-bottom"><text class="account-muted">查看订单详情</text><text class="order-total-price">¥{{ item.totalAmount.toFixed(2) }}</text></view>
             </button>
-            <view v-if="!loading && visibleOrders.length == 0 && errorText.length == 0" class="account-card"><text class="account-heading">{{ selectedStatus == 'all' ? '还没有订单' : '暂无该状态的订单' }}</text><text class="account-note">去食堂挑选喜欢的菜品，开启下一餐。</text><button class="account-primary" @click="goHome"><text class="account-primary-text">去点餐</text></button></view>
+            <view v-if="!loading && visibleOrders.length == 0 && errorText.length == 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">{{ selectedStatus == 'all' ? '还没有订单' : '暂无该状态的订单' }}</text><text class="account-note">去食堂挑选喜欢的菜品，开启下一餐。</text><button class="account-primary vapor-account-secondary--account-primary" @click="goHome"><text class="account-primary-text">去点餐</text></button></view>
             <text v-if="loading" class="account-note">正在获取订单…</text><text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
 
         </view></scroll-view>
     </view>
 </template>
-<script lang="uts">
-    import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
-    import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
-    import { normalizeOrderStatusFilter } from '../../common/order-navigation.uts'
-    import { CustomerOrder, fetchOrders, parseOrder } from '../../api/order.uts'
-    import { jsonArray } from '../../common/json.uts'
-    import { HttpResult } from '../../common/http.uts'
-    import { currentUser } from '../../store/auth.uts'
-    import { readCheckout } from '../../common/checkout.uts'
-    import { accountDate, backToAccount } from '../../common/account.uts'
-    type OrderFilterTab = { code: string, label: string }
-    export default {
-        components: { RefreshHeader },
-        data() { const orders: Array<CustomerOrder> = []; const filterTabs: Array<OrderFilterTab> = [{ code: 'all', label: '全部' }, { code: 'pending', label: '待支付' }, { code: 'active', label: '进行中' }, { code: 'completed', label: '已完成' }, { code: 'cancelled', label: '已取消' }]; return { refreshing: false, currentRefreshTime: '', selectedStatus: 'all', filterTabs: filterTabs, statusBarHeight: 0, orders: orders, loading: false, errorText: '', pendingWindowId: 0 } },
-        onLoad(options: OnLoadOptions) {
-            const status = options['status']
-            const legacy = options['filter']
-            this.selectFilter(status != null ? status as string : (legacy != null ? legacy as string : 'all'))
-        },
-        computed: {
-            pageTitle(): string {
-                if (this.selectedStatus == 'pending') return '待支付订单'
-                if (this.selectedStatus == 'active') return '进行中订单'
-                if (this.selectedStatus == 'completed') return '已完成订单'
-                if (this.selectedStatus == 'cancelled') return '已取消订单'
-                return '全部订单'
-            },
-            visibleOrders(): Array<CustomerOrder> {
-                if (this.selectedStatus == 'all') return this.orders
-                return this.orders.filter((item: CustomerOrder): boolean => {
-                    if (this.selectedStatus == 'pending') return item.status == '待支付'
-                    if (this.selectedStatus == 'completed') return item.status == '已完成'
-                    if (this.selectedStatus == 'cancelled') return item.status == '已取消'
-                    return item.status == '已支付' || item.status == '制作中' || item.status == '待取货'
-                })
-            }
-        },
-        onShow() {
-            this.statusBarHeight = uni.getWindowInfo().statusBarHeight
-            const user = currentUser()
-            if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
-            if (user.roleCode != 'CUSTOMER') { uni.switchTab({ url: '/pages/home/home' }); return }
-            const draft = readCheckout(user.userUuid); this.pendingWindowId = draft == null ? 0 : draft.windowId
-            this.load()
-        },
-        methods: {
-            refreshPage() {
-                if (this.refreshing || this.loading) return
-                this.refreshing = true
-                const refreshStartedAt = Date.now()
-                this.currentRefreshTime = refreshTimeLabel(refreshStartedAt)
-                this.load().then(() => {
-                    finishPullRefresh(refreshStartedAt, this.errorText.length == 0, (time: string) => {
-                        if (time.length > 0) this.currentRefreshTime = time
-                        this.refreshing = false
-                    })
-                }).catch(() => {
-                    finishPullRefresh(refreshStartedAt, false, (_time: string) => { this.refreshing = false })
-                })
-            },
-            selectFilter(value: string) { this.selectedStatus = normalizeOrderStatusFilter(value) },
-            goBack() { backToAccount() },
-            goHome() { uni.switchTab({ url: '/pages/home/home' }) },
-            formatDate(value: string): string { return accountDate(value) },
-            openOrder(id: number) { uni.navigateTo({ url: '/pages/order/detail?orderId=' + id }) },
-            resume() { uni.navigateTo({ url: '/pages/order/confirm?windowId=' + this.pendingWindowId }) },
-            load(): Promise<void> {
-                if (this.loading) return Promise.resolve()
-                this.loading = true; this.errorText = ''
-                return fetchOrders().then((result: HttpResult) => {
-                    this.loading = false
-                    const rows = result.ok && result.data != null ? jsonArray(result.data, 'data') : null
-                    if (rows == null) { this.errorText = result.message.length > 0 ? result.message : '订单列表格式异常'; return }
-                    const orders: Array<CustomerOrder> = []
-                    for (let i = 0; i < rows.length; i++) {
-                        if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) { this.errorText = '订单数据异常'; return }
-                        const order = parseOrder(rows[i] as UTSJSONObject)
-                        if (order == null) { this.errorText = '订单数据异常'; return }
-                        orders.push(order)
-                    }
-                    orders.sort((a: CustomerOrder, b: CustomerOrder): number => b.orderId - a.orderId)
-                    this.orders = orders
-                })
-            }
+<script setup lang="uts">
+import { reactive, toRefs, computed } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
+import { normalizeOrderStatusFilter } from '../../common/order-navigation.uts';
+import { CustomerOrder, fetchOrders, parseOrder } from '../../api/order.uts';
+import { jsonArray } from '../../common/json.uts';
+import { HttpResult } from '../../common/http.uts';
+import { currentUser } from '../../store/auth.uts';
+import { readCheckout } from '../../common/checkout.uts';
+import { accountDate, backToAccount } from '../../common/account.uts';
+type OrderFilterTab = {
+    code: string;
+    label: string;
+};
+
+const initialOrders: Array<CustomerOrder> = [];
+const initialFilterTabs: Array<OrderFilterTab> = [{ code: 'all', label: '全部' }, { code: 'pending', label: '待支付' }, { code: 'active', label: '进行中' }, { code: 'completed', label: '已完成' }, { code: 'cancelled', label: '已取消' }];
+const state = reactive({ refreshing: false, currentRefreshTime: '', selectedStatus: 'all', filterTabs: initialFilterTabs, statusBarHeight: 0, orders: initialOrders, loading: false, errorText: '', pendingWindowId: 0 })
+
+const { refreshing, currentRefreshTime, selectedStatus, filterTabs, statusBarHeight, orders, loading, errorText, pendingWindowId } = toRefs(state)
+
+const pageTitle = computed((): string => {
+    if (state.selectedStatus == 'pending')
+        return '待支付订单';
+    if (state.selectedStatus == 'active')
+        return '进行中订单';
+    if (state.selectedStatus == 'completed')
+        return '已完成订单';
+    if (state.selectedStatus == 'cancelled')
+        return '已取消订单';
+    return '全部订单';
+})
+
+const visibleOrders = computed((): Array<CustomerOrder> => {
+    if (state.selectedStatus == 'all')
+        return state.orders;
+    return state.orders.filter((item: CustomerOrder): boolean => {
+        if (state.selectedStatus == 'pending')
+            return item.status == '待支付';
+        if (state.selectedStatus == 'completed')
+            return item.status == '已完成';
+        if (state.selectedStatus == 'cancelled')
+            return item.status == '已取消';
+        return item.status == '已支付' || item.status == '制作中' || item.status == '待取货';
+    });
+})
+
+function refreshPage() {
+    if (state.refreshing || state.loading)
+        return;
+    state.refreshing = true;
+    const refreshStartedAt = Date.now();
+    state.currentRefreshTime = refreshTimeLabel(refreshStartedAt);
+    load().then(() => {
+        finishPullRefresh(refreshStartedAt, state.errorText.length == 0, (time: string) => {
+            if (time.length > 0)
+                state.currentRefreshTime = time;
+            state.refreshing = false;
+        });
+    }).catch(() => {
+        finishPullRefresh(refreshStartedAt, false, (_time: string) => { state.refreshing = false; });
+    });
+}
+
+function selectFilter(value: string) {
+    state.selectedStatus = normalizeOrderStatusFilter(value);
+}
+
+function goBack() {
+    backToAccount();
+}
+
+function goHome() {
+    uni.switchTab({ url: '/pages/home/home' });
+}
+
+function formatDate(value: string): string {
+    return accountDate(value);
+}
+
+function openOrder(id: number) {
+    uni.navigateTo({ url: '/pages/order/detail?orderId=' + id });
+}
+
+function resume() {
+    uni.navigateTo({ url: '/pages/order/confirm?windowId=' + state.pendingWindowId });
+}
+
+function load(): Promise<void> {
+    if (state.loading)
+        return Promise.resolve();
+    state.loading = true;
+    state.errorText = '';
+    return fetchOrders().then((result: HttpResult) => {
+        state.loading = false;
+        const rows = result.ok && result.data != null ? jsonArray(result.data, 'data') : null;
+        if (rows == null) {
+            state.errorText = result.message.length > 0 ? result.message : '订单列表格式异常';
+            return;
         }
+        const orders: Array<CustomerOrder> = [];
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) {
+                state.errorText = '订单数据异常';
+                return;
+            }
+            const order = parseOrder(rows[i] as UTSJSONObject);
+            if (order == null) {
+                state.errorText = '订单数据异常';
+                return;
+            }
+            orders.push(order);
+        }
+        orders.sort((a: CustomerOrder, b: CustomerOrder): number => b.orderId - a.orderId);
+        state.orders = orders;
+    });
+}
+
+onLoad((options: OnLoadOptions) => {
+    const status = options['status'];
+    const legacy = options['filter'];
+    selectFilter(status != null ? status as string : (legacy != null ? legacy as string : 'all'));
+})
+
+onShow(() => {
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
+    const user = currentUser();
+    if (user == null) {
+        uni.reLaunch({ url: '/pages/login/login' });
+        return;
     }
+    if (user.roleCode != 'CUSTOMER') {
+        uni.switchTab({ url: '/pages/home/home' });
+        return;
+    }
+    const draft = readCheckout(user.userUuid);
+    state.pendingWindowId = draft == null ? 0 : draft.windowId;
+    load();
+})
 </script>
 <style>
     @import '../../styles/account.css';

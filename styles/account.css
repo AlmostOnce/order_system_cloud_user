@@ -41,13 +41,13 @@
 /* #endif */
 
 /* 账户二级页：统一页头、表单和卡片，页面特征由业务变体承载。 */
-.account-secondary .account-status, .account-secondary .account-nav { background-color: #FDF6F0; }
-.account-secondary .account-back { background-color: #FFFFFF; border-radius: 14px; }
-.account-secondary .account-content { padding-top: 12px; }
-.account-secondary .account-card { border-width: 1px; border-style: solid; border-color: #F1E5DA; border-radius: 20px; padding: 22px; }
-.account-secondary .account-input { height: 50px; border-width: 1px; border-style: solid; border-color: #EADDD1; background-color: #FCF9F6; border-radius: 12px; }
-.account-secondary .account-primary { height: 50px; border-radius: 14px; }
-.account-secondary .account-label { font-weight: bold; }
+.vapor-account-secondary--account-status,.vapor-account-secondary--account-nav { background-color: #FDF6F0; }
+.vapor-account-secondary--account-back { background-color: #FFFFFF; border-radius: 14px; }
+.vapor-account-secondary--account-content { padding-top: 12px; }
+.vapor-account-secondary--account-card { border-width: 1px; border-style: solid; border-color: #F1E5DA; border-radius: 20px; padding: 22px; }
+.vapor-account-secondary--account-input { height: 50px; border-width: 1px; border-style: solid; border-color: #EADDD1; background-color: #FCF9F6; border-radius: 12px; }
+.vapor-account-secondary--account-primary { height: 50px; border-radius: 14px; }
+.vapor-account-secondary--account-label { font-weight: bold; }
 .account-banner { display: flex; flex-direction: row; align-items: center; margin-bottom: 22px; padding: 6px 0 4px 0; }
 .banner-copy { flex: 1; min-width: 0; }
 .banner-kicker { font-size: 11px; line-height: 18px; font-weight: bold; color: #C2410C; }
@@ -55,6 +55,57 @@
 .banner-note { margin-top: 8px; font-size: 12px; line-height: 20px; color: #7A6C60; }
 .banner-symbol { position: relative; flex-shrink: 0; width: 54px; height: 60px; margin-left: 12px; border-radius: 18px; background-color: #FBE3D5; }
 .symbol-part-one, .symbol-part-two, .symbol-part-three { position: absolute; border-color: #C2410C; border-style: solid; border-width: 2px; }
+.vapor-symbol-wallet--symbol-part-one { left: 11px; top: 18px; width: 32px; height: 25px; border-radius: 6px; }
+.vapor-symbol-wallet--symbol-part-two { left: 29px; top: 26px; width: 15px; height: 10px; border-radius: 3px; background-color: #FBE3D5; }
+.vapor-symbol-wallet--symbol-part-three { left: 33px; top: 29px; width: 4px; height: 4px; border-width: 0; border-radius: 2px; background-color: #C2410C; }
+.vapor-symbol-lock--symbol-part-one { left: 18px; top: 13px; width: 18px; height: 22px; border-radius: 9px; }
+.vapor-symbol-lock--symbol-part-two { left: 12px; top: 27px; width: 30px; height: 23px; border-radius: 6px; background-color: #FBE3D5; }
+.vapor-symbol-lock--symbol-part-three { left: 26px; top: 35px; width: 2px; height: 7px; border-width: 0; background-color: #C2410C; }
+.vapor-symbol-ledger--symbol-part-one { left: 13px; top: 12px; width: 28px; height: 37px; border-radius: 5px; }
+.vapor-symbol-ledger--symbol-part-two { left: 20px; top: 24px; width: 14px; height: 2px; border-width: 0; background-color: #C2410C; }
+.vapor-symbol-ledger--symbol-part-three { left: 20px; top: 33px; width: 10px; height: 2px; border-width: 0; background-color: #C2410C; }
+.vapor-account-secondary--recharge-summary { background-color: #31241F; border-color: #31241F; }
+.vapor-account-secondary--recharge-summary--account-muted { color: #F4DCCB; }
+.vapor-account-secondary--recharge-summary--recharge-balance { color: #FFFFFF; font-size: 38px; line-height: 50px; }
+.vapor-account-secondary--recharge-summary--recharge-label { align-self: flex-start; padding: 4px 10px; border-radius: 6px; background-color: #4A352C; color: #FFD5B7; }
+.vapor-account-secondary--recharge-summary--account-note,.vapor-account-secondary--recharge-summary--account-link-text { color: #E7CCBB; }
+.vapor-account-secondary--amount-choice { height: 56px; border-radius: 12px; }
+.vapor-account-secondary--amount-choice-on { border-width: 2px; background-color: #FFF0E5; }
+.vapor-account-secondary--record-tabs { background-color: #FDF6F0; }
+.vapor-account-secondary--record-tab { background-color: #F2E9E1; border-radius: 12px; }
+.vapor-account-secondary--record-tab-on { background-color: #E4572E; }
+.vapor-account-secondary--record-tab-text { color: #7A6C60; }
+.vapor-account-secondary--record-tab-on--record-tab-text { color: #FFFFFF; font-weight: bold; }
+.vapor-account-secondary--record-card { border-width: 1px; border-style: solid; border-color: #F1E5DA; border-radius: 18px; }
+.record-type-mark { display: flex; flex-shrink: 0; width: 34px; height: 34px; margin-right: 10px; align-items: center; justify-content: center; border-radius: 11px; background-color: #EAF2E6; }
+.record-mark-pay { background-color: #FBE3D5; }
+.record-mark-text { font-size: 13px; line-height: 20px; font-weight: bold; color: #386341; }
+.vapor-record-mark-pay--record-mark-text { color: #C2410C; }
+.vapor-account-secondary--record-reference { line-height: 18px; }
+.profile-identity { align-items: center; padding: 24px 16px; margin-bottom: 20px; border-radius: 22px; background-color: #FBE3D5; }
+.profile-initial { display: flex; align-items: center; justify-content: center; width: 68px; height: 68px; border-radius: 24px; background-color: #FFFFFF; }
+.profile-initial-text { font-size: 28px; line-height: 36px; font-weight: bold; color: #C2410C; }
+.profile-identity-name { margin-top: 14px; font-size: 23px; line-height: 32px; font-weight: bold; color: #211C18; text-align: center; }
+.profile-role-badge { margin-top: 8px; padding: 5px 12px; border-radius: 8px; background-color: #FFFFFF; font-size: 11px; line-height: 18px; color: #C2410C; }
+.profile-identity-note { margin-top: 12px; font-size: 12px; line-height: 20px; color: #80634F; }
+.vapor-account-secondary--profile-detail-row { padding-top: 16px; padding-bottom: 16px; }
+.vapor-account-secondary--profile-detail-value { font-size: 16px; line-height: 24px; }
+/* #ifdef WEB */
+.account-secondary .account-banner { flex-direction: row; }
+.account-secondary .account-input { box-sizing: border-box; }
+.account-secondary .symbol-part-one, .account-secondary .symbol-part-two, .account-secondary .symbol-part-three { box-sizing: border-box; }
+.account-secondary button:focus-visible { outline: 2px solid #C2410C; outline-offset: 3px; }
+/* #endif */
+
+/* #ifdef WEB */
+/* Preserve VDOM Web specificity; native uses explicit vapor-* classes above. */
+.account-secondary .account-status, .account-secondary .account-nav { background-color: #FDF6F0; }
+.account-secondary .account-back { background-color: #FFFFFF; border-radius: 14px; }
+.account-secondary .account-content { padding-top: 12px; }
+.account-secondary .account-card { border-width: 1px; border-style: solid; border-color: #F1E5DA; border-radius: 20px; padding: 22px; }
+.account-secondary .account-input { height: 50px; border-width: 1px; border-style: solid; border-color: #EADDD1; background-color: #FCF9F6; border-radius: 12px; }
+.account-secondary .account-primary { height: 50px; border-radius: 14px; }
+.account-secondary .account-label { font-weight: bold; }
 .symbol-wallet .symbol-part-one { left: 11px; top: 18px; width: 32px; height: 25px; border-radius: 6px; }
 .symbol-wallet .symbol-part-two { left: 29px; top: 26px; width: 15px; height: 10px; border-radius: 3px; background-color: #FBE3D5; }
 .symbol-wallet .symbol-part-three { left: 33px; top: 29px; width: 4px; height: 4px; border-width: 0; border-radius: 2px; background-color: #C2410C; }
@@ -77,22 +128,8 @@
 .account-secondary .record-tab-text { color: #7A6C60; }
 .account-secondary .record-tab-on .record-tab-text { color: #FFFFFF; font-weight: bold; }
 .account-secondary .record-card { border-width: 1px; border-style: solid; border-color: #F1E5DA; border-radius: 18px; }
-.record-type-mark { display: flex; flex-shrink: 0; width: 34px; height: 34px; margin-right: 10px; align-items: center; justify-content: center; border-radius: 11px; background-color: #EAF2E6; }
-.record-mark-pay { background-color: #FBE3D5; }
-.record-mark-text { font-size: 13px; line-height: 20px; font-weight: bold; color: #386341; }
 .record-mark-pay .record-mark-text { color: #C2410C; }
 .account-secondary .record-reference { line-height: 18px; }
-.profile-identity { align-items: center; padding: 24px 16px; margin-bottom: 20px; border-radius: 22px; background-color: #FBE3D5; }
-.profile-initial { display: flex; align-items: center; justify-content: center; width: 68px; height: 68px; border-radius: 24px; background-color: #FFFFFF; }
-.profile-initial-text { font-size: 28px; line-height: 36px; font-weight: bold; color: #C2410C; }
-.profile-identity-name { margin-top: 14px; font-size: 23px; line-height: 32px; font-weight: bold; color: #211C18; text-align: center; }
-.profile-role-badge { margin-top: 8px; padding: 5px 12px; border-radius: 8px; background-color: #FFFFFF; font-size: 11px; line-height: 18px; color: #C2410C; }
-.profile-identity-note { margin-top: 12px; font-size: 12px; line-height: 20px; color: #80634F; }
 .account-secondary .profile-detail-row { padding-top: 16px; padding-bottom: 16px; }
 .account-secondary .profile-detail-value { font-size: 16px; line-height: 24px; }
-/* #ifdef WEB */
-.account-secondary .account-banner { flex-direction: row; }
-.account-secondary .account-input { box-sizing: border-box; }
-.account-secondary .symbol-part-one, .account-secondary .symbol-part-two, .account-secondary .symbol-part-three { box-sizing: border-box; }
-.account-secondary button:focus-visible { outline: 2px solid #C2410C; outline-offset: 3px; }
 /* #endif */

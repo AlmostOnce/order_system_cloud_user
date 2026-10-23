@@ -1,41 +1,70 @@
 <template>
-    <view v-if="message.length > 0" :key="message" class="window-message">
-        <view class="message-track" :style="'animation-duration:' + durationSeconds + 's'">
-            <text class="message-copy">{{ message }}</text>
-            <text class="message-copy" aria-hidden="true">{{ message }}</text>
+    <view v-if="message.length > 0" class="window-message" @touchstart="pause" @touchend="resume" @touchcancel="resume">
+        <view class="message-track" :style="trackStyle">
+            <text class="message-copy" :style="copyStyle">{{ message }}</text>
+            <text class="message-copy" :style="copyStyle" aria-hidden="true">{{ message }}</text>
         </view>
     </view>
 </template>
 
-<script lang="uts">
-    export default {
-        props: { content: { type: String, default: '' } },
-        computed: {
-            message(): string {
-                return this.content.replace(/[\r\n\t]+/g, ' ').trim()
-            },
-            durationSeconds(): number {
-                // 长文相应延长周期，避免文字越多滚得越快。
-                return Math.max(12, this.message.length * 0.5 + 2)
-            }
-        }
-    }
+<script setup lang="uts">
+import { computed, ref, watch, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
+import { onShow, onHide } from '@dcloudio/uni-app'
+import { jsonNumber } from '../../common/json.uts'
+
+const props = defineProps({ content: { type: String, default: '' } })
+const instance = getCurrentInstance()
+const offset = ref(0)
+const viewportWidth = ref(0)
+const paused = ref(false)
+let timer = -1
+let visible = true
+let previousTick = 0
+const message = computed((): string => props.content.replace(/[\r\n\t]+/g, ' ').trim())
+// 为整段文字留足宽度，避免原生端依赖 max-content、keyframes 等浏览器能力。
+const copyWidth = computed((): number => Math.max(message.value.length * 12 + 40, viewportWidth.value))
+const trackStyle = computed((): string => 'width:' + copyWidth.value * 2 + 'px;transform:translateX(-' + offset.value + 'px)')
+const copyStyle = computed((): string => 'width:' + copyWidth.value + 'px')
+
+function stop() {
+    if (timer >= 0) { clearInterval(timer); timer = -1 }
+}
+function start() {
+    stop()
+    if (!visible || message.value.length == 0) return
+    previousTick = Date.now()
+    timer = setInterval(() => {
+        const now = Date.now()
+        const elapsed = Math.min(100, now - previousTick)
+        previousTick = now
+        if (!paused.value && copyWidth.value > 0) offset.value = (offset.value + elapsed * 0.024) % copyWidth.value
+    }, 33)
+}
+function measure() {
+    if (instance == null || instance.proxy == null) { start(); return }
+    uni.createSelectorQuery().in(instance.proxy).select('.window-message').boundingClientRect((rect: any) => {
+        if (rect != null) viewportWidth.value = jsonNumber(rect as UTSJSONObject, 'width') ?? 0
+        start()
+    }).exec()
+}
+function pause() { paused.value = true }
+function resume() { paused.value = false }
+onMounted(() => { measure() })
+onShow(() => { visible = true; start() })
+onHide(() => { visible = false; stop() })
+onBeforeUnmount(() => { visible = false; stop() })
+watch(() => props.content, () => { offset.value = 0; measure() })
 </script>
 
-<style>
+<style scoped>
     .window-message { margin: 0 14px 12px 14px; padding: 0 12px; height: 40px; border-radius: 12px; background-color: #FDF0E8; overflow: hidden; }
-    .message-track { display: flex; flex-direction: row; align-items: center; height: 40px; width: max-content; animation-name: window-message-scroll; animation-timing-function: linear; animation-iteration-count: infinite; }
+    .message-track { display: flex; flex-direction: row; align-items: center; height: 40px; }
     .message-copy { flex-shrink: 0; padding-right: 40px; font-size: 12px; line-height: 20px; color: #7A6C60; white-space: nowrap; }
-    @keyframes window-message-scroll {
-        from { transform: translateX(0); }
-        to { transform: translateX(-50%); }
-    }
     /* #ifdef WEB */
-    .window-message:hover .message-track { animation-play-state: paused; }
     @media (prefers-reduced-motion: reduce) {
         .window-message { height: auto; padding-top: 10px; padding-bottom: 10px; }
-        .message-track { animation: none; width: 100%; height: auto; }
-        .message-copy { white-space: normal; padding-right: 0; }
+        .message-track { transform: none !important; width: 100% !important; height: auto; }
+        .message-copy { white-space: normal; width: 100% !important; padding-right: 0; }
         .message-copy[aria-hidden="true"] { display: none; }
     }
     /* #endif */
