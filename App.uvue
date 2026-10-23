@@ -1,7 +1,5 @@
 <script setup lang="uts">
-import { onLaunch, onShow, onHide, onExit } from '@dcloudio/uni-app'
 // #ifdef APP-ANDROID
-import { onLastPageBackPress } from '@dcloudio/uni-app'
 let firstBackTime = 0
 onLastPageBackPress(() => {
     if (firstBackTime == 0) {

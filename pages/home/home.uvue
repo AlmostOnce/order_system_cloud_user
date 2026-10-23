@@ -128,7 +128,6 @@
 
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
-import { onShow, onReady } from '@dcloudio/uni-app'
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
@@ -447,7 +446,7 @@ function openWindow(item: WindowItem) {
     uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId });
 }
 
-onShow(() => {
+onPageShow(() => {
     // 状态栏高度取不到时用 24px 兜底，避免顶部内容被系统栏遮挡。
     const info = uni.getWindowInfo();
     state.statusBarHeight = info.statusBarHeight > 0 ? info.statusBarHeight : 24;

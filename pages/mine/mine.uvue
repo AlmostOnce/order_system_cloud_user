@@ -63,7 +63,6 @@
 
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
@@ -202,7 +201,7 @@ function signOut() {
     doLogout().then(() => { state.signingOut = false; uni.reLaunch({ url: '/pages/login/login' }); });
 }
 
-onShow(() => {
+onPageShow(() => {
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     if (!isLoggedIn()) {
         uni.reLaunch({ url: '/pages/login/login' });

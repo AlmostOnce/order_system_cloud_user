@@ -29,7 +29,6 @@
 </template>
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
-import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { fetchCart, CartResult } from '../../api/cart.uts';
@@ -181,7 +180,7 @@ onLoad((options: OnLoadOptions) => {
         state.windowName = name as string;
 })
 
-onShow(() => {
+onPageShow(() => {
     state.pageVisible = true;
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     const user = currentUser();
@@ -210,7 +209,7 @@ onShow(() => {
         loadCart();
 })
 
-onHide(() => {
+onPageHide(() => {
     state.pageVisible = false;
 })
 

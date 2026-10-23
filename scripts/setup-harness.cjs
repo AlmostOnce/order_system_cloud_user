@@ -4,7 +4,11 @@ const vue=require('D:/HBuilderX/plugins/uniapp-cli-vite/node_modules/vue');
 exports.loadSetup=function(source,resolve){
  const sf=ts.createSourceFile('setup.ts',source,ts.ScriptTarget.Latest,true);
  if(sf.parseDiagnostics.length)throw Error('Invalid setup syntax');
- const imports=sf.statements.filter(ts.isImportDeclaration).map(s=>s.getText(sf)).join('\n');
+ // uni-app x injects these globals during compilation. Supply isolated hook
+ // registration functions here because this unit harness does not run that compiler.
+ const hookNames=['onLaunch','onAppShow','onAppHide','onShow','onHide','onExit','onLastPageBackPress','onLoad','onReady','onUnload','onPageShow','onPageHide'];
+ const hooksUsed=hookNames.filter(name=>new RegExp('\\b'+name+'\\s*\\(').test(source));
+ const imports=sf.statements.filter(ts.isImportDeclaration).map(s=>s.getText(sf)).join('\n')+(hooksUsed.length?'\nimport { '+hooksUsed.join(',')+' } from "@dcloudio/uni-app";':'');
  const methods=[],refs=[],props=[];let body='';
  for(const s of sf.statements){
   if(ts.isImportDeclaration(s))continue;

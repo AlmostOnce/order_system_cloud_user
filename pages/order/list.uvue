@@ -22,7 +22,6 @@
 </template>
 <script setup lang="uts">
 import { reactive, toRefs, computed } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { normalizeOrderStatusFilter } from '../../common/order-navigation.uts';
@@ -146,7 +145,7 @@ onLoad((options: OnLoadOptions) => {
     selectFilter(status != null ? status as string : (legacy != null ? legacy as string : 'all'));
 })
 
-onShow(() => {
+onPageShow(() => {
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     const user = currentUser();
     if (user == null) {

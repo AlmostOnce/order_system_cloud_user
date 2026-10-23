@@ -62,4 +62,4 @@ manifest.json 开启 uni-app-x.vapor 和样式隔离 2.0。14 个页面、3 个�
 
 原生端不依赖后代或复合状态选择器，使用显式 vapor-* 单类变体；动态选中条件与父级状态同步。Web 条件区保留原选择器优先级，避免原有卡片颜色与表单状态被后加载样式覆盖。跑马灯使用跨端位移和可清理计时器，原生端不依赖 max-content 或 CSS keyframes。
 
-验证包含 18 个 SFC 的 setup/模板编译、原生选择器检查、真实 Vue 响应式逻辑测试、Web 构建以及浏览器登录/注册页交互检查。Web 在当前官方方案下仍使用 VDOM。当前本机 5.26 编译器的 @dcloudio/uni-app 类型桩为空，构建会提示生命周期导出声明警告；运行时 Web 页面和跳转已验证，HBuilder V 及 Android/iOS/鸿蒙原生端尚未运行验收。
+验证包含 18 个 SFC 的 setup/模板编译、原生选择器检查、真实 Vue 响应式逻辑测试、Web 构建以及浏览器登录/注册页交互检查。Web 在当前官方方案下仍使用 VDOM。生命周期按 uni-app x 官方规则自动引入，页面和组件使用 onPageShow/onPageHide。本机 5.26 Web 构建无警告；HBuilder V 及 Android/iOS/鸿蒙原生端尚未运行验收。

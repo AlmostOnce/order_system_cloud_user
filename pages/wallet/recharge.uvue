@@ -39,7 +39,6 @@
 
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
-import { onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { fetchMyBalance, rechargeBalance, walletPayload } from '../../api/wallet.uts';
@@ -163,7 +162,7 @@ function submit() {
     });
 }
 
-onShow(() => {
+onPageShow(() => {
     state.pageVisible = true;
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     if (!isLoggedIn()) {
@@ -188,7 +187,7 @@ onShow(() => {
     loadBalance();
 })
 
-onHide(() => {
+onPageHide(() => {
     state.pageVisible = false;
     state.payPassword = '';
 })

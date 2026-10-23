@@ -32,7 +32,6 @@
 
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { fetchBalanceRecords, walletPayload } from '../../api/wallet.uts';
@@ -158,7 +157,7 @@ onLoad((options: OnLoadOptions) => {
         state.recordType = 'PAY';
 })
 
-onShow(() => {
+onPageShow(() => {
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     if (!isLoggedIn()) {
         uni.reLaunch({ url: '/pages/login/login' });

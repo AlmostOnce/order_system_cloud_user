@@ -28,7 +28,6 @@
 
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { isLoggedIn, currentUser } from '../../store/auth.uts';
@@ -92,7 +91,7 @@ function openWindow(item: SalesRankItem) {
     uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId });
 }
 
-onShow(() => {
+onPageShow(() => {
     if (!isLoggedIn()) {
         uni.reLaunch({ url: '/pages/login/login' });
         return;

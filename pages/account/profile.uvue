@@ -40,7 +40,6 @@
 
 <script setup lang="uts">
 import { reactive, toRefs, computed } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
@@ -178,7 +177,7 @@ onLoad((options: OnLoadOptions) => {
         state.avatarPreviewVisible = true;
 })
 
-onShow(() => {
+onPageShow(() => {
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     if (!isLoggedIn()) {
         uni.reLaunch({ url: '/pages/login/login' });

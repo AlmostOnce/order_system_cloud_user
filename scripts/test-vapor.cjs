@@ -14,6 +14,8 @@ function checkCss(css,file){
 }
 for(const file of files){
  const source=fs.readFileSync(file,'utf8');assert.ok(source.includes('<script setup'),file);
+ assert.ok(!/from\s*['"]@dcloudio\/uni-app['"]/.test(source),file+': use uni-app x lifecycle auto imports');
+ if(file!==path.join(root,'App.uvue'))assert.ok(!/\bon(?:Show|Hide)\s*\(/.test(source),file+': use onPageShow/onPageHide for page visibility');
  assert.ok(!/\binitialState\s*=\s*\(\s*\(/.test(source),file+': temporary state initialization wrapper');
  assert.ok(!/@ts-(ignore|nocheck)|\bas any\b/.test(source),file+': type checking bypass');
  const template=source.match(/<template>([\s\S]*?)<\/template>/)?.[1]??'';

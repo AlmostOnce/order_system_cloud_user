@@ -24,7 +24,7 @@ Node 测试：test-vapor、test-vapor-message、test-public-user-id、test-sessi
 
 已使用本机 HBuilderX 5.26 内置 uni-app 编译器进行 Web 构建，结果 DONE Build complete；在浏览器检查登录页、密码可见性切换、注册页跳转。后端不在线时验证码请求网络失败属于预期依赖状态，未执行真实登录、充值或支付。
 
-该编译器的 uni-uts-v1 类型目录中 dcloudio__uni-app/types/index.d.ts 是空 module 声明，因此提示 onLoad/onShow 等导出声明警告。编译器的运行时模块具备这些导出，实际 Web 页面可以运行。没有修改 IDE 安装目录或用业务类型补丁掩盖警告。
+已修复迁移时手动从 @dcloudio/uni-app 导入生命周期产生的 39 条导出声明警告。uni-app x 支持自动引入生命周期，源码直接调用即可；页面和组件使用 onPageShow/onPageHide 区分应用显示隐藏。修复后的本机 5.26 Web 构建完成，完整日志无 warning/error。没有修改 IDE 安装目录、关闭检查或添加类型补丁。
 
 原生蒸汽模式及新 HBuilder V 未在本机运行验收；Web 构建仍走 VDOM 是当前官方行为，不能当成原生 Vapor 构建通过。使用 HBuilder V 时直接打开本项目根目录，让 IDE 识别 manifest；若仍无运行项，需检查 V 的核心插件版本和运行环境。
 

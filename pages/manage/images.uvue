@@ -30,7 +30,6 @@
 </template>
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import { fetchManagedWindows, fetchManagedProducts, uploadImage, saveCatalogImage } from '../../api/files.uts';
@@ -199,7 +198,7 @@ function bindImage() {
     });
 }
 
-onShow(() => {
+onPageShow(() => {
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     const user = currentUser();
     if (user == null) {

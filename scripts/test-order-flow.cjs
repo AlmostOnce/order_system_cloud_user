@@ -56,7 +56,7 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
     const submitted = calls.filter(c => c.args[0] === '/orders');
     assert.deepEqual(submitted[0].args, submitted[1].args, 'uncertain retry uses identical body and key');
     const restored = page('pages/order/confirm.uvue');
-    restored.component.onShow.call(restored.vm);
+    restored.component.onPageShow.call(restored.vm);
     assert.equal(restored.vm.pending, true);
     assert.equal(restored.vm.requestKey, saved.key);
     assert.equal(restored.vm.remark, '少辣');
@@ -94,7 +94,7 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
     assert.equal(calls.at(-1).args[0], '/orders/11/cancel');
 
     const detail = page('pages/order/detail.uvue');
-    detail.vm.payPassword = 'secret'; detail.component.onHide.call(detail.vm);
+    detail.vm.payPassword = 'secret'; detail.component.onPageHide.call(detail.vm);
     assert.equal(detail.vm.payPassword, '', 'password cleared when leaving');
     Object.assign(detail.vm, { cancelConfirm: true, paymentReady: true, paymentUncertain: true, orderId: 11 });
     const before = calls.length; detail.vm.cancel(); await flush();

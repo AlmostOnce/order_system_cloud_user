@@ -9,7 +9,6 @@
 
 <script setup lang="uts">
 import { computed, ref, watch, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
-import { onShow, onHide } from '@dcloudio/uni-app'
 import { jsonNumber } from '../../common/json.uts'
 
 const props = defineProps({ content: { type: String, default: '' } })
@@ -50,8 +49,8 @@ function measure() {
 function pause() { paused.value = true }
 function resume() { paused.value = false }
 onMounted(() => { measure() })
-onShow(() => { visible = true; start() })
-onHide(() => { visible = false; stop() })
+onPageShow(() => { visible = true; start() })
+onPageHide(() => { visible = false; stop() })
 onBeforeUnmount(() => { visible = false; stop() })
 watch(() => props.content, () => { offset.value = 0; measure() })
 </script>

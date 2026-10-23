@@ -39,7 +39,6 @@
 </template>
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
-import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { CustomerOrder, fetchOrder, fetchOrderPayment, payOrder, cancelOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts';
@@ -224,7 +223,7 @@ onLoad((options: OnLoadOptions) => {
     state.orderId = Number(options['orderId'] ?? '0');
 })
 
-onShow(() => {
+onPageShow(() => {
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     const user = currentUser();
     if (user == null) {
@@ -240,7 +239,7 @@ onShow(() => {
     retryCleanup();
 })
 
-onHide(() => {
+onPageHide(() => {
     state.payPassword = '';
 })
 

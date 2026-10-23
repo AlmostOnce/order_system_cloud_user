@@ -143,7 +143,6 @@
 
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
-import { onLoad, onReady } from '@dcloudio/uni-app'
 import { jsonObject, jsonString } from '../../common/json.uts';
 // 导入本地存储读取：取上次「记住账号」保存的用户名。
 import { getRememberedUsername } from '../../common/storage.uts';

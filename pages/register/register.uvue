@@ -115,7 +115,6 @@
 
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
-import { onLoad, onReady } from '@dcloudio/uni-app'
 // 导入轻量提示：普通提示与成功提示。
 import { toast, toastSuccess } from '../../common/feedback.uts';
 // 导入注册动作：注册成功后引导用户回登录页手动登录。

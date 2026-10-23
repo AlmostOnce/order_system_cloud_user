@@ -190,7 +190,6 @@
 
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
-import { onLoad, onShow, onReady } from '@dcloudio/uni-app'
 import WindowMessage from '../../components/window-message/window-message.uvue';
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
@@ -757,7 +756,7 @@ onLoad((options: OnLoadOptions) => {
     }
 })
 
-onShow(() => {
+onPageShow(() => {
     // 状态栏高度取不到时用 24px 兜底；放在 onShow 中读取，
     // 避免 H5 服务端预渲染阶段访问客户端窗口信息。
     const info = uni.getWindowInfo();
