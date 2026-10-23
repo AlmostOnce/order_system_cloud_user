@@ -19,12 +19,12 @@ const KEY_ACCESS_TOKEN: string = 'auth_access_token'
 const KEY_REFRESH_TOKEN: string = 'auth_refresh_token'
 
 /**
- * 上次登录用户名的存储键，仅供「记住账号」回填使用。
+ * 上次登录登录账号的存储键，仅供「记住账号」回填使用。
  *
  * 刻意不落盘密码：旧版把明文密码写入本地存储，属于必须修掉的安全问题。
  */
-// 「记住账号」只记用户名，不记密码，降低凭据泄露风险。
-const KEY_REMEMBERED_USERNAME: string = 'auth_remembered_username'
+// 「记住账号」只记登录账号，不记密码，降低凭据泄露风险。
+const KEY_REMEMBERED_ACCOUNT: string = 'auth_remembered_account'
 
 /**
  * 读取访问令牌。
@@ -82,13 +82,13 @@ export function clearTokens(): void {
 }
 
 /**
- * 读取上次记住的用户名。
+ * 读取上次记住的登录账号。
  *
- * @return 记住的用户名，无记录时返回空字符串
+ * @return 记住的登录账号，无记录时返回空字符串
  */
-export function getRememberedUsername(): string {
-	// 从本地存储读取上次记住的用户名。
-	const value = uni.getStorageSync(KEY_REMEMBERED_USERNAME)
+export function getRememberedAccount(): string {
+	// 从本地存储读取上次记住的登录账号。
+	const value = uni.getStorageSync(KEY_REMEMBERED_ACCOUNT)
 	// 没有记录时返回空字符串，登录页据此跳过回填。
 	if (value == null) {
 		return ''
@@ -98,19 +98,19 @@ export function getRememberedUsername(): string {
 }
 
 /**
- * 记住用户名，供下次登录回填。
+ * 记住登录账号，供下次登录回填。
  *
- * @param username 用户名
+ * @param username 登录账号
  */
-export function setRememberedUsername(username: string): void {
-	// 仅写入用户名，不写入密码。
-	uni.setStorageSync(KEY_REMEMBERED_USERNAME, username)
+export function setRememberedAccount(username: string): void {
+	// 仅写入登录账号，不写入密码。
+	uni.setStorageSync(KEY_REMEMBERED_ACCOUNT, username)
 }
 
 /**
- * 清除已记住的用户名。
+ * 清除已记住的登录账号。
  */
-export function clearRememberedUsername(): void {
+export function clearRememberedAccount(): void {
 	// 用户取消「记住账号」时删除记录，下次登录不再自动回填。
-	uni.removeStorageSync(KEY_REMEMBERED_USERNAME)
+	uni.removeStorageSync(KEY_REMEMBERED_ACCOUNT)
 }

@@ -32,20 +32,20 @@
 			<text class="panel-title">欢迎回来</text>
 			<text class="panel-desc">登录后浏览档口菜单、下单并查询订单</text>
 
-			<view class="field" :class="focusedField == 'username' ? 'field-focused' : ''">
+			<view class="field" :class="focusedField == 'account' ? 'field-focused' : ''">
 				<text class="field-label">账号</text>
 				<input
 					class="field-input"
 					type="text"
-					v-model="username"
-					placeholder="请输入用户名"
+					v-model="account"
+					placeholder="请输入用户号或邮箱"
 					placeholder-class="field-placeholder"
-					:maxlength="64"
+					:maxlength="254"
 					confirm-type="next"
-					@focus="onUsernameFocus"
+					@focus="onAccountFocus"
 					@blur="onFieldBlur"
 				/>
-				<view class="field-rule" :class="focusedField == 'username' ? 'field-rule-on' : ''"></view>
+				<view class="field-rule" :class="focusedField == 'account' ? 'field-rule-on' : ''"></view>
 			</view>
 
 			<view class="field" :class="focusedField == 'password' ? 'field-focused' : ''">
@@ -111,8 +111,8 @@
 
 			<view class="options">
 				<view class="remember" @click="toggleRemember">
-					<view class="remember-box" :class="rememberUsername ? 'remember-box-on' : ''">
-						<text class="remember-tick" :class="rememberUsername ? 'remember-tick-on' : 'remember-tick-off'">✓</text>
+					<view class="remember-box" :class="rememberAccount ? 'remember-box-on' : ''">
+						<text class="remember-tick" :class="rememberAccount ? 'remember-tick-on' : 'remember-tick-off'">✓</text>
 					</view>
 					<text class="remember-text">记住账号</text>
 				</view>
@@ -145,7 +145,7 @@
 import { reactive, toRefs } from 'vue'
 import { jsonObject, jsonString } from '../../common/json.uts';
 // 导入本地存储读取：取上次「记住账号」保存的用户名。
-import { getRememberedUsername } from '../../common/storage.uts';
+import { getRememberedAccount } from '../../common/storage.uts';
 // 导入轻量提示：普通提示与成功提示。
 import { toastSuccess, toast } from '../../common/feedback.uts';
 // 导入登录态：登录动作与是否已登录判断。
@@ -161,13 +161,13 @@ const state = reactive({
     // 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
     statusBarHeight: 0,
     // 账号输入框绑定值。
-    username: '',
+    account: '',
     // 密码输入框绑定值。
     password: '',
     // 密码是否明文显示，控制 input 的 password 属性。
     showPassword: false,
     // 是否勾选「记住账号」。
-    rememberUsername: false,
+    rememberAccount: false,
     // 验证码输入框绑定值。
     captchaCode: '',
     // 当前验证码标识，登录时原样回传给后端校验。
@@ -176,7 +176,7 @@ const state = reactive({
     captchaImage: '',
     // 是否正在获取验证码，避免连续点击触发并发请求。
     captchaLoading: false,
-    // 当前聚焦的字段名，用于驱动聚焦样式：''/username/password/captcha。
+    // 当前聚焦的字段名，用于驱动聚焦样式：''/account/password/captcha。
     focusedField: '',
     // 是否正在提交登录，用于置灰按钮并拦截重复点击。
     submitting: false,
@@ -186,7 +186,7 @@ const state = reactive({
     entered: false
 })
 
-const { statusBarHeight, username, password, showPassword, rememberUsername, captchaCode, captchaId, captchaImage, captchaLoading, focusedField, submitting, titleChars, entered } = toRefs(state)
+const { statusBarHeight, account, password, showPassword, rememberAccount, captchaCode, captchaId, captchaImage, captchaLoading, focusedField, submitting, titleChars, entered } = toRefs(state)
 
 function titleCharDelay(index: number): string {
     const delays: string[] = ['0.12s', '0.18s', '0.24s', '0.30s'];
@@ -196,9 +196,9 @@ function titleCharDelay(index: number): string {
     return 'transition-delay: ' + delays[index];
 }
 
-function onUsernameFocus() {
+function onAccountFocus() {
     // 标记账号字段为聚焦，驱动其底线扫出动画与高亮。
-    state.focusedField = 'username';
+    state.focusedField = 'account';
 }
 
 function onPasswordFocus() {
@@ -267,7 +267,7 @@ function togglePassword() {
 
 function toggleRemember() {
     // 切换「记住账号」勾选状态，决定登录成功后是否记住用户名。
-    state.rememberUsername = !state.rememberUsername;
+    state.rememberAccount = !state.rememberAccount;
 }
 
 function submit() {
@@ -276,10 +276,10 @@ function submit() {
         return;
     }
     // 去掉首尾空格后再校验，避免把纯空白当成有效用户名。
-    const username = state.username.trim();
+    const account = state.account.trim();
     // 用户名为空：提示后直接返回，不发起请求。
-    if (username.length == 0) {
-        toast('请输入用户名');
+    if (account.length == 0) {
+        toast('请输入用户号或邮箱');
         return;
     }
     // 密码为空：提示后直接返回。
@@ -302,7 +302,7 @@ function submit() {
     // 置为提交中，按钮进入忙碌态并拦截重复点击。
     state.submitting = true;
     // 调用登录流程，返回空串表示成功，否则为错误提示。
-    doLogin(username, state.password, state.captchaId, captchaCode, state.rememberUsername).then((message: string) => {
+    doLogin(account, state.password, state.captchaId, captchaCode, state.rememberAccount).then((message: string) => {
         // 请求结束，无论成败都先解除忙碌态。
         state.submitting = false;
         // 有错误提示说明登录失败，直接 toast 后结束。
@@ -336,13 +336,20 @@ onLoad(() => {
         return;
     }
     // 回填上次记住的账号，密码一律不落盘，需用户重新输入。
-    const remembered = getRememberedUsername();
+    const remembered = getRememberedAccount();
     if (remembered.length > 0) {
-        state.username = remembered;
-        state.rememberUsername = true;
+        state.account = remembered;
+        state.rememberAccount = true;
     }
     // 进入页面即预取一张验证码，避免用户填完账密后才等待图片加载。
     loadCaptcha();
+})
+
+let lastRememberedAccount = '';
+onPageShow(() => {
+    const remembered = getRememberedAccount();
+    if (remembered.length > 0 && remembered != lastRememberedAccount) { state.account = remembered; state.rememberAccount = true; }
+    lastRememberedAccount = remembered;
 })
 
 onReady(() => {

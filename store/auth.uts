@@ -13,27 +13,27 @@ import { login as loginApi, register as registerApi, logout as logoutApi } from 
 // 导入统一请求结果类型，用于标注接口返回值。
 import { HttpResult } from '../common/http.uts'
 // 导入本地凭据读写：保存/清除双令牌，以及「记住账号」的读写。
-import { saveTokens, clearTokens, getAccessToken, getRefreshToken, setRememberedUsername, clearRememberedUsername } from '../common/storage.uts'
+import { saveTokens, clearTokens, getAccessToken, getRefreshToken, setRememberedAccount, clearRememberedAccount } from '../common/storage.uts'
 // 导入 JWT 载荷解析，用于在不请求后端的情况下读取当前登录身份。
 import { parseTokenPayload, TokenPayload } from '../common/jwt.uts'
 
 /**
  * 账号密码登录。
  *
- * 登录成功后写入双令牌；「记住账号」只保存用户名，不保存密码。
+ * 登录成功后写入双令牌；「记住账号」只保存用户号或邮箱，不保存密码。
  *
- * @param username 用户名
+ * @param account 用户号或邮箱
  * @param password 密码
  * @param captchaId 验证码标识，由获取验证码接口下发
  * @param captchaCode 用户输入的验证码字符
- * @param rememberUsername 是否记住用户名
+ * @param rememberAccount 是否记住登录账号
  * @return 空字符串表示登录成功，否则为需要展示的错误提示
  */
-export function login(username: string, password: string, captchaId: string, captchaCode: string, rememberUsername: boolean): Promise<string> {
+export function login(account: string, password: string, captchaId: string, captchaCode: string, rememberAccount: boolean): Promise<string> {
 	// 用 Promise<string> 收敛结果：空串表示成功，非空串为可直接 toast 的提示。
 	return new Promise<string>((resolve) => {
 		// 调用认证接口发起登录，验证码与账号密码一并提交。
-		loginApi(username, password, captchaId, captchaCode).then((result: HttpResult) => {
+		loginApi(account, password, captchaId, captchaCode).then((result: HttpResult) => {
 			// 请求失败：后端 message 已可直接展示，原样返回给页面。
 			if (!result.ok) {
 				resolve(result.message)
@@ -77,11 +77,11 @@ export function login(username: string, password: string, captchaId: string, cap
 			// 双令牌齐全，写入本地存储，后续请求即携带该访问令牌。
 			saveTokens(accessToken, refreshToken)
 			// 勾选「记住账号」：只记用户名，不落盘密码。
-			if (rememberUsername) {
-				setRememberedUsername(username)
+			if (rememberAccount) {
+				setRememberedAccount(account)
 			} else {
 				// 未勾选：清掉历史记住的用户名，避免下次误回填。
-				clearRememberedUsername()
+				clearRememberedAccount()
 			}
 			// 返回空串表示登录成功。
 			resolve('')
@@ -96,27 +96,19 @@ export function login(username: string, password: string, captchaId: string, cap
  * 与后端「注册只创建账号」的语义保持一致。
  *
  * @param username 用户名
- * @param phone 手机号
+ * @param email 邮箱
  * @param password 密码
- * @return 空字符串表示注册成功，否则为需要展示的错误提示
+ * @return 注册结果及系统分配的用户号
  */
-export function register(username: string, phone: string, password: string): Promise<string> {
-	// 用 Promise<string> 收敛结果：空串表示注册成功，非空串为错误提示。
-	return new Promise<string>((resolve) => {
-		// 调用注册接口创建账号。
-		registerApi(username, phone, password).then((result: HttpResult) => {
-			// 注册失败（如用户名或手机号已被占用）：透传后端提示。
-			if (!result.ok) {
-				resolve(result.message)
-				return
-			}
-
-			// 注册成功时把用户名记下来，方便登录页直接回填。
-			setRememberedUsername(username)
-			// 返回空串表示注册成功。
-			resolve('')
-		})
-	})
+export type RegistrationResult = { ok: boolean, message: string, userNo: string }
+export function register(username: string, email: string, password: string): Promise<RegistrationResult> {
+    return registerApi(username, email.trim().toLowerCase(), password).then((result: HttpResult): RegistrationResult => {
+        if (!result.ok) return { ok: false, message: result.message, userNo: '' }
+        const payload = result.data == null ? null : jsonObject(result.data, 'data')
+        const userNo = payload == null ? '' : (jsonString(payload, 'userNo') ?? '')
+        setRememberedAccount(userNo.length > 0 ? userNo : email.trim().toLowerCase())
+        return { ok: true, message: '', userNo: userNo }
+    })
 }
 
 /**

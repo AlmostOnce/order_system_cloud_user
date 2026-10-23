@@ -16,12 +16,12 @@ const auth=load('store/auth.uts');
 const token=sub=>'header.'+Buffer.from(JSON.stringify({sub,exp:1900000000})).toString('base64url')+'.sig';
 (async()=>{
  for(const invalid of [token('7'),'broken']) {
-  storage.set('auth_access_token',invalid); storage.set('auth_refresh_token','old-refresh'); storage.set('auth_remembered_username','remember-me');
+  storage.set('auth_access_token',invalid); storage.set('auth_refresh_token','old-refresh'); storage.set('auth_remembered_account','remember-me');
   assert.equal(auth.isLoggedIn(),false,'login must not send an unreadable session back to home');
   assert.equal(auth.currentUser(),null);
   assert.equal(storage.has('auth_access_token'),false);
   assert.equal(storage.has('auth_refresh_token'),false);
-  assert.equal(storage.get('auth_remembered_username'),'remember-me');
+  assert.equal(storage.get('auth_remembered_account'),'remember-me');
   assert.equal(auth.isLoggedIn(),false,'re-entering login must stay on login');
  }
  const uuid='12345678-1234-4234-8234-123456789abc';

@@ -23,16 +23,16 @@ export function fetchCaptcha(): Promise<HttpResult> {
 /**
  * 账号密码登录。
  *
- * @param username 用户名
+ * @param account 用户号或邮箱
  * @param password 密码
  * @param captchaId 验证码标识，由 fetchCaptcha 下发
  * @param captchaCode 用户输入的验证码字符
  * @return 请求结果，成功时 data 内含 accessToken、refreshToken、expiresIn
  */
-export function login(username: string, password: string, captchaId: string, captchaCode: string): Promise<HttpResult> {
+export function login(account: string, password: string, captchaId: string, captchaCode: string): Promise<HttpResult> {
 	// 按后端 LoginRequest 契约组装请求体，验证码标识与字符必须原样回传。
 	const body: UTSJSONObject = {
-		username: username,
+		account: account,
 		password: password,
 		captchaId: captchaId,
 		captchaCode: captchaCode
@@ -45,13 +45,13 @@ export function login(username: string, password: string, captchaId: string, cap
  * 注册新用户，注册成功后由后端默认分配 CUSTOMER 角色。
  *
  * @param username 用户名，2-64 个字符
- * @param phone 手机号，需匹配 1[3-9] 开头的 11 位号码
+ * @param email 邮箱，合法邮箱地址
  * @param password 登录密码，6-64 个字符
- * @return 请求结果，成功时 data 内含 userUuid、username、roleCode
+ * @return 请求结果，成功时 data 内含 userUuid、userNo、username、roleCode
  */
-export function register(username: string, phone: string, password: string): Promise<HttpResult> {
-	// 按后端 RegisterRequest 契约组装请求体：用户名、手机号、登录密码。
-	const body: UTSJSONObject = { username: username, phone: phone, password: password }
+export function register(username: string, email: string, password: string): Promise<HttpResult> {
+	// 按后端 RegisterRequest 契约组装请求体：用户名、邮箱、登录密码。
+	const body: UTSJSONObject = { username: username, email: email, password: password }
 	// 注册同为免鉴权入口，不携带旧令牌。
 	return httpPost('/auth/register', body, false)
 }

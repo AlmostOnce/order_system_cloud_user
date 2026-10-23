@@ -17,10 +17,18 @@
 			<text class="intro-desc" :class="entered ? '' : 'intro-desc-pre'">注册后即可浏览档口菜单、下单并查看订单进度</text>
 		</view>
 
-		<view class="panel" :class="entered ? '' : 'panel-pre'">
+        <view v-if="registered" class="panel">
+            <text class="success-title">注册成功</text>
+            <text class="success-note">你的用户号</text>
+            <text class="success-account">{{ registeredUserNo.length > 0 ? registeredUserNo : '可使用邮箱登录' }}</text>
+            <text class="success-note">请保存用户号，也可以使用注册邮箱和密码登录。</text>
+            <button v-if="registeredUserNo.length > 0" class="account-copy" @click="copyUserNo">复制用户号</button>
+            <button class="success-login" @click="goBack">前往登录</button>
+        </view>
+		<view v-if="!registered" class="panel" :class="entered ? '' : 'panel-pre'">
 			<view class="panel-rule" :class="entered ? '' : 'panel-rule-pre'"></view>
 			<view class="field" :class="focusedField == 'username' ? 'field-focused' : ''">
-				<text class="field-label">用户名</text>
+				<text class="field-label">昵称</text>
 				<input
 					class="field-input"
 					type="text"
@@ -36,22 +44,22 @@
 			</view>
 			<text v-if="usernameError.length > 0" class="field-error">{{ usernameError }}</text>
 
-			<view class="field" :class="focusedField == 'phone' ? 'field-focused' : ''">
-				<text class="field-label">手机号</text>
+			<view class="field" :class="focusedField == 'email' ? 'field-focused' : ''">
+				<text class="field-label">邮箱</text>
 				<input
 					class="field-input"
-					type="number"
-					v-model="phone"
-					placeholder="11 位手机号，用于找回账号"
+					type="text"
+					v-model="email"
+					placeholder="用于登录的邮箱地址"
 					placeholder-class="field-placeholder"
-					:maxlength="11"
+					:maxlength="254"
 					confirm-type="next"
-					@focus="onFieldFocus('phone')"
+					@focus="onFieldFocus('email')"
 					@blur="onFieldBlur"
 				/>
-				<view class="field-rule" :class="focusedField == 'phone' ? 'field-rule-on' : ''"></view>
+				<view class="field-rule" :class="focusedField == 'email' ? 'field-rule-on' : ''"></view>
 			</view>
-			<text v-if="phoneError.length > 0" class="field-error">{{ phoneError }}</text>
+			<text v-if="emailError.length > 0" class="field-error">{{ emailError }}</text>
 
 			<view class="field" :class="focusedField == 'password' ? 'field-focused' : ''">
 				<text class="field-label">登录密码</text>
@@ -118,55 +126,29 @@ import { reactive, toRefs } from 'vue'
 // 导入轻量提示：普通提示与成功提示。
 import { toast, toastSuccess } from '../../common/feedback.uts';
 // 导入注册动作：注册成功后引导用户回登录页手动登录。
-import { register as doRegister } from '../../store/auth.uts';
+import { register as doRegister, RegistrationResult } from '../../store/auth.uts';
 /**
- * 校验手机号。
+ * 校验邮箱。
  *
  * 与后端 RegisterRequest 的约束保持一致（^1[3-9]\d{9}$），
  * 这里手写逐位判断而非正则，避免不同平台正则实现差异。
  *
- * @param phone 手机号
+ * @param email 邮箱
  * @return 合法返回空字符串，否则为错误提示
  */
-function validatePhone(phone: string): string {
-    // 空值优先拦截，避免后续按位判断时下标越界。
-    if (phone.length == 0) {
-        return '请输入手机号';
-    }
-    // 中国大陆手机号固定 11 位。
-    if (phone.length != 11) {
-        return '手机号应为 11 位数字';
-    }
-    // 首位必须是 1。
-    if (phone.charAt(0) != '1') {
-        return '手机号应以 1 开头';
-    }
-    // 取出第二位，用于校验号段。
-    const second = phone.charAt(1);
-    // 第二位需落在 3-9，对应有效号段。
-    if (second < '3' || second > '9') {
-        return '手机号格式不正确';
-    }
-    // 逐位校验余下字符均为数字字符（从下标 1 开始，首位已单独校验）。
-    for (let i = 1; i < phone.length; i++) {
-        // 取字符编码；数字字符的 ASCII 区间为 48-57。
-        const code = phone.charCodeAt(i);
-        // 超出数字区间说明混入了非数字字符。
-        if (code < 48 || code > 57) {
-            return '手机号只能包含数字';
-        }
-    }
-    // 全部校验通过，返回空串表示合法。
+function validateEmail(email: string): string {
+    if (email.length == 0) return '请输入邮箱地址';
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return '请输入有效的邮箱地址';
     return '';
 }
 
 const state = reactive({
     // 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
     statusBarHeight: 0,
-    // 用户名输入框绑定值。
+    // 昵称输入框绑定值。
     username: '',
-    // 手机号输入框绑定值。
-    phone: '',
+    // 邮箱输入框绑定值。
+    email: '',
     // 登录密码输入框绑定值。
     password: '',
     // 确认密码输入框绑定值，用于与密码比对。
@@ -175,10 +157,10 @@ const state = reactive({
     showPassword: false,
     // 当前聚焦的字段名，用于驱动聚焦样式。
     focusedField: '',
-    // 用户名校验错误提示，非空时模板展示红字。
+    // 昵称校验错误提示，非空时模板展示红字。
     usernameError: '',
-    // 手机号校验错误提示。
-    phoneError: '',
+    // 邮箱校验错误提示。
+    emailError: '',
     // 密码校验错误提示。
     passwordError: '',
     // 确认密码校验错误提示。
@@ -186,10 +168,12 @@ const state = reactive({
     // 是否正在提交注册，用于置灰按钮并拦截重复点击。
     submitting: false,
     // 是否已进入入场动画终态，切换后驱动各元素的过渡。
+    registered: false,
+    registeredUserNo: '',
     entered: false
 })
 
-const { statusBarHeight, username, phone, password, confirmPassword, showPassword, focusedField, usernameError, phoneError, passwordError, confirmError, submitting, entered } = toRefs(state)
+const { statusBarHeight, username, email, password, confirmPassword, showPassword, focusedField, usernameError, emailError, passwordError, confirmError, submitting, registered, registeredUserNo, entered } = toRefs(state)
 
 function onFieldFocus(field: string) {
     // 记录当前聚焦字段，驱动对应输入框的聚焦样式。
@@ -198,8 +182,8 @@ function onFieldFocus(field: string) {
     if (field == 'username') {
         state.usernameError = '';
     }
-    else if (field == 'phone') {
-        state.phoneError = '';
+    else if (field == 'email') {
+        state.emailError = '';
     }
     else if (field == 'password') {
         state.passwordError = '';
@@ -222,22 +206,22 @@ function togglePassword() {
 function validateForm(): boolean {
     // 逐项校验并把结果写入错误字段，返回整体是否通过。
     const username = state.username.trim();
-    // 用户名长度需与后端约束一致，避免提交后才被后端拒绝。
+    // 昵称长度需与后端约束一致，避免提交后才被后端拒绝。
     if (username.length < 2 || username.length > 64) {
-        state.usernameError = '用户名长度需在 2 到 64 个字符之间';
+        state.usernameError = '昵称长度需在 2 到 64 个字符之间';
         return false;
     }
     // 该项通过，清掉可能残留的错误提示。
     state.usernameError = '';
-    // 手机号交给独立的校验函数处理，保证与后端规则一致。
-    const phoneMessage = validatePhone(state.phone.trim());
+    // 邮箱交给独立的校验函数处理，保证与后端规则一致。
+    const emailMessage = validateEmail(state.email.trim());
     // 校验不通过时记录提示并终止后续校验。
-    if (phoneMessage.length > 0) {
-        state.phoneError = phoneMessage;
+    if (emailMessage.length > 0) {
+        state.emailError = emailMessage;
         return false;
     }
-    // 手机号通过，清掉错误提示。
-    state.phoneError = '';
+    // 邮箱通过，清掉错误提示。
+    state.emailError = '';
     // 登录密码长度需在 6 到 64 个字符之间。
     if (state.password.length < 6 || state.password.length > 64) {
         state.passwordError = '密码长度需在 6 到 64 个字符之间';
@@ -267,24 +251,27 @@ function submit() {
     }
     // 置为提交中，按钮进入忙碌态并拦截重复点击。
     state.submitting = true;
-    // 调用注册流程，返回空串表示成功，否则为错误提示。
-    doRegister(state.username.trim(), state.phone.trim(), state.password).then((message: string) => {
+    // 调用注册流程，成功时展示系统分配的用户号。
+    doRegister(state.username.trim(), state.email.trim(), state.password).then((result: RegistrationResult) => {
         // 请求结束，无论成败都先解除忙碌态。
         state.submitting = false;
-        // 有错误提示说明注册失败（如用户名或手机号已占用），toast 后结束。
-        if (message.length > 0) {
-            toast(message);
+        // 有错误提示说明注册失败（如昵称或邮箱已占用），toast 后结束。
+        if (!result.ok) {
+            toast(result.message);
             return;
         }
-        // 注册成功后不自动登录，清掉密码并回到登录页手动登录。
+        // 注册成功后清空密码，展示用户号，由用户选择前往登录。
         state.password = '';
         // 确认密码同步清空，避免返回后再进入时残留。
         state.confirmPassword = '';
-        // 给出成功提示。
-        toastSuccess('注册成功');
-        // 返回上一页（登录页）。
-        uni.navigateBack();
+        // 展示注册回执。
+        state.registeredUserNo = result.userNo;
+        state.registered = true;
     });
+}
+
+function copyUserNo() {
+    uni.setClipboardData({ data: state.registeredUserNo });
 }
 
 function goBack() {
@@ -310,6 +297,12 @@ onReady(() => {
 </script>
 
 <style>
+.success-title { font-size: 24px; line-height: 34px; font-weight: bold; color: #211C18; }
+.success-note { margin-top: 14px; font-size: 13px; line-height: 22px; color: #7A6C60; }
+.success-account { margin-top: 10px; font-size: 30px; line-height: 42px; font-weight: bold; color: #C2410C; }
+.account-copy { margin-top: 20px; width: 100%; border-width: 0; border-radius: 12px; background-color: #FBE3D5; color: #C2410C; font-size: 15px; }
+.success-login { margin-top: 12px; width: 100%; border-width: 0; border-radius: 12px; background-color: #E4572E; color: #FFFFFF; font-size: 15px; }
+
 	.page {
 		flex: 1;
 		background-color: #FDF6F0;

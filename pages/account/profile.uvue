@@ -16,11 +16,10 @@
                 </view>
                 <view class="account-card vapor-account-secondary--account-card">
 				<text class="account-heading">账号资料</text>
-				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">用户名</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ username }}</text></view>
-				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">用户编号</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ userUuid }}</text></view>
+				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">昵称</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ username }}</text></view>
+				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">用户号</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ userNo }}</text></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">身份</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ roleName }}</text></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">邮箱</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ email.length > 0 ? email : '未绑定' }}</text></view>
-				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">手机号</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ phone.length > 0 ? phone : '未绑定' }}</text></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">注册时间</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ createdAt }}</text></view>
 			</view>
             </view>
@@ -52,9 +51,9 @@ import { chooseLocalImage, ImageChoice } from '../../common/image-picker.uts';
 import { isLoggedIn } from '../../store/auth.uts';
 import { accountRoleLabel, accountDate, backToAccount } from '../../common/account.uts';
 
-const state = reactive({ refreshing: false, currentRefreshTime: '', statusBarHeight: 0, loading: true, avatarUrl: '', avatarPreviewVisible: false, avatarPreviewFailed: false, avatarChoosing: false, avatarUploading: false, avatarError: '', pendingAvatarKey: '', errorText: '', username: '', userUuid: '', roleName: '', email: '', phone: '', createdAt: '' })
+const state = reactive({ refreshing: false, currentRefreshTime: '', statusBarHeight: 0, loading: true, avatarUrl: '', avatarPreviewVisible: false, avatarPreviewFailed: false, avatarChoosing: false, avatarUploading: false, avatarError: '', pendingAvatarKey: '', errorText: '', username: '', userUuid: '', roleName: '', email: '', userNo: '', createdAt: '' })
 
-const { refreshing, currentRefreshTime, statusBarHeight, loading, avatarUrl, avatarPreviewVisible, avatarPreviewFailed, avatarChoosing, avatarUploading, avatarError, pendingAvatarKey, errorText, username, userUuid, roleName, email, phone, createdAt } = toRefs(state)
+const { refreshing, currentRefreshTime, statusBarHeight, loading, avatarUrl, avatarPreviewVisible, avatarPreviewFailed, avatarChoosing, avatarUploading, avatarError, pendingAvatarKey, errorText, username, userUuid, roleName, email, userNo, createdAt } = toRefs(state)
 
 const avatarPreviewSource = computed((): string => {
     return state.avatarPreviewFailed ? defaultImage('avatar') : imageSource(state.avatarUrl, 'avatar');
@@ -167,7 +166,7 @@ function loadProfile(): Promise<void> {
         state.userUuid = jsonString(data, 'userUuid') ?? '';
         state.roleName = accountRoleLabel(jsonString(data, 'roleCode') ?? '');
         state.email = jsonString(data, 'email') ?? '';
-        state.phone = jsonString(data, 'phone') ?? '';
+        state.userNo = jsonString(data, 'userNo') ?? '';
         state.createdAt = accountDate(jsonString(data, 'createdAt') ?? '');
     });
 }
