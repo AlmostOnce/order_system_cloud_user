@@ -10,6 +10,9 @@
 .order-status-note { margin-top: 8px; font-size: 12px; line-height: 21px; color: #F4DCCB; }
 .order-pickup { margin-top: 20px; font-size: 22px; line-height: 32px; font-weight: bold; color: #FFD5B7; }
 .order-password { margin-top: 18px; }
+.order-payment-panel { margin-top: 18px; padding: 18px; border-radius: 14px; background-color: #FCF9F6; }
+.order-payment-label { font-size: 12px; line-height: 20px; color: #7A6C60; }
+.order-payment-amount { margin-top: 6px; font-size: 28px; line-height: 38px; font-weight: bold; color: #C2410C; }
 .order-list-card { display: flex; flex-direction: column; width: 100%; margin: 0 0 14px 0; padding: 20px; border-width: 1px; border-style: solid; border-color: #F1E5DA; border-radius: 18px; background-color: #FFFFFF; text-align: left; line-height: 22px; }
 .order-list-top { display: flex; flex-direction: row; justify-content: space-between; align-items: center; width: 100%; }
 .order-list-status { flex-shrink: 0; margin-left: 12px; padding: 3px 8px; border-radius: 7px; background-color: #FBE3D5; font-size: 12px; line-height: 20px; color: #C2410C; }

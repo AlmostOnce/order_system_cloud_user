@@ -5,6 +5,7 @@ export type CheckoutDraft = { key: string, windowId: number, windowName: string,
 
 export function checkoutKey(userUuid: string): string { return 'order_pending_' + userUuid }
 export function cleanupKey(userUuid: string, orderId: number): string { return 'order_cleanup_' + userUuid + '_' + orderId }
+export function paymentPendingKey(userUuid: string, orderId: number): string { return 'order_payment_pending_' + userUuid + '_' + orderId }
 export function readStoredObject(key: string): UTSJSONObject | null {
     const raw = uni.getStorageSync(key)
     return typeof raw == 'string' ? parseJsonObject(raw as string) : null
