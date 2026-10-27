@@ -2,7 +2,7 @@
 	<view class="account-page account-secondary">
 		<view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
 		<view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">个人资料</text></view>
-		<scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!avatarPreviewVisible && !avatarChoosing && !avatarUploading && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+		<scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!editing && !profileSaving && !avatarPreviewVisible && !avatarChoosing && !avatarUploading && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
                 <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
 <view class="account-content vapor-account-secondary--account-content">
 			<view v-if="loading" class="account-card vapor-account-secondary--account-card"><text class="account-muted">正在获取资料…</text></view>
@@ -15,12 +15,28 @@
                     <text class="profile-identity-note">你的校园用餐账号</text>
                 </view>
                 <view class="account-card vapor-account-secondary--account-card">
-				<text class="account-heading">账号资料</text>
+				<view class="profile-card-header"><text class="account-heading">账号资料</text><button v-if="!editing" class="profile-edit-button" :disabled="refreshing || avatarChoosing || avatarUploading" @click="startEdit"><text class="account-link-text">编辑资料</text></button></view>
+                <view v-if="editing" class="profile-edit-form">
+                    <text class="account-label vapor-account-secondary--account-label">昵称</text>
+                    <input class="account-input vapor-account-secondary--account-input" v-model="draftUsername" :maxlength="64" :disabled="profileSaving" placeholder="请输入2至64个字符的昵称" aria-label="昵称" />
+                    <text class="account-label vapor-account-secondary--account-label">绑定邮箱</text>
+                    <input class="account-input vapor-account-secondary--account-input" v-model="draftEmail" :maxlength="254" :disabled="profileSaving" placeholder="请输入邮箱地址" aria-label="绑定邮箱" />
+                    <text class="account-note">保存后可使用新邮箱或原用户号登录。</text>
+                    <view v-if="emailChanged">
+                        <text class="account-label vapor-account-secondary--account-label">登录密码</text>
+                        <input class="account-input vapor-account-secondary--account-input" v-model="loginPassword" :password="true" :maxlength="64" :disabled="profileSaving" placeholder="输入登录密码以确认换绑" aria-label="登录密码" />
+                    </view>
+                    <text v-if="profileError.length > 0" class="account-error" role="alert">{{ profileError }}</text>
+                    <button class="account-primary vapor-account-secondary--account-primary" :disabled="profileSaving" @click="saveProfile"><text class="account-primary-text">{{ profileSaving ? '正在保存…' : '保存修改' }}</text></button>
+                    <button class="account-link" :disabled="profileSaving" @click="cancelEdit"><text class="account-link-text">取消编辑</text></button>
+                </view>
+                <view v-if="!editing">
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">昵称</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ username }}</text></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">用户号</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ userNo }}</text></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">身份</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ roleName }}</text></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">邮箱</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ email.length > 0 ? email : '未绑定' }}</text></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">注册时间</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ createdAt }}</text></view>
+                </view>
 			</view>
             </view>
 		</view></scroll-view>
@@ -42,7 +58,8 @@ import { reactive, toRefs, computed } from 'vue'
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
-import { fetchMyProfile, walletPayload } from '../../api/wallet.uts';
+import { updateMyProfile, fetchMyProfile, walletPayload } from '../../api/wallet.uts';
+import { toastSuccess } from '../../common/feedback.uts';
 import { HttpResult } from '../../common/http.uts';
 import { jsonString, jsonNumber } from '../../common/json.uts';
 import { uploadImage, saveAvatar } from '../../api/files.uts';
@@ -51,15 +68,71 @@ import { chooseLocalImage, ImageChoice } from '../../common/image-picker.uts';
 import { isLoggedIn } from '../../store/auth.uts';
 import { accountRoleLabel, accountDate, backToAccount } from '../../common/account.uts';
 
-const state = reactive({ refreshing: false, currentRefreshTime: '', statusBarHeight: 0, loading: true, avatarUrl: '', avatarPreviewVisible: false, avatarPreviewFailed: false, avatarChoosing: false, avatarUploading: false, avatarError: '', pendingAvatarKey: '', errorText: '', username: '', userUuid: '', roleName: '', email: '', userNo: '', createdAt: '' })
+const state = reactive({ editing: false, profileSaving: false, draftUsername: '', draftEmail: '', loginPassword: '', profileError: '', refreshing: false, currentRefreshTime: '', statusBarHeight: 0, loading: true, avatarUrl: '', avatarPreviewVisible: false, avatarPreviewFailed: false, avatarChoosing: false, avatarUploading: false, avatarError: '', pendingAvatarKey: '', errorText: '', username: '', userUuid: '', roleName: '', email: '', userNo: '', createdAt: '' })
 
-const { refreshing, currentRefreshTime, statusBarHeight, loading, avatarUrl, avatarPreviewVisible, avatarPreviewFailed, avatarChoosing, avatarUploading, avatarError, pendingAvatarKey, errorText, username, userUuid, roleName, email, userNo, createdAt } = toRefs(state)
+const { editing, profileSaving, draftUsername, draftEmail, loginPassword, profileError, refreshing, currentRefreshTime, statusBarHeight, loading, avatarUrl, avatarPreviewVisible, avatarPreviewFailed, avatarChoosing, avatarUploading, avatarError, pendingAvatarKey, errorText, username, userUuid, roleName, email, userNo, createdAt } = toRefs(state)
+
+const emailChanged = computed((): boolean => state.draftEmail.trim().toLowerCase() != state.email);
+
+function startEdit() {
+    if (state.loading || state.refreshing || state.avatarChoosing || state.avatarUploading || state.avatarPreviewVisible) return;
+    state.draftUsername = state.username;
+    state.draftEmail = state.email;
+    state.loginPassword = '';
+    state.profileError = '';
+    state.editing = true;
+}
+
+function cancelEdit() {
+    if (state.profileSaving) return;
+    state.editing = false;
+    state.draftUsername = '';
+    state.draftEmail = '';
+    state.loginPassword = '';
+    state.profileError = '';
+}
+
+function saveProfile(): Promise<void> {
+    if (!state.editing || state.profileSaving) return Promise.resolve();
+    const name = state.draftUsername.trim();
+    const email = state.draftEmail.trim().toLowerCase();
+    const changed = email != state.email;
+    state.profileError = '';
+    if (name.length < 2 || name.length > 64) state.profileError = '昵称长度为2至64个字符';
+    else if (email.length > 254 || (email.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) state.profileError = '请输入正确的邮箱地址';
+    else if (changed && email.length == 0) state.profileError = '绑定邮箱不能为空';
+    else if (changed && state.loginPassword.length == 0) state.profileError = '请输入登录密码以确认换绑';
+    if (state.profileError.length > 0) return Promise.resolve();
+    state.profileSaving = true;
+    return updateMyProfile(name, email, changed ? state.loginPassword : '').then((result: HttpResult) => {
+        const data = walletPayload(result);
+        if (data == null) {
+            state.profileError = result.message.length > 0 ? result.message : '资料尚未保存，请重试';
+            return;
+        }
+        const savedName = jsonString(data, 'username');
+        if (savedName == null) { state.profileError = '保存结果异常，请下拉刷新确认'; return; }
+        state.username = savedName;
+        state.email = jsonString(data, 'email') ?? '';
+        toastSuccess('资料已保存');
+        state.editing = false;
+        state.draftUsername = '';
+        state.draftEmail = '';
+    }).catch(() => { state.profileError = '资料保存失败，请重试'; }).finally(() => {
+        state.profileSaving = false;
+        state.loginPassword = '';
+    });
+}
+
+onPageHide(() => { state.loginPassword = ''; });
+onUnload(() => { state.loginPassword = ''; });
 
 const avatarPreviewSource = computed((): string => {
     return state.avatarPreviewFailed ? defaultImage('avatar') : imageSource(state.avatarUrl, 'avatar');
 })
 
 function openAvatarPreview() {
+    if (state.editing || state.profileSaving || state.refreshing) return;
     state.avatarPreviewFailed = false;
     state.avatarPreviewVisible = true;
 }
@@ -73,7 +146,7 @@ function previewImageError() {
 }
 
 function refreshPage() {
-    if (state.refreshing || state.loading || state.avatarPreviewVisible || state.avatarChoosing || state.avatarUploading)
+    if (state.editing || state.profileSaving || state.refreshing || state.loading || state.avatarPreviewVisible || state.avatarChoosing || state.avatarUploading)
         return;
     state.refreshing = true;
     const refreshStartedAt = Date.now();
@@ -148,6 +221,8 @@ function bindAvatar() {
 }
 
 function goBack() {
+    if (state.profileSaving) return;
+    if (state.editing) { cancelEdit(); return; }
     backToAccount();
 }
 
@@ -182,13 +257,16 @@ onPageShow(() => {
         uni.reLaunch({ url: '/pages/login/login' });
         return;
     }
-    if (!state.avatarChoosing && !state.avatarUploading)
+    if (!state.editing && !state.profileSaving && !state.avatarChoosing && !state.avatarUploading)
         loadProfile();
 })
 </script>
 
 <style>
 	@import '../../styles/account.css';
+    .profile-card-header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+    .profile-edit-button { display: flex; align-items: center; justify-content: center; min-height: 44px; margin: 0; padding: 0 12px; border-width: 0; border-radius: 10px; background-color: #FDF6F0; }
+    .profile-edit-form { margin-top: 4px; }
 	.profile-detail-row { padding-top: 18px; padding-bottom: 18px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #F4EBE4; }
 	.profile-detail-label { font-size: 12px; line-height: 18px; color: #7A6C60; }
 	.profile-detail-value { margin-top: 6px; font-size: 15px; line-height: 22px; color: #211C18; }
@@ -203,6 +281,6 @@ onPageShow(() => {
     .avatar-preview-picture { height: 240px; margin-top: 16px; border-radius: 16px; overflow: hidden; background-color: #F7F2EE; }
     .avatar-preview-image { width: 100%; height: 100%; }
     /* #ifdef WEB */
-    .account-page .avatar-preview-top { flex-direction: row; }
+    .account-page .avatar-preview-top, .account-page .profile-card-header { flex-direction: row; }
     /* #endif */
 </style>

@@ -36,3 +36,9 @@ export function setPayPassword(loginPassword: string, oldPayPassword: string, ne
 export function walletPayload(result: HttpResult): UTSJSONObject | null {
 	return result.ok && result.data != null ? jsonObject(result.data, 'data') : null
 }
+
+/** 更新本人资料；只传递允许编辑的字段，换绑邮箱时附登录密码。 */
+export function updateMyProfile(username: string, email: string, loginPassword: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { username: username, email: email, loginPassword: loginPassword }
+    return httpPut('/users/me/profile', body, true)
+}
