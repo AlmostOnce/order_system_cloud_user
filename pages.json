@@ -57,6 +57,7 @@
 			"style": { "navigationStyle": "custom" }
 		},
 		{ "path": "pages/order/confirm", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/notifications/list", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/order/detail", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/order/list", "style": { "navigationStyle": "custom" } },
         { "path": "pages/review/create", "style": { "navigationStyle": "custom" } },

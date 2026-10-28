@@ -1,0 +1,130 @@
+<template>
+    <view class="account-page account-secondary">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">消息通知</text></view>
+        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMore">
+            <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            <view class="account-content vapor-account-secondary--account-content">
+                <view class="notification-intro"><text class="notification-heading">订单消息</text><text class="notification-subtitle">用餐进度，一目了然</text></view>
+                <view v-for="item in items" :key="item.notificationId" class="notification-card" @click="openNotification(item)">
+                    <view class="notification-head"><view class="notification-title-row"><view v-if="item.readAt.length == 0" class="notification-dot"></view><text class="notification-title">{{ item.title }}</text></view><text class="notification-date">{{ formatDate(item.createdAt) }}</text></view>
+                    <text class="notification-body">{{ item.content }}</text><text v-if="item.orderId > 0" class="notification-link">查看订单 ›</text>
+                </view>
+                <text v-if="loading" class="account-note">正在获取消息…</text>
+                <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
+                <view v-if="loaded && !loading && errorText.length == 0 && items.length == 0" class="notification-empty"><text class="notification-heading">暂无消息</text><text class="notification-subtitle">订单有新的进展时会显示在这里</text></view>
+                <text v-if="loaded && !hasMore && items.length > 0" class="notification-end">已经看到全部消息</text>
+            </view>
+        </scroll-view>
+    </view>
+</template>
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+import { NotificationItem, fetchNotifications, markNotificationRead, parseNotificationPage, requestNotificationSocketTicket, parseNotificationSocketTicket } from '../../api/notifications.uts'
+import { API_BASE_URL } from '../../common/config.uts'
+import { backToAccount, accountDate } from '../../common/account.uts'
+import { currentUser } from '../../store/auth.uts'
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
+import { toast } from '../../common/feedback.uts'
+
+const initialItems: Array<NotificationItem> = []
+const state = reactive({ statusBarHeight: 0, userUuid: '', version: 0, items: initialItems, loading: false, loaded: false, refreshing: false, currentRefreshTime: '', errorText: '', cursor: '', hasMore: false, opening: false })
+let socket: SocketTask | null = null
+let socketVersion = 0
+let socketVisible = false
+let socketRetry = 0
+let socketRefreshPending = false
+const { statusBarHeight, items, loading, loaded, refreshing, currentRefreshTime, errorText, hasMore } = toRefs(state)
+async function load(reset: boolean): Promise<void> {
+    if (state.loading || (!reset && !state.hasMore)) return
+    state.loading = true; state.errorText = ''
+    const version = state.version
+    try {
+        const result = await fetchNotifications(reset ? '' : state.cursor)
+        if (version != state.version) return
+        const page = parseNotificationPage(result)
+        if (page == null || (!reset && page.hasMore && page.nextCursor == state.cursor)) { state.errorText = result.message.length > 0 ? result.message : '消息暂时不可用，请下拉重试'; return }
+        if (reset) state.items = page.items
+        else for (let i = 0; i < page.items.length; i++) { const item = page.items[i]; if (!state.items.some((old: NotificationItem): boolean => old.notificationId == item.notificationId)) state.items.push(item) }
+        state.cursor = page.nextCursor; state.hasMore = page.hasMore; state.loaded = true
+    } finally {
+        if (version == state.version) {
+            state.loading = false
+            if (socketRefreshPending && socketVisible) { socketRefreshPending = false; load(true) }
+        }
+    }
+}
+function loadMore() { if (!state.refreshing) load(false) }
+function refreshPage() {
+    if (state.loading || state.refreshing) return
+    state.refreshing = true; const start = Date.now(); state.currentRefreshTime = refreshTimeLabel(start)
+    load(true).then(() => { finishPullRefresh(start, state.errorText.length == 0, (_time: string) => { state.refreshing = false }) }).catch(() => { finishPullRefresh(start, false, (_time: string) => { state.refreshing = false }) })
+}
+async function openNotification(item: NotificationItem): Promise<void> {
+    if (state.opening) return
+    state.opening = true
+    const version = state.version
+    try {
+        if (item.readAt.length == 0) { const result = await markNotificationRead(item.notificationId); if (version != state.version) return; if (!result.ok) { toast(result.message.length > 0 ? result.message : '消息状态更新失败'); return } item.readAt = new Date().toISOString() }
+        if (item.orderId > 0) uni.navigateTo({ url: '/pages/order/detail?orderId=' + item.orderId })
+    } finally { state.opening = false }
+}
+function formatDate(value: string): string { return accountDate(value) }
+function goBack() { backToAccount() }
+function stopSocket() {
+    socketVisible = false; socketVersion++; socketRetry = 0; socketRefreshPending = false
+    const current = socket; socket = null
+    if (current != null) current.close({})
+}
+function scheduleSocketRetry(version: number) {
+    if (!socketVisible || version != socketVersion) return
+    const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(socketRetry, 5)))
+    socketRetry++
+    setTimeout(() => { if (socketVisible && version == socketVersion) connectSocket(version) }, delay)
+}
+async function connectSocket(version: number): Promise<void> {
+    if (!socketVisible || version != socketVersion) return
+    const result = await requestNotificationSocketTicket()
+    if (!socketVisible || version != socketVersion) return
+    const ticket = parseNotificationSocketTicket(result)
+    if (!/^[A-Za-z0-9_-]{43}$/.test(ticket)) { scheduleSocketRetry(version); return }
+    const base = API_BASE_URL.replace(/^http/, 'ws')
+    let task: SocketTask
+    try { task = uni.connectSocket({ url: base + '/notifications/ws', protocols: ['notification.v1', 'ticket.' + ticket] }) }
+    catch (_error) { scheduleSocketRetry(version); return }
+    socket = task
+    let ended = false
+    const finish = () => { if (ended) return; ended = true; if (version == socketVersion) { socket = null; scheduleSocketRetry(version) } }
+    task.onOpen((_event) => { if (version == socketVersion) { socketRetry = 0; if (state.loading) socketRefreshPending = true; else load(true) } })
+    task.onMessage((_event) => { if (socketVisible && version == socketVersion) { if (state.loading) socketRefreshPending = true; else load(true) } })
+    task.onClose((_event) => { finish() })
+    task.onError((_event) => { finish(); task.close({}) })
+}
+onPageShow(() => {
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+    const user = currentUser()
+    if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
+    if (state.userUuid != user.userUuid) { state.version++; state.userUuid = user.userUuid; state.items = []; state.loading = false; state.loaded = false; state.cursor = ''; state.hasMore = false; state.errorText = '' }
+    load(true)
+    stopSocket(); socketVisible = true; connectSocket(socketVersion)
+})
+onPageHide(() => { stopSocket() })
+onUnload(() => { stopSocket() })
+</script>
+<style>
+@import '../../styles/account.css';
+.notification-intro { padding: 6px 2px 20px; }
+.notification-heading { color: #211C18; font-size: 20px; font-weight: bold; }
+.notification-subtitle { color: #8C7C6F; font-size: 13px; margin-top: 6px; }
+.notification-card { background-color: #FFFFFF; border-radius: 16px; margin-bottom: 12px; padding: 16px; }
+.notification-head { flex-direction: row; justify-content: space-between; align-items: center; }
+.notification-title-row { flex-direction: row; align-items: center; }
+.notification-dot { width: 7px; height: 7px; border-radius: 4px; margin-right: 7px; background-color: #E4572E; }
+.notification-title { font-size: 15px; font-weight: bold; color: #211C18; }
+.notification-date { font-size: 11px; color: #A2968B; }
+.notification-body { margin-top: 10px; font-size: 14px; color: #6F5B4D; line-height: 21px; }
+.notification-link { margin-top: 12px; font-size: 12px; color: #C2410C; }
+.notification-empty { padding: 45px 18px; align-items: center; }
+.notification-end { padding: 12px; text-align: center; font-size: 12px; color: #A2968B; }
+</style>

@@ -32,7 +32,7 @@
                         <button class="order-center-shortcut" @click="openCancelledOrders"><view class="order-center-symbol"><view class="center-clock"></view><view class="center-cross"></view><view class="center-cross center-cross-other"></view></view><text class="order-center-label">已取消</text></button>
                     </view>
                 </view>
-                <view v-if="roleCode == 'CUSTOMER'" class="entry-group"><button class="account-entry" @click="openReviews"><view class="account-entry-icon"><image class="review-entry-icon" src="/static/review/star-outline.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的评价</text><text class="account-entry-note">回顾用餐感受，查看已发布评价</text></view><view class="account-arrow"></view></button></view>
+                <view v-if="roleCode == 'CUSTOMER'" class="entry-group"><button class="account-entry" @click="openNotifications"><view class="account-entry-icon"><view class="center-receipt"></view></view><view class="account-entry-body"><text class="account-entry-title">消息通知</text><text class="account-entry-note">查看订单状态消息</text></view><text v-if="unreadCount > 0" class="notification-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</text><view class="account-arrow"></view></button><view class="entry-divider"></view><button class="account-entry" @click="openReviews"><view class="account-entry-icon"><image class="review-entry-icon" src="/static/review/star-outline.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的评价</text><text class="account-entry-note">回顾用餐感受，查看已发布评价</text></view><view class="account-arrow"></view></button></view>
                 <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">我的钱包</text>
 				<view v-if="roleCode == 'CUSTOMER'" class="entry-group">
                     <button class="account-entry" @click="openWallet">
@@ -83,12 +83,13 @@ import { HttpResult } from '../../common/http.uts';
 import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts';
 import { accountRoleLabel } from '../../common/account.uts';
 import { openOrderList } from '../../common/order-navigation.uts';
+import { fetchUnreadNotificationCount } from '../../api/notifications.uts';
 
 const state = reactive({ refreshing: false, currentRefreshTime: '', profileLoading: false, statusBarHeight: 0, username: '校园用户', roleName: '', roleCode: '', userUuid: '',
     email: '', avatarUrl: '', profileError: '', balanceLoading: false, balanceReady: false,
-    balanceText: '--', balanceError: '', payPasswordSet: false, signOutConfirm: false, signingOut: false })
+    balanceText: '--', balanceError: '', payPasswordSet: false, signOutConfirm: false, signingOut: false, unreadCount: 0 })
 
-const { refreshing, currentRefreshTime, profileLoading, statusBarHeight, username, roleName, roleCode, userUuid, email, avatarUrl, profileError, balanceLoading, balanceReady, balanceText, balanceError, payPasswordSet, signOutConfirm, signingOut } = toRefs(state)
+const { refreshing, currentRefreshTime, profileLoading, statusBarHeight, username, roleName, roleCode, userUuid, email, avatarUrl, profileError, balanceLoading, balanceReady, balanceText, balanceError, payPasswordSet, signOutConfirm, signingOut, unreadCount } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.profileLoading || state.balanceLoading || state.signingOut)
@@ -99,6 +100,7 @@ function refreshPage() {
     const tasks: Array<Promise<void>> = [loadProfile()];
     if (state.roleCode == 'CUSTOMER')
         tasks.push(loadBalance());
+    if (state.roleCode == 'CUSTOMER') tasks.push(loadUnreadCount());
     Promise.all(tasks).then(() => {
         finishPullRefresh(refreshStartedAt, state.profileError.length == 0 && (state.roleCode != 'CUSTOMER' || state.balanceError.length == 0), (time: string) => {
             if (time.length > 0)
@@ -146,6 +148,15 @@ function loadBalance(): Promise<void> {
 }
 
 function openReviews() { uni.navigateTo({ url: '/pages/review/list' }); }
+function loadUnreadCount(): Promise<void> {
+    const user = state.userUuid;
+    return fetchUnreadNotificationCount().then((result: HttpResult) => {
+        if (state.userUuid != user) return;
+        const count = result.ok && result.data != null ? jsonNumber(result.data, 'data') : null;
+        state.unreadCount = count != null && count > 0 ? count : 0;
+    });
+}
+function openNotifications() { uni.navigateTo({ url: '/pages/notifications/list' }); }
 
 function openOrders() {
     openOrderList('all');
@@ -233,6 +244,7 @@ onPageShow(() => {
     loadProfile();
     if (state.roleCode == 'CUSTOMER')
         loadBalance();
+    if (state.roleCode == 'CUSTOMER') loadUnreadCount();
 })
 </script>
 
@@ -240,6 +252,7 @@ onPageShow(() => {
 @import '../../styles/review.css';
 	@import '../../styles/account.css';
 	.mine-status { background-color: #E4572E; }
+	.notification-badge { min-width: 20px; padding: 2px 5px; border-radius: 10px; background-color: #E4572E; color: #FFFFFF; font-size: 11px; text-align: center; margin-right: 8px; }
 	.mine-hero { background-color: #E4572E; padding: 20px 24px 24px 24px; }
 	.mine-eyebrow { font-size: 12px; line-height: 18px; color: #FFE3D6; }
 	.mine-title { margin-top: 8px; font-size: 28px; line-height: 36px; font-weight: bold; color: #FFFFFF; }
