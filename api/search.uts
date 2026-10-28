@@ -1,0 +1,124 @@
+import { httpGet, HttpResult } from '../common/http.uts'
+import { jsonObject, jsonArray, jsonString, jsonNumber } from '../common/json.uts'
+/**
+ * 菜品搜索服务接口定义。
+ *
+ * 路径与后端 search-service 的 ProductSearchController 对应：GET /search/products。
+ * 对外统一经网关 /api 前缀访问，因此这里只写服务自身路径。
+ *
+ * 注意：后端该接口标注了 @PreAuthorize("hasRole('CUSTOMER')")，只有顾客角色可查；
+ * 其它角色会收到 403，页面需按失败结果做降级展示。
+ */
+
+/**
+ * 单条搜索结果，对应后端 ProductSearchResultVO。
+ */
+export type SearchProductItem = {
+    /** 菜品 ID。 */
+    productId: number
+    /** 所属档口 ID，用于跳转点餐页。 */
+    windowId: number
+    /** 所属餐厅 ID。 */
+    restaurantId: number
+    /** 餐厅名称。 */
+    restaurantName: string
+    /** 餐厅位置。 */
+    restaurantLocation: string
+    /** 档口名称。 */
+    windowName: string
+    /** 菜品分类名称。 */
+    categoryName: string
+    /** 菜品名称。 */
+    productName: string
+    /** 菜品描述。 */
+    description: string
+    /** 菜品图片地址。 */
+    imageUrl: string
+    /** 菜品单价。 */
+    price: number
+}
+
+/**
+ * 搜索结果分页结构，对应后端 ProductSearchPageVO。
+ */
+export type SearchProductsResult = {
+    /** 是否查询成功。 */
+    ok: boolean
+    /** 失败时的提示文案，可直接展示给用户。 */
+    message: string
+    /** 当前页码，从 1 开始。 */
+    page: number
+    /** 每页条数。 */
+    size: number
+    /** 命中总数。 */
+    total: number
+    /** 当前页的搜索结果。 */
+    items: SearchProductItem[]
+}
+
+/**
+ * 按关键词搜索菜品。
+ *
+ * @param keyword 搜索关键词，由调用方保证非空且不超过 80 字符
+ * @param page 页码，从 1 开始
+ * @param size 每页条数，取值 1 至 100
+ * @return 搜索结果
+ */
+export function searchProducts(keyword: string, page: number, size: number): Promise<SearchProductsResult> {
+    // 关键词含空格与中文，必须编码后再拼进查询串；页码与条数均为纯数字。
+    const path = '/search/products?q=' + encodeURIComponent(keyword) + '&page=' + page + '&size=' + size
+    return httpGet(path, true).then((result: HttpResult): SearchProductsResult => {
+        const empty: SearchProductItem[] = []
+        // 请求整体失败（网络、401、403、搜索服务不可用等）：透传后端提示。
+        if (!result.ok || result.data == null) {
+            return { ok: false, message: result.message, page: page, size: size, total: 0, items: empty }
+        }
+        // 成功时需要从统一响应体中取出 data 字段。
+        const data = jsonObject(result.data, 'data')
+        if (data == null) {
+            return { ok: false, message: '搜索结果数据不完整，请稍后再试', page: page, size: size, total: 0, items: empty }
+        }
+        // data.items 是结果数组，data 存在但 items 缺失视为异常响应。
+        const rows = jsonArray(data, 'items')
+        if (rows == null) {
+            return { ok: false, message: '搜索结果数据不完整，请稍后再试', page: page, size: size, total: 0, items: empty }
+        }
+        const items: SearchProductItem[] = []
+        for (let i = 0; i < rows.length; i++) {
+            const raw = rows[i]
+            // 单条结果缺失时跳过，不影响整页其余结果展示。
+            if (raw == null) {
+                continue
+            }
+            const row = raw as UTSJSONObject
+            const productId = jsonNumber(row, 'productId') ?? 0
+            const windowId = jsonNumber(row, 'windowId') ?? 0
+            // 缺少菜品或档口主键的结果无法跳转到点餐页，直接跳过。
+            if (productId <= 0 || windowId <= 0) {
+                continue
+            }
+            const item: SearchProductItem = {
+                productId: productId,
+                windowId: windowId,
+                restaurantId: jsonNumber(row, 'restaurantId') ?? 0,
+                restaurantName: jsonString(row, 'restaurantName') ?? '',
+                restaurantLocation: jsonString(row, 'restaurantLocation') ?? '',
+                windowName: jsonString(row, 'windowName') ?? '',
+                categoryName: jsonString(row, 'categoryName') ?? '',
+                productName: jsonString(row, 'productName') ?? '菜品',
+                description: jsonString(row, 'description') ?? '',
+                imageUrl: jsonString(row, 'imageUrl') ?? '',
+                price: jsonNumber(row, 'price') ?? 0
+            }
+            items.push(item)
+        }
+        return {
+            ok: true,
+            message: '',
+            page: jsonNumber(data, 'page') ?? page,
+            size: jsonNumber(data, 'size') ?? size,
+            total: jsonNumber(data, 'total') ?? items.length,
+            items: items
+        }
+    })
+}

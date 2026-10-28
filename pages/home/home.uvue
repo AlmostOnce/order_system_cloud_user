@@ -26,6 +26,19 @@
 				</view>
 				<text class="hero-greeting" :class="entered ? '' : 'hero-greeting-pre'">{{ greeting }}</text>
 				<text class="hero-desc" :class="entered ? '' : 'hero-desc-pre'">看看今天哪个档口合胃口</text>
+				<!-- 菜品搜索入口：点击进入独立搜索页，仅学生角色可见 -->
+				<view
+					v-if="roleCode == 'CUSTOMER'"
+					class="search-entry"
+					:class="entered ? '' : 'search-entry-pre'"
+					hover-class="search-entry-hover"
+					@click="openSearch"
+				>
+					<view class="search-lens">
+						<view class="search-lens-handle"></view>
+					</view>
+					<text class="search-entry-text">搜索菜品、档口或餐厅</text>
+				</view>
 			</view>
 		</view>
 
@@ -446,6 +459,11 @@ function openWindow(item: WindowItem) {
     uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId });
 }
 
+function openSearch() {
+    // 进入菜品搜索页，由搜索页负责关键词查询与分页。
+    uni.navigateTo({ url: '/pages/search/search' });
+}
+
 onPageShow(() => {
     // 状态栏高度取不到时用 24px 兜底，避免顶部内容被系统栏遮挡。
     const info = uni.getWindowInfo();
@@ -635,6 +653,62 @@ onReady(() => {
 	.hero-desc-pre {
 		opacity: 0;
 		transform: translateY(14px);
+	}
+
+	/* 搜索入口：白底胶囊压在橙色块上，与餐厅选择胶囊形成层次 */
+	.search-entry {
+		flex-direction: row;
+		align-items: center;
+		margin-top: 16px;
+		height: 42px;
+		padding-left: 14px;
+		padding-right: 14px;
+		border-radius: 999px;
+		background-color: #FFFFFF;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.26s;
+	}
+
+	.search-entry-pre {
+		opacity: 0;
+		transform: translateY(14px);
+	}
+
+	.search-entry-hover {
+		background-color: #FDF0E8;
+	}
+
+	/* 放大镜：圆形镜片 + 右下角斜向手柄，用两个方块拼出来 */
+	.search-lens {
+		position: relative;
+		flex-shrink: 0;
+		width: 12px;
+		height: 12px;
+		border-radius: 999px;
+		border-width: 2px;
+		border-style: solid;
+		border-color: #E4572E;
+	}
+
+	.search-lens-handle {
+		position: absolute;
+		right: -5px;
+		bottom: -1px;
+		width: 6px;
+		height: 2px;
+		background-color: #E4572E;
+		transform: rotate(45deg);
+	}
+
+	.search-entry-text {
+		flex: 1;
+		margin-left: 10px;
+		font-size: 13px;
+		color: #A2968B;
 	}
 
 	/* ---------- 档口列表 ---------- */

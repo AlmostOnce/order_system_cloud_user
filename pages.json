@@ -34,6 +34,13 @@
 			}
 		},
 		{
+			// 菜品搜索页：由首页搜索入口进入，非 tab 页，使用自定义导航栏
+			"path": "pages/search/search",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
 			"path": "pages/wallet/recharge",
 			"style": { "navigationStyle": "custom" }
 		},

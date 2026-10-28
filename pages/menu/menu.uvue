@@ -71,10 +71,11 @@
 
 						<view
 							class="dish"
-							:class="listReady ? '' : 'dish-pre'"
+							:class="(listReady ? '' : 'dish-pre ') + (highlightedProductId == product.productId ? 'dish-target' : '')"
 							v-for="product in group.products"
 							:key="product.productId"
 						>
+							<view class="dish-anchor" :id="productSectionId(product.productId)"></view>
 							<!-- 缩略区：有图片用图片，没有图片用菜品名首字兜底 -->
 							<view class="dish-thumb">
 								<business-image :src="product.imageUrl" kind="product"></business-image>
@@ -267,11 +268,14 @@ const menuInstance = getCurrentInstance();
 let measurementScheduled = false;
 let layoutVersion = 0;
 let menuDisposed = false;
+let locationVersion = 0;
 const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTime: '', cartLoading: false,
     // 状态栏高度（px），用于顶部占位。
     statusBarHeight: 0,
     // 当前档口 ID，来自路由参数，取不到时为 0（页面会展示失败态）。
     windowId: 0,
+    pendingProductId: 0,
+    highlightedProductId: 0,
     stocks: initialEmptyStocks,
     stockLoading: false,
     stockRequestVersion: 0,
@@ -310,7 +314,7 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     // 菜品卡片是否已就绪，控制依次浮入。
     listReady: false })
 
-const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHeight, windowId, stocks, stockLoading, stockRequestVersion, stockLoadError, windowName, windowImageUrl, windowLocation, windowDescription, loading, loadError, groups, activeCategoryId, dishesAnchor, railAnchor, dishesScrollTop, categoryTailHeight, categoryOffsets, quantities, cartItems, cartQuantity, cartAmount, cartPanelVisible, cartPanelReady, mutating, entered, listReady } = toRefs(state)
+const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHeight, windowId, highlightedProductId, stocks, stockLoading, stockRequestVersion, stockLoadError, windowName, windowImageUrl, windowLocation, windowDescription, loading, loadError, groups, activeCategoryId, dishesAnchor, railAnchor, dishesScrollTop, categoryTailHeight, categoryOffsets, quantities, cartItems, cartQuantity, cartAmount, cartPanelVisible, cartPanelReady, mutating, entered, listReady } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.loading || state.stockLoading || state.cartLoading || state.mutating)
@@ -407,6 +411,7 @@ function loadMenu(): Promise<void> {
         state.groups = converted;
         // 重新建立完整菜单的分类导航，不做单组过滤。
         resetCategoryNavigation();
+        locateRequestedProduct();
         // 菜单渲染完成后再切到「已入场」，菜品卡片才会依次浮入。
         setTimeout(() => {
             state.listReady = true;
@@ -537,6 +542,45 @@ function categoryRailId(categoryId: number): string {
     return 'menu-rail-' + (categoryId < 0 ? 'other' : categoryId.toString());
 }
 
+function productSectionId(productId: number): string {
+    return 'menu-product-' + productId.toString();
+}
+
+/** 菜单加载成功后定位目标；已下架或不属于当前窗口时给出提示。 */
+function locateRequestedProduct() {
+    const productId = state.pendingProductId;
+    if (productId <= 0) return;
+    state.pendingProductId = 0;
+    let targetCategory = 0;
+    let found = false;
+    for (let i = 0; i < state.groups.length && !found; i++) {
+        const group = state.groups[i];
+        for (let j = 0; j < group.products.length; j++) {
+            if (group.products[j].productId == productId) {
+                targetCategory = group.categoryId;
+                found = true;
+                break;
+            }
+        }
+    }
+    if (!found) {
+        toast('该菜品已下架或暂不可用');
+        return;
+    }
+    state.activeCategoryId = targetCategory;
+    state.railAnchor = categoryRailId(targetCategory);
+    state.highlightedProductId = productId;
+    state.dishesAnchor = '';
+    const version = ++locationVersion;
+    nextTick(() => {
+        if (menuDisposed || version != locationVersion) return;
+        state.dishesAnchor = productSectionId(productId);
+        setTimeout(() => {
+            if (!menuDisposed && version == locationVersion) state.highlightedProductId = 0;
+        }, 2800);
+    });
+}
+
 function resetCategoryNavigation() {
     state.categoryOffsets = [];
     state.categoryTailHeight = 0;
@@ -549,6 +593,8 @@ function resetCategoryNavigation() {
 
 function selectCategory(categoryId: number) {
     if (!state.groups.some((group: MenuGroup): boolean => group.categoryId == categoryId)) return;
+    locationVersion++;
+    state.highlightedProductId = 0;
     state.activeCategoryId = categoryId;
     state.railAnchor = categoryRailId(categoryId);
     // 清空后下一帧重新赋值，重复点击同一分类也能重新定位其标题。
@@ -640,7 +686,7 @@ watch(() => state.stockLoading, () => { scheduleCategoryMeasurement(); }, { flus
 watch(() => state.stockLoadError, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
 watch(() => state.cartLoadError, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
 onResize(() => { scheduleCategoryMeasurement(); });
-onUnload(() => { menuDisposed = true; layoutVersion++; });
+onUnload(() => { menuDisposed = true; layoutVersion++; locationVersion++; });
 
 function quantityOf(productId: number): number {
     // 遍历扁平数量列表，命中即返回。
@@ -849,6 +895,8 @@ onLoad((options: OnLoadOptions) => {
     if (rawWindowId != null) {
         state.windowId = toInt(rawWindowId as string);
     }
+    const rawProductId = options['productId'];
+    if (rawProductId != null) state.pendingProductId = toInt(rawProductId as string);
 })
 
 onPageShow(() => {
@@ -1212,6 +1260,7 @@ onReady(() => {
 
 	/* 菜品卡片：白底细描边，按下时描边转主色 */
 	.dish {
+		position: relative;
 		flex-direction: row;
 		flex-wrap: wrap;
 		align-items: flex-start;
@@ -1229,9 +1278,23 @@ onReady(() => {
 		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
 	}
 
+	/* 定位锚点放在卡片上方，搜索跳转时保留顶部留白。 */
+	.dish-anchor {
+		position: absolute;
+		top: -48px;
+		left: 0;
+		width: 1px;
+		height: 1px;
+	}
+
 	.dish-pre {
 		opacity: 0;
 		transform: translateY(16px);
+	}
+
+	.dish-target {
+		border-color: #E4572E;
+		background-color: #FFF5EE;
 	}
 
 	/* 缩略区：右侧菜品区宽度有限，尺寸比首页卡片更克制 */

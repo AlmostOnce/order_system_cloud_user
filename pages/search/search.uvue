@@ -1,0 +1,967 @@
+<template>
+	<view class="page">
+		<!-- 状态栏底色与头部品牌区同色，避免顶部出现米色缝隙 -->
+		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
+
+		<!-- 头部：返回按钮 + 搜索条，沿用首页的柿子橙品牌色 -->
+		<view class="hero">
+			<view class="hero-shape hero-shape-1" :class="entered ? '' : 'hero-shape-1-pre'"></view>
+			<view class="hero-shape hero-shape-2" :class="entered ? '' : 'hero-shape-2-pre'"></view>
+			<view class="hero-body" :class="entered ? '' : 'hero-body-pre'">
+				<view class="nav-top">
+					<view class="nav-back" hover-class="nav-back-hover" @click="goBack">
+						<view class="nav-back-icon"></view>
+					</view>
+					<text class="hero-eyebrow">菜品搜索</text>
+				</view>
+
+				<view class="search-bar">
+					<view class="search-lens">
+						<view class="search-lens-handle"></view>
+					</view>
+					<input
+						class="search-input"
+						type="text"
+						v-model="keyword"
+						:maxlength="80"
+						placeholder="搜索菜品、档口或餐厅"
+						placeholder-class="search-placeholder"
+						confirm-type="search"
+						@confirm="submit"
+					/>
+					<view
+						v-if="keyword.length > 0"
+						class="search-clear"
+						hover-class="search-clear-hover"
+						@click="clearKeyword"
+					>
+						<text class="search-clear-text">×</text>
+					</view>
+					<view class="search-submit" hover-class="search-submit-hover" @click="submit">
+						<text class="search-submit-text">搜索</text>
+					</view>
+				</view>
+			</view>
+		</view>
+
+		<!-- 结果区：状态卡与结果列表共用同一滚动容器 -->
+		<scroll-view class="results" scroll-y="true" :lower-threshold="120" @scrolltolower="loadMore">
+			<view class="results-body">
+				<view v-if="!roleChecked" class="state" :class="entered ? '' : 'state-pre'">
+					<text class="state-text">正在确认身份…</text>
+				</view>
+
+				<view v-else-if="!canSearch" class="state" :class="entered ? '' : 'state-pre'">
+					<text class="state-text">搜索面向学生用户开放</text>
+					<text class="state-hint">请用学生账号登录后再试</text>
+				</view>
+
+				<view v-else-if="searching" class="state" :class="entered ? '' : 'state-pre'">
+					<text class="state-text">正在搜索「{{ submittedKeyword }}」…</text>
+				</view>
+
+				<view v-else-if="errorText.length > 0 && items.length == 0" class="state" :class="entered ? '' : 'state-pre'">
+					<text class="state-text">{{ errorText }}</text>
+					<view class="state-action" hover-class="state-action-hover" @click="retry">
+						<text class="state-action-text">重新搜索</text>
+					</view>
+				</view>
+
+				<view v-else-if="submittedKeyword.length == 0" class="history-area">
+					<view v-if="history.length > 0" class="history-card">
+						<view class="history-head">
+							<text class="history-title">最近搜索</text>
+							<view class="history-actions">
+								<view class="history-clear" @click="toggleHistoryEditing"><text class="history-action-text">{{ historyEditing ? '完成' : '删除' }}</text></view>
+								<view class="history-clear" @click="clearHistory"><text class="history-action-text">清空</text></view>
+							</view>
+						</view>
+						<view class="history-list">
+							<view class="history-chip-wrap" v-for="entry in history" :key="entry">
+								<view class="history-chip" @click="searchHistory(entry)">
+									<text class="history-chip-text">{{ entry }}</text>
+								</view>
+								<view v-if="historyEditing" class="history-remove" :aria-label="'删除搜索记录' + entry" @click="removeHistory(entry)"><text class="history-remove-text">×</text></view>
+							</view>
+						</view>
+					</view>
+					<view v-else class="state" :class="entered ? '' : 'state-pre'">
+						<text class="state-text">输入关键词，找到想吃的那一道</text>
+						<text class="state-hint">支持菜品名、档口名与餐厅名</text>
+					</view>
+				</view>
+
+				<view v-else-if="items.length == 0" class="state" :class="entered ? '' : 'state-pre'">
+					<text class="state-text">没有找到「{{ submittedKeyword }}」相关的菜品</text>
+					<text class="state-hint">换个关键词或检查错别字试试</text>
+				</view>
+
+				<view v-else class="list">
+					<view class="list-head">
+						<text class="list-title">搜索结果</text>
+						<text class="list-count">共 {{ total }} 道</text>
+					</view>
+
+					<view
+						class="result"
+						:class="listReady ? '' : 'result-pre'"
+						:style="itemDelay(index)"
+						hover-class="result-hover"
+						v-for="(item, index) in items"
+						:key="item.productId"
+						@click="openWindow(item)"
+					>
+						<view class="result-thumb">
+							<business-image :src="item.imageUrl" kind="product"></business-image>
+						</view>
+						<view class="result-body">
+							<text class="result-name">{{ item.productName }}</text>
+							<text v-if="item.description.length > 0" class="result-desc">{{ item.description }}</text>
+							<text class="result-meta">{{ itemMeta(item) }}</text>
+						</view>
+						<view class="result-side">
+							<text class="result-price">¥{{ formatPrice(item.price) }}</text>
+							<text class="result-arrow">›</text>
+						</view>
+					</view>
+
+					<view class="list-tail">
+						<text v-if="loadingMore" class="list-tail-text">正在加载更多…</text>
+						<text v-else-if="errorText.length > 0" class="list-tail-text">加载更多失败，上拉重试</text>
+						<text v-else-if="items.length >= total" class="list-tail-text">已经到底啦</text>
+					</view>
+				</view>
+			</view>
+		</scroll-view>
+		<view v-if="historyClearConfirm" class="history-modal-mask" @click="cancelClearHistory">
+			<view class="history-modal" role="dialog" aria-label="确认清空搜索记录" aria-modal="true" @click.stop>
+				<text class="history-modal-title">清空搜索记录？</text>
+				<text class="history-modal-note">清空后将无法恢复。</text>
+				<view class="history-modal-actions">
+					<button class="history-modal-cancel" @click="cancelClearHistory"><text class="history-modal-cancel-text">取消</text></button>
+					<button class="history-modal-confirm" @click="confirmClearHistory"><text class="history-modal-confirm-text">确认清空</text></button>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import BusinessImage from '../../components/business-image/business-image.uvue';
+import { isLoggedIn, currentUser } from '../../store/auth.uts';
+import { toast } from '../../common/feedback.uts';
+import { searchProducts, SearchProductItem, SearchProductsResult } from '../../api/search.uts';
+import { readSearchHistory, saveSearchHistory, clearSearchHistory, removeSearchHistory } from '../../common/search-history.uts';
+
+/** 每页条数，与后端默认值保持一致。 */
+const PAGE_SIZE: number = 20;
+
+// 结果列表的初始空数组，避免首帧渲染时出现 undefined。
+const initialItems: SearchProductItem[] = [];
+const initialHistory: Array<string> = [];
+
+const state = reactive({
+    // 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
+    statusBarHeight: 0,
+    // 是否已进入入场动画终态。
+    entered: false,
+    // 结果列表是否已就绪，控制卡片依次浮入的过渡。
+    listReady: false,
+    // 是否已完成角色确认，未确认时先展示占位，避免闪一下越权提示。
+    roleChecked: false,
+    // 当前角色是否可以使用搜索（仅学生）。
+    canSearch: false,
+    userUuid: '',
+    history: initialHistory,
+    historyEditing: false,
+    historyClearConfirm: false,
+    // 输入框中的关键词。
+    keyword: '',
+    // 已提交搜索的关键词，用于展示「没有找到」等文案。
+    submittedKeyword: '',
+    // 是否正在加载第一页。
+    searching: false,
+    // 是否正在加载下一页。
+    loadingMore: false,
+    // 错误文案，非空时展示错误态。
+    errorText: '',
+    // 当前已加载到的页码。
+    page: 0,
+    // 命中总数。
+    total: 0,
+    // 已加载的结果。
+    items: initialItems,
+    // 请求版本号：新搜索开始后，旧请求的结果不再写回。
+    requestVersion: 0
+});
+
+const { statusBarHeight, entered, listReady, roleChecked, canSearch, history, historyEditing, historyClearConfirm, keyword, submittedKeyword, searching, loadingMore, errorText, total, items } = toRefs(state)
+
+/**
+ * 返回上一页；没有上一页时退回首页 tab。
+ */
+function goBack() {
+    // getCurrentPages 返回当前页面栈，长度大于 1 说明可以正常返回。
+    if (getCurrentPages().length > 1) {
+        uni.navigateBack();
+        return;
+    }
+    // 直接进入本页（如刷新浏览器）时没有上一页，退回首页 tab。
+    uni.switchTab({ url: '/pages/home/home' });
+}
+
+/**
+ * 名称过长时截断，避免把结果行撑破。
+ *
+ * @param text 原始文本
+ * @param limit 最大字符数
+ * @return 展示用文本
+ */
+function shorten(text: string, limit: number): string {
+    // 超过上限时截断并追加省略号。
+    if (text.length > limit) {
+        return text.substring(0, limit) + '…';
+    }
+    return text;
+}
+
+/**
+ * 结果行的档口与餐厅说明。
+ *
+ * @param item 搜索结果
+ * @return 展示用说明
+ */
+function itemMeta(item: SearchProductItem): string {
+    const windowName = item.windowName.trim();
+    const restaurantName = item.restaurantName.trim();
+    // 档口与餐厅都缺失时给出兜底文案。
+    if (windowName.length == 0 && restaurantName.length == 0) {
+        return '档口待补充';
+    }
+    // 只有餐厅名时直接展示餐厅。
+    if (windowName.length == 0) {
+        return shorten(restaurantName, 16);
+    }
+    // 只有档口名时直接展示档口。
+    if (restaurantName.length == 0) {
+        return shorten(windowName, 16);
+    }
+    // 两者都有时按「档口 · 餐厅」串联。
+    return shorten(windowName, 12) + ' · ' + shorten(restaurantName, 12);
+}
+
+/**
+ * 价格统一保留两位小数。
+ *
+ * @param value 后端返回的单价
+ * @return 展示用价格
+ */
+function formatPrice(value: number): string {
+    return value.toFixed(2);
+}
+
+/**
+ * 结果卡片的入场延迟：按下标依次浮入。
+ *
+ * @param index 卡片序号
+ * @return 行内过渡延迟声明
+ */
+function itemDelay(index: number): string {
+    // 预置各档位的延迟秒数，下标即卡片序号。
+    const delays: string[] = ['0.06s', '0.12s', '0.18s', '0.24s', '0.30s', '0.36s', '0.42s', '0.48s'];
+    // 下标异常（负数）时退回第一档，避免取值越界。
+    if (index < 0) {
+        return 'transition-delay: 0.06s';
+    }
+    // 超出预设档位的卡片统一沿用最后一档，防止等待时间无限增长。
+    if (index >= delays.length) {
+        return 'transition-delay: 0.48s';
+    }
+    return 'transition-delay: ' + delays[index];
+}
+
+/**
+ * 提交搜索：校验关键词后从第一页重新查询。
+ */
+function submit() {
+    if (!state.canSearch) {
+        return;
+    }
+    const trimmed = state.keyword.trim();
+    // 空关键词不发起请求，直接提示用户。
+    if (trimmed.length == 0) {
+        toast('请输入关键词');
+        return;
+    }
+    state.submittedKeyword = trimmed;
+    runSearch(1);
+}
+
+/** 点击历史词直接搜索，保持输入框和结果关键词一致。 */
+function searchHistory(entry: string) {
+    if (state.historyEditing) return;
+    state.keyword = entry;
+    submit();
+}
+
+/** 只清除当前账号在此设备上的历史记录。 */
+function clearHistory() {
+    state.historyClearConfirm = true;
+}
+
+function cancelClearHistory() {
+    state.historyClearConfirm = false;
+}
+
+function confirmClearHistory() {
+    state.historyClearConfirm = false;
+    if (clearSearchHistory(state.userUuid)) { state.history = []; state.historyEditing = false; }
+    else toast('搜索记录清除失败');
+}
+
+function toggleHistoryEditing() {
+    state.historyEditing = !state.historyEditing;
+}
+
+function removeHistory(entry: string) {
+    if (removeSearchHistory(state.userUuid, entry, state.history)) {
+        state.history = readSearchHistory(state.userUuid);
+        if (state.history.length == 0) state.historyEditing = false;
+    } else toast('搜索记录删除失败');
+}
+
+/**
+ * 错误态下重试上一次关键词。
+ */
+function retry() {
+    if (!state.canSearch || state.submittedKeyword.length == 0) {
+        return;
+    }
+    runSearch(1);
+}
+
+/**
+ * 查询指定页码。
+ *
+ * @param targetPage 目标页码，从 1 开始
+ */
+function runSearch(targetPage: number) {
+    // 递增版本号：本次请求返回前若又有新搜索，旧结果会被丢弃。
+    state.requestVersion = state.requestVersion + 1;
+    const version = state.requestVersion;
+    if (targetPage <= 1) {
+        // 第一页进入加载态，先清空上一次的结果，避免新旧结果混排。
+        state.searching = true;
+        state.loadingMore = false;
+        state.errorText = '';
+        state.items = [];
+        state.total = 0;
+        state.page = 0;
+        state.listReady = false;
+    }
+    else {
+        state.loadingMore = true;
+        state.errorText = '';
+    }
+    searchProducts(state.submittedKeyword, targetPage, PAGE_SIZE).then((result: SearchProductsResult) => {
+        // 版本号不一致说明已有更新的搜索，本次结果作废。
+        if (version != state.requestVersion) {
+            return;
+        }
+        state.searching = false;
+        state.loadingMore = false;
+        if (!result.ok) {
+            state.errorText = result.message.length > 0 ? result.message : '搜索失败，请稍后再试';
+            return;
+        }
+        if (targetPage <= 1) {
+            if (saveSearchHistory(state.userUuid, state.submittedKeyword, state.history)) {
+                state.history = readSearchHistory(state.userUuid);
+            } else {
+                toast('搜索记录无法保存到本机');
+            }
+        }
+        state.errorText = '';
+        state.page = result.page;
+        state.total = result.total;
+        if (targetPage <= 1) {
+            state.items = result.items;
+            // 列表渲染完成后再切到「已就绪」，卡片才会依次浮入。
+            setTimeout(() => {
+                state.listReady = true;
+            }, 60);
+            return;
+        }
+        // 追加下一页：复用现有数组，避免整体替换导致已渲染卡片重播入场。
+        const merged = state.items;
+        for (let i = 0; i < result.items.length; i++) {
+            merged.push(result.items[i]);
+        }
+        state.items = merged;
+    }).catch(() => {
+        if (version != state.requestVersion) {
+            return;
+        }
+        state.searching = false;
+        state.loadingMore = false;
+        state.errorText = '搜索失败，请稍后再试';
+    });
+}
+
+/**
+ * 上拉到底部时加载下一页。
+ */
+function loadMore() {
+    if (!state.canSearch || state.searching || state.loadingMore) {
+        return;
+    }
+    if (state.submittedKeyword.length == 0 || state.items.length == 0 || state.total <= 0) {
+        return;
+    }
+    // 已加载数量达到总数时不再请求。
+    if (state.items.length >= state.total) {
+        return;
+    }
+    runSearch(state.page + 1);
+}
+
+/**
+ * 清空输入与结果，回到初始提示态。
+ */
+function clearKeyword() {
+    // 递增版本号，让进行中的请求结果作废。
+    state.requestVersion = state.requestVersion + 1;
+    state.keyword = '';
+    state.submittedKeyword = '';
+    state.searching = false;
+    state.loadingMore = false;
+    state.errorText = '';
+    state.page = 0;
+    state.total = 0;
+    state.items = [];
+    state.listReady = false;
+}
+
+/**
+ * 点击结果行进入该菜品所属档口的点餐页。
+ *
+ * @param item 搜索结果
+ */
+function openWindow(item: SearchProductItem) {
+    uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId + '&productId=' + item.productId });
+}
+
+onPageShow(() => {
+    // 状态栏高度取不到时用 24px 兜底，避免顶部内容被系统栏遮挡。
+    const info = uni.getWindowInfo();
+    state.statusBarHeight = info.statusBarHeight > 0 ? info.statusBarHeight : 24;
+    // 令牌被清空（如退出登录）时不允许停留在本页。
+    if (!isLoggedIn()) {
+        uni.reLaunch({ url: '/pages/login/login' });
+        return;
+    }
+    const profile = currentUser();
+    // 令牌存在但解析失败，说明凭据已不可用，回到登录页重新获取。
+    if (profile == null) {
+        uni.reLaunch({ url: '/pages/login/login' });
+        return;
+    }
+    const allowed = profile.roleCode == 'CUSTOMER';
+    if (state.userUuid != profile.userUuid) {
+        clearKeyword();
+        state.userUuid = profile.userUuid;
+        state.history = readSearchHistory(profile.userUuid);
+        state.historyEditing = false;
+        state.historyClearConfirm = false;
+    }
+    // 角色变化（如切换账号后返回本页）时清空上一次结果，避免展示越权数据。
+    if (!allowed && (state.items.length > 0 || state.submittedKeyword.length > 0)) {
+        clearKeyword();
+    }
+    state.canSearch = allowed;
+    state.roleChecked = true;
+})
+
+onReady(() => {
+    // 页面渲染完成后窗口信息才准确（app-android 尤其如此），此处再同步一次状态栏高度。
+    const readyInfo = uni.getWindowInfo();
+    state.statusBarHeight = readyInfo.statusBarHeight > 0 ? readyInfo.statusBarHeight : 24;
+    // 首帧绘制完成后再切到「已入场」状态，属性变化才会驱动入场过渡动画。
+    setTimeout(() => {
+        state.entered = true;
+    }, 60);
+})
+</script>
+
+<style>
+	.page {
+		flex: 1;
+		background-color: #FDF6F0;
+	}
+
+	/* ---------- 品牌区 ---------- */
+
+	/* 状态栏底色：与品牌区同色，让头部整块连贯 */
+	.statusfill {
+		background-color: #E4572E;
+	}
+
+	.hero {
+		position: relative;
+		background-color: #E4572E;
+		padding-top: 10px;
+		padding-bottom: 20px;
+		overflow: hidden;
+	}
+
+	.hero-shape {
+		position: absolute;
+		border-radius: 999px;
+		transition-property: opacity, transform;
+		/* 带回弹的缓动曲线，与首页保持一致 */
+		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	.hero-shape-1 {
+		width: 150px;
+		height: 150px;
+		right: -52px;
+		top: -46px;
+		background-color: #FFFFFF;
+		opacity: 0.14;
+		transform: scale(1);
+		transition-duration: 0.7s;
+		transition-delay: 0.06s;
+	}
+
+	.hero-shape-1-pre {
+		opacity: 0;
+		transform: scale(0.5);
+	}
+
+	.hero-shape-2 {
+		width: 24px;
+		height: 24px;
+		right: 40px;
+		top: 46px;
+		background-color: #F2A93B;
+		opacity: 1;
+		transform: scale(1);
+		transition-duration: 0.5s;
+		transition-delay: 0.16s;
+	}
+
+	.hero-shape-2-pre {
+		opacity: 0;
+		transform: scale(0);
+	}
+
+	.hero-body {
+		padding-left: 20px;
+		padding-right: 20px;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.06s;
+	}
+
+	.hero-body-pre {
+		opacity: 0;
+		transform: translateY(12px);
+	}
+
+	.nav-top {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	/* 返回按钮：半透明白底圆形，按下时提亮 */
+	.nav-back {
+		width: 34px;
+		height: 34px;
+		border-radius: 999px;
+		background-color: rgba(255, 255, 255, 0.22);
+		align-items: center;
+		justify-content: center;
+	}
+
+	.nav-back-hover {
+		background-color: rgba(255, 255, 255, 0.42);
+	}
+
+	.nav-back-icon {
+		width: 10px;
+		height: 10px;
+		border-left-width: 2px;
+		border-left-style: solid;
+		border-left-color: #FFFFFF;
+		border-bottom-width: 2px;
+		border-bottom-style: solid;
+		border-bottom-color: #FFFFFF;
+		transform: rotate(45deg);
+		margin-left: 4px;
+	}
+
+	.hero-eyebrow {
+		margin-left: 10px;
+		font-size: 11px;
+		color: #FFD9C7;
+		letter-spacing: 1px;
+		font-weight: bold;
+	}
+
+	/* 搜索条：白底胶囊压在橙色块上，内部放输入框、清空与提交按钮 */
+	.search-bar {
+		flex-direction: row;
+		align-items: center;
+		margin-top: 14px;
+		height: 44px;
+		padding-left: 14px;
+		padding-right: 5px;
+		border-radius: 999px;
+		background-color: #FFFFFF;
+	}
+
+	/* 放大镜：圆形镜片 + 右下角斜向手柄，用两个方块拼出来 */
+	.search-lens {
+		position: relative;
+		flex-shrink: 0;
+		width: 12px;
+		height: 12px;
+		border-radius: 999px;
+		border-width: 2px;
+		border-style: solid;
+		border-color: #E4572E;
+	}
+
+	.search-lens-handle {
+		position: absolute;
+		right: -5px;
+		bottom: -1px;
+		width: 6px;
+		height: 2px;
+		background-color: #E4572E;
+		transform: rotate(45deg);
+	}
+
+	.search-input {
+		flex: 1;
+		margin-left: 10px;
+		font-size: 14px;
+		color: #211C18;
+	}
+
+	.search-placeholder {
+		font-size: 14px;
+		color: #B5A79A;
+	}
+
+	/* 清空按钮：小圆形浅底，点击即清空关键词与结果 */
+	.search-clear {
+		width: 22px;
+		height: 22px;
+		border-radius: 999px;
+		background-color: #F3E9E0;
+		align-items: center;
+		justify-content: center;
+		margin-left: 4px;
+	}
+
+	.search-clear-hover {
+		background-color: #E7D8CB;
+	}
+
+	.search-clear-text {
+		font-size: 15px;
+		line-height: 15px;
+		color: #8C7C6F;
+	}
+
+	/* 提交按钮：主色胶囊，压在搜索条右侧 */
+	.search-submit {
+		flex-shrink: 0;
+		margin-left: 6px;
+		padding-left: 16px;
+		padding-right: 16px;
+		height: 34px;
+		border-radius: 999px;
+		background-color: #E4572E;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.search-submit-hover {
+		background-color: #C2410C;
+	}
+
+	.search-submit-text {
+		font-size: 13px;
+		font-weight: bold;
+		color: #FFFFFF;
+	}
+
+	/* ---------- 结果区 ---------- */
+
+	.results {
+		flex: 1;
+		min-height: 0;
+	}
+
+	.results-body {
+		padding-left: 20px;
+		padding-right: 20px;
+		padding-top: 20px;
+		padding-bottom: 30px;
+	}
+
+	.history-card {
+		background-color: #FFFFFF;
+		border-radius: 18px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #EFE1D6;
+		padding: 18px;
+	}
+
+	.history-head {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 12px;
+	}
+
+	.history-title { font-size: 15px; font-weight: bold; color: #211C18; }
+	.history-actions { flex-direction: row; align-items: center; }
+	.history-clear {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 24px;
+		margin: 0;
+		padding: 2px 5px;
+		border-width: 0;
+		background-color: transparent;
+	}
+	.history-action-text { color: #8C7C6F; font-size: 12px; }
+	.history-list { flex-direction: row; flex-wrap: wrap; }
+	.history-chip-wrap { position: relative; margin: 4px 8px 8px 0; max-width: 100%; }
+	.history-chip {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 28px;
+		margin: 0;
+		padding: 4px 10px;
+		border-width: 0;
+		border-radius: 999px;
+		background-color: #FDF0E8;
+		line-height: 20px;
+		max-width: 100%;
+	}
+	.history-chip-text { color: #6F4D3C; font-size: 13px; }
+	.history-remove {
+		position: absolute;
+		top: 1px;
+		right: 0;
+		width: 8px;
+		height: 8px;
+		margin: 0;
+		padding: 0;
+		border-width: 0;
+		border-radius: 4px;
+		background-color: #8C7C6F;
+		align-items: center;
+		justify-content: center;
+	}
+	.history-remove-text { color: #FFFFFF; font-size: 6px; line-height: 8px; }
+	.history-modal-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 100; flex-direction: row; align-items: center; justify-content: center; padding: 24px; background-color: rgba(33, 28, 24, 0.58); }
+	.history-modal { width: 100%; max-width: 340px; padding: 28px 24px 24px; border-radius: 20px; background-color: #FFFFFF; align-items: center; }
+	.history-modal-title { font-size: 19px; line-height: 28px; font-weight: bold; color: #211C18; text-align: center; }
+	.history-modal-note { margin-top: 8px; font-size: 13px; line-height: 21px; color: #7A6C60; text-align: center; }
+	.history-modal-actions { flex-direction: row; width: 100%; margin-top: 24px; }
+	.history-modal-cancel { display: flex; flex: 1; height: 46px; margin: 0 8px 0 0; padding: 0; border-width: 1px; border-style: solid; border-color: #E8DCD2; border-radius: 12px; background-color: #FFFFFF; align-items: center; justify-content: center; }
+	.history-modal-confirm { display: flex; flex: 1; height: 46px; margin: 0; padding: 0; border-width: 0; border-radius: 12px; background-color: #E4572E; align-items: center; justify-content: center; }
+	.history-modal-cancel-text { font-size: 14px; color: #7A6C60; }
+	.history-modal-confirm-text { font-size: 14px; font-weight: bold; color: #FFFFFF; }
+
+	/* #ifdef WEB */
+	.history-modal-cancel::after, .history-modal-confirm::after { border: none; }
+	/* #endif */
+
+	/* 加载中 / 失败 / 空态的公共容器 */
+	.state {
+		margin-top: 4px;
+		background-color: #FFFFFF;
+		border-radius: 18px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #EFE1D6;
+		padding-top: 34px;
+		padding-bottom: 34px;
+		padding-left: 20px;
+		padding-right: 20px;
+		align-items: center;
+		opacity: 1;
+		transform: translateY(0);
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: ease-out;
+		transition-delay: 0.1s;
+	}
+
+	.state-pre {
+		opacity: 0;
+		transform: translateY(16px);
+	}
+
+	.state-text {
+		font-size: 13px;
+		color: #A2968B;
+		text-align: center;
+	}
+
+	.state-hint {
+		margin-top: 6px;
+		font-size: 11px;
+		color: #C9BDB2;
+		text-align: center;
+	}
+
+	.state-action {
+		margin-top: 14px;
+		padding-left: 18px;
+		padding-right: 18px;
+		padding-top: 8px;
+		padding-bottom: 8px;
+		border-radius: 999px;
+		background-color: #E4572E;
+	}
+
+	.state-action-hover {
+		background-color: #C2410C;
+	}
+
+	.state-action-text {
+		font-size: 13px;
+		font-weight: bold;
+		color: #FFFFFF;
+	}
+
+	.list {
+		margin-top: 2px;
+	}
+
+	.list-head {
+		flex-direction: row;
+		align-items: center;
+		margin-bottom: 12px;
+	}
+
+	.list-title {
+		font-size: 15px;
+		font-weight: bold;
+		color: #211C18;
+		letter-spacing: 1px;
+	}
+
+	.list-count {
+		margin-left: 8px;
+		font-size: 11px;
+		color: #A2968B;
+	}
+
+	/* 结果卡片：白底圆角，缩略图 + 文案 + 价格右列 */
+	.result {
+		flex-direction: row;
+		align-items: flex-start;
+		background-color: #FFFFFF;
+		border-radius: 18px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #EFE1D6;
+		padding: 12px;
+		margin-bottom: 12px;
+		opacity: 1;
+		transform: translateY(0);
+		/* 只过渡入场用的透明度与位移：底色/描边不在过渡列表内，按下立即切换 */
+		transition-property: opacity, transform;
+		transition-duration: 0.5s;
+		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	.result-pre {
+		opacity: 0;
+		transform: translateY(18px);
+	}
+
+	.result-hover {
+		background-color: #FDF6F0;
+		border-color: #E4572E;
+	}
+
+	.result-thumb {
+		overflow: hidden;
+		flex-shrink: 0;
+		width: 64px;
+		height: 64px;
+		border-radius: 15px;
+		background-color: #FDF0E8;
+	}
+
+	.result-body {
+		flex: 1;
+		min-width: 0;
+		margin-left: 12px;
+	}
+
+	.result-name {
+		font-size: 15px;
+		font-weight: bold;
+		color: #211C18;
+	}
+
+	.result-desc {
+		margin-top: 4px;
+		font-size: 11px;
+		line-height: 16px;
+		color: #8C7C6F;
+	}
+
+	.result-meta {
+		margin-top: 6px;
+		font-size: 11px;
+		color: #A2968B;
+	}
+
+	.result-side {
+		flex-shrink: 0;
+		margin-left: 10px;
+		align-items: flex-end;
+	}
+
+	.result-price {
+		font-size: 15px;
+		font-weight: bold;
+		color: #E4572E;
+	}
+
+	.result-arrow {
+		margin-top: 6px;
+		font-size: 18px;
+		color: #D8C6B8;
+	}
+
+	.list-tail {
+		padding-top: 6px;
+		padding-bottom: 8px;
+		align-items: center;
+	}
+
+	.list-tail-text {
+		font-size: 11px;
+		color: #B5A79A;
+	}
+</style>

@@ -1,0 +1,65 @@
+/** 搜索记录保存在本机，并按登录用户隔离。 */
+const HISTORY_LIMIT: number = 10
+
+function historyKey(userUuid: string): string {
+    return 'search_history_' + userUuid
+}
+
+/** 读取当前用户的最近搜索；异常或无效数据按空记录处理。 */
+export function readSearchHistory(userUuid: string): Array<string> {
+    const result: Array<string> = []
+    if (userUuid.length == 0) return result
+    try {
+        const stored = uni.getStorageSync(historyKey(userUuid))
+        if (typeof stored != 'string' || (stored as string).length == 0) return result
+        const parsed = JSON.parse(stored as string)
+        if (!Array.isArray(parsed)) return result
+        const entries = parsed as Array<any>
+        for (let i = 0; i < entries.length && result.length < HISTORY_LIMIT; i++) {
+            if (typeof entries[i] != 'string') continue
+            const value = (entries[i] as string).trim()
+            if (value.length > 0 && value.length <= 80 && !result.includes(value)) result.push(value)
+        }
+    } catch (_error) {
+        return []
+    }
+    return result
+}
+
+/** 将关键词放到最前，去重并限制数量；返回本次是否成功持久化。 */
+export function saveSearchHistory(userUuid: string, keyword: string, current: Array<string>): boolean {
+    if (userUuid.length == 0 || keyword.length == 0) return false
+    const entries: Array<string> = [keyword]
+    for (let i = 0; i < current.length && entries.length < HISTORY_LIMIT; i++) {
+        if (current[i] != keyword) entries.push(current[i])
+    }
+    try {
+        uni.setStorageSync(historyKey(userUuid), JSON.stringify(entries))
+        return true
+    } catch (_error) {
+        return false
+    }
+}
+
+/** 删除当前用户在此设备上的搜索记录。 */
+export function clearSearchHistory(userUuid: string): boolean {
+    if (userUuid.length == 0) return false
+    try {
+        uni.removeStorageSync(historyKey(userUuid))
+        return true
+    } catch (_error) {
+        return false
+    }
+}
+
+/** 仅删除一条记录，保留其他记录的顺序。 */
+export function removeSearchHistory(userUuid: string, keyword: string, current: Array<string>): boolean {
+    if (userUuid.length == 0) return false
+    const entries = current.filter((entry: string): boolean => entry != keyword)
+    try {
+        uni.setStorageSync(historyKey(userUuid), JSON.stringify(entries))
+        return true
+    } catch (_error) {
+        return false
+    }
+}
