@@ -95,11 +95,13 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     let menuFails = true;
     const menu = loadSetup(menuSource.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1], request => {
         if (request.endsWith('/feedback.uts')) return { toast: message => messages.push(message) };
+        if (request.endsWith('/comments.uts')) return { fetchCardRatings: () => Promise.resolve([]), fetchWindowReviews: () => Promise.resolve({ ok: true, data: { items: [{ commentId: 'review-1', windowId: 2, images: [], tags: [] }], nextCursor: '', hasMore: false } }), fetchWindowRating: () => Promise.resolve({ ok: true, data: { reviewCount: 1, averageScore: 5 } }), commentPayload: result => result.data, parseWindowReviewPage: raw => raw };
+        if (request.endsWith('/json.uts')) return { jsonNumber: (raw, key) => raw[key] ?? null };
         if (request.endsWith('/menu.uts')) return { fetchWindowMenu: () => Promise.resolve(menuFails
             ? { ok: false, message: '菜单不可用', menu: null }
             : { ok: true, menu: { windowName: '窗口', imageUrl: '', location: '', description: '',
-                categories: [{ categoryId: 11, categoryName: '米饭', products: [{ productId: 1 }] }],
-                uncategorizedProducts: [{ productId: 7 }] } }) };
+                categories: [{ categoryId: 11, categoryName: '米饭', products: [{ productId: 1, productName: '鸡肉饭', description: '香辣' }] }],
+                uncategorizedProducts: [{ productId: 7, productName: '汤', description: '鸡肉汤' }] } }) };
         if (request.endsWith('/stock.uts')) return { fetchWindowStocks: () => Promise.resolve({ ok: true, items: [] }) };
         if (request.endsWith('/cart.uts')) return { fetchCart: () => Promise.resolve({ ok: true, cart: { windows: [] } }) };
         return {};
@@ -114,6 +116,24 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     assert.equal(menu.railAnchor, 'menu-rail-other');
     assert.equal(menu.dishesAnchor, 'menu-product-7');
     assert.equal(menu.highlightedProductId, 7);
+    menu.selectShopTab('reviews');
+    await flush();
+    assert.equal(menu.shopTab, 'reviews');
+    assert.equal(menu.shopReviews.length, 1);
+    assert.equal(menu.shopReviewCount, 1);
+    menu.selectShopTab('menu');
+    await flush();
+    assert.equal(menu.shopTab, 'menu');
+    menu.shopKeyword = ' 鸡肉 ';
+    assert.deepEqual(Array.from(menu.shopSearchResults, item => item.productId), [1, 7]);
+    menu.shopKeyword = '不存在';
+    assert.equal(menu.shopSearchResults.length, 0);
+    menu.shopKeyword = '汤';
+    menu.openShopResult(menu.shopSearchResults[0]);
+    await flush();
+    assert.equal(menu.shopKeyword, '');
+    assert.equal(menu.dishesAnchor, 'menu-product-7');
+    assert.equal(menu.activeCategoryId, -1);
     menu.selectCategory(11);
     await flush();
     assert.equal(menu.dishesAnchor, 'menu-category-11', 'manual category selection takes control');

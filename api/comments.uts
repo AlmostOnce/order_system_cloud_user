@@ -4,6 +4,44 @@ import { jsonObject, jsonArray, jsonString, jsonNumber, jsonBoolean } from '../c
 export type Review = { commentId: string, productId: number, windowId: number, authorName: string, score: number, content: string, images: Array<string>, tags: Array<string>, createdAt: string }
 export type ReviewPage = { items: Array<Review>, nextCursor: string, hasMore: boolean }
 export type ProductRating = { productId: number, reviewCount: number, averageScore: number | null }
+export type CardRating = { id: number, reviewCount: number, averageScore: number | null, available: boolean }
+
+/** 分批获取评分；失败的批次标记不可用，不伪造零评价。 */
+export async function fetchCardRatings(kind: string, ids: Array<number>): Promise<Array<CardRating>> {
+    const output: Array<CardRating> = []
+    for (let start = 0; start < ids.length; start += 100) {
+        const chunk = ids.slice(start, start + 100)
+        let rows: Array<any> | null = null
+        try {
+            const result = await httpGet('/comments/ratings/batch?kind=' + kind + '&ids=' + chunk.join(','), true)
+            rows = result.ok && result.data != null ? jsonArray(result.data, 'data') : null
+        } catch (_error) { rows = null }
+        let valid = rows != null
+        const found: Array<CardRating> = []
+        if (rows != null) for (let i = 0; i < rows.length; i++) {
+            const row = rows[i]
+            if (row == null || typeof row != 'object' || Array.isArray(row)) { valid = false; break }
+            const raw = row as UTSJSONObject
+            const id = jsonNumber(raw, 'id') ?? 0
+            const count = jsonNumber(raw, 'reviewCount')
+            const average = jsonNumber(raw, 'averageScore')
+            if (!chunk.includes(id) || count == null || !Number.isInteger(count) || count < 0 || (count > 0 && (average == null || average < 1 || average > 5)) || found.some((item: CardRating): boolean => item.id == id)) { valid = false; break }
+            found.push({ id: id, reviewCount: count, averageScore: count == 0 ? null : average, available: true })
+        }
+        for (let i = 0; i < chunk.length; i++) {
+            const item = valid ? found.find((entry: CardRating): boolean => entry.id == chunk[i]) : null
+            output.push(item != null ? item : { id: chunk[i], reviewCount: 0, averageScore: null, available: valid })
+        }
+    }
+    return output
+}
+export function cardRatingText(ratings: Array<CardRating>, id: number): string {
+    const rating = ratings.find((item: CardRating): boolean => item.id == id)
+    if (rating == null) return '评分加载中'
+    if (!rating.available) return '评分暂不可用'
+    if (rating.reviewCount == 0 || rating.averageScore == null) return '暂无评分'
+    return '★ ' + rating.averageScore!.toFixed(1) + ' · ' + rating.reviewCount + '条评价'
+}
 
 export function commentPayload(result: HttpResult): UTSJSONObject | null {
     return result.ok && result.data != null ? jsonObject(result.data, 'data') : null
@@ -56,3 +94,28 @@ export function fetchComments(productId: number, cursor: string): Promise<HttpRe
 }
 export function fetchProductRating(productId: number): Promise<HttpResult> { return httpGet('/comments/products/' + productId + '/rating', true) }
 export function createComment(body: UTSJSONObject, key: string): Promise<HttpResult> { return httpPost('/comments', body, true, key) }
+export function createWindowReview(body: UTSJSONObject, key: string): Promise<HttpResult> { return httpPost('/comments/window-reviews', body, true, key) }
+export function fetchWindowReviews(windowId: number, cursor: string): Promise<HttpResult> {
+    const base = windowId > 0 ? '/comments/window-reviews/windows/' + windowId : '/comments/window-reviews/me'
+    return httpGet(base + '?limit=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : ''), true)
+}
+export function fetchWindowRating(windowId: number): Promise<HttpResult> { return httpGet('/comments/window-reviews/windows/' + windowId + '/rating', true) }
+export function parseWindowReviewPage(raw: UTSJSONObject): ReviewPage | null {
+    const rows = jsonArray(raw, 'items')
+    const more = jsonBoolean(raw, 'hasMore')
+    const cursor = jsonString(raw, 'nextCursor') ?? ''
+    if (rows == null || more == null || (more && (cursor.length == 0 || rows.length == 0))) return null
+    const items: Array<Review> = []
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) return null
+        const item = rows[i] as UTSJSONObject
+        const id = jsonString(item, 'reviewId') ?? ''
+        const windowId = jsonNumber(item, 'windowId') ?? 0
+        const score = jsonNumber(item, 'score') ?? 0
+        const images = strings(item, 'images')
+        const tags = strings(item, 'tags')
+        if (id.length == 0 || windowId <= 0 || !Number.isInteger(score) || score < 1 || score > 5 || images == null || tags == null) return null
+        items.push({ commentId: id, productId: 0, windowId: windowId, authorName: jsonString(item, 'authorName') ?? '校园用户', score: score, content: jsonString(item, 'content') ?? '', images: images, tags: tags, createdAt: jsonString(item, 'createdAt') ?? '' })
+    }
+    return { items: items, nextCursor: cursor, hasMore: more }
+}

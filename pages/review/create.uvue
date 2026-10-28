@@ -1,11 +1,11 @@
 <template>
     <view class="account-page account-secondary">
         <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" :disabled="submitting || imageBusy" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">评价菜品</text></view>
+        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" :disabled="submitting || imageBusy" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">{{ productId > 0 ? '评价菜品' : '评价店铺' }}</text></view>
         <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!submitting && !imageBusy && !pending && !succeeded && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
             <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
             <view class="account-content vapor-account-secondary--account-content">
-                <view class="review-intro"><text class="review-eyebrow">记录这次用餐</text><text class="review-title">{{ productName.length > 0 ? productName : '分享你的真实感受' }}</text><text class="review-subtitle">每笔已完成订单中的每道菜可评价一次</text></view>
+                <view class="review-intro"><text class="review-eyebrow">记录这次用餐</text><text class="review-title">{{ productName.length > 0 ? productName : '分享你的真实感受' }}</text><text class="review-subtitle">{{ productId > 0 ? '每笔已完成订单中的每道菜可评价一次' : '每笔已完成订单可评价店铺一次' }}</text></view>
                 <view v-if="succeeded" class="account-success"><text class="account-success-text">评价已发布</text><text class="account-note">谢谢分享，其他同学可以看到你的用餐评价。</text><button class="account-primary vapor-account-secondary--account-primary" @click="openMine"><text class="account-primary-text">查看我的评价</text></button></view>
                 <view v-if="eligible && !succeeded" class="account-card vapor-account-secondary--account-card">
                     <text class="account-heading">这道菜怎么样？</text>
@@ -36,7 +36,7 @@ import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 import { currentUser } from '../../store/auth.uts'
 import { backToAccount } from '../../common/account.uts'
 import { fetchOrder, orderPayload, parseOrder } from '../../api/order.uts'
-import { commentPayload, createComment, parseComment, strings } from '../../api/comments.uts'
+import { commentPayload, createComment, createWindowReview, parseComment, strings } from '../../api/comments.uts'
 import { commentPendingKey, newCommentKey, readPendingReview } from '../../common/comments.uts'
 import { uploadImage } from '../../api/files.uts'
 import { chooseLocalImage } from '../../common/image-picker.uts'
@@ -50,7 +50,7 @@ const state = reactive({ statusBarHeight: 0, orderId: 0, productId: 0, userUuid:
     refreshing: false, currentRefreshTime: '', score: 0, content: '', tags: initialTags, photos: initialPhotos,
     scores: [1, 2, 3, 4, 5], scoreLabels: ['不满意', '有待改进', '还不错', '很满意', '非常满意'],
     tagOptions: ['味道好', '分量足', '出餐快', '包装好', '值得推荐'], imageBusy: false, submitting: false, pending: false, succeeded: false, requestKey: '', errorText: '' })
-const { statusBarHeight, productName, loading, eligible, refreshing, currentRefreshTime, score, content, tags, photos, scores, scoreLabels, tagOptions, imageBusy, submitting, pending, succeeded, errorText } = toRefs(state)
+const { statusBarHeight, productId, productName, loading, eligible, refreshing, currentRefreshTime, score, content, tags, photos, scores, scoreLabels, tagOptions, imageBusy, submitting, pending, succeeded, errorText } = toRefs(state)
 
 function setScore(value: number) { if (!state.pending && !state.submitting) state.score = value }
 function toggleTag(value: string) {
@@ -84,7 +84,7 @@ async function addPhoto(): Promise<void> {
 async function loadOrder(): Promise<void> {
     if (state.loading || state.submitting || state.succeeded) return
     state.eligible = false
-    if (!Number.isInteger(state.orderId) || state.orderId <= 0 || !Number.isInteger(state.productId) || state.productId <= 0) { state.errorText = '评价入口无效，请从已完成订单进入'; return }
+    if (!Number.isInteger(state.orderId) || state.orderId <= 0 || !Number.isInteger(state.productId) || state.productId < 0) { state.errorText = '评价入口无效，请从已完成订单进入'; return }
     state.loading = true
     state.errorText = ''
     try {
@@ -93,6 +93,7 @@ async function loadOrder(): Promise<void> {
         const order = raw == null ? null : parseOrder(raw)
         if (order == null) { state.errorText = result.message.length > 0 ? result.message : '订单信息暂不可用'; return }
         if (order.status != '已完成') { state.errorText = '完成取餐后才可以评价'; return }
+        if (state.productId == 0) { state.productName = '评价本次店铺体验'; state.eligible = true; return }
         for (let i = 0; i < order.items.length; i++) {
             if (order.items[i].productId == state.productId) { state.productName = order.items[i].productName; state.eligible = true; return }
         }
@@ -125,7 +126,9 @@ async function submit(): Promise<void> {
     } else {
         const keys: Array<string> = []
         for (let i = 0; i < state.photos.length; i++) keys.push(state.photos[i].fileKey)
-        body = { orderId: state.orderId, productId: state.productId, score: state.score, content: state.content.trim(), imageFileKeys: keys, tags: state.tags.slice() }
+        body = state.productId > 0
+            ? { orderId: state.orderId, productId: state.productId, score: state.score, content: state.content.trim(), imageFileKeys: keys, tags: state.tags.slice() }
+            : { orderId: state.orderId, score: state.score, content: state.content.trim(), imageFileKeys: keys, tags: state.tags.slice() }
         state.requestKey = newCommentKey()
         try { uni.setStorageSync(storageKey, JSON.stringify({ key: state.requestKey, body: body })) }
         catch (error) { state.errorText = '无法保存提交记录，请检查设备存储空间后重试'; return }
@@ -133,10 +136,12 @@ async function submit(): Promise<void> {
     }
     state.submitting = true
     try {
-        const result = await createComment(body, state.requestKey)
+        const result = state.productId > 0 ? await createComment(body, state.requestKey) : await createWindowReview(body, state.requestKey)
         const raw = commentPayload(result)
-        const saved = raw == null ? null : parseComment(raw)
-        if (result.ok && saved != null && saved.productId == state.productId) {
+        const saved = raw == null || state.productId == 0 ? null : parseComment(raw)
+        const savedWindowId = raw == null ? 0 : (jsonNumber(raw, 'windowId') ?? 0)
+        const savedReviewId = raw == null ? '' : (jsonString(raw, 'reviewId') ?? '')
+        if (result.ok && ((saved != null && saved.productId == state.productId) || (state.productId == 0 && savedWindowId > 0 && savedReviewId.length > 0))) {
             uni.removeStorageSync(storageKey)
             state.pending = false
             state.succeeded = true

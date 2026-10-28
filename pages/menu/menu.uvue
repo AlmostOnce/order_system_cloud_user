@@ -18,6 +18,16 @@
 				<text class="hero-loc">{{ windowLocation.length > 0 ? windowLocation : '位置待补充' }}</text>
 			</view>
 		</view>
+		<view class="shop-tabs">
+			<view class="shop-tab" @click="selectShopTab('menu')"><text class="shop-tab-text" :class="shopTab == 'menu' ? 'shop-tab-text-active' : ''">菜品</text><view v-if="shopTab == 'menu'" class="shop-tab-underline"></view></view>
+			<view class="shop-tab" @click="selectShopTab('reviews')"><text class="shop-tab-text" :class="shopTab == 'reviews' ? 'shop-tab-text-active' : ''">评价</text><view v-if="shopTab == 'reviews'" class="shop-tab-underline"></view></view>
+		</view>
+		<view v-if="shopTab == 'menu'" class="shop-menu-content">
+		<view v-if="!loading && loadError.length == 0" class="shop-search-bar">
+			<view class="shop-search-icon"></view>
+			<input class="shop-search-input" v-model="shopKeyword" placeholder="搜索本店菜品" confirm-type="search" :maxlength="80" />
+			<view v-if="shopKeyword.length > 0" class="shop-search-clear" @click="clearShopSearch"><text class="shop-search-clear-text">清除</text></view>
+		</view>
 
         <scroll-view v-if="(loading && groups.length == 0) || loadError.length > 0" class="menu-state-scroll" scroll-y="true" :refresher-enabled="refreshing || (!loading && !stockLoading && !cartLoading && !mutating)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
                 <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
@@ -29,6 +39,15 @@
         </scroll-view>
 
 		<!-- 菜单主体：左侧分类导航与右侧连续菜单联动 -->
+		<scroll-view v-else-if="shopKeyword.trim().length > 0" class="shop-search-results" scroll-y="true">
+			<view class="shop-results-head"><text class="shop-results-title">本店搜索</text><text class="shop-results-count">{{ shopSearchResults.length }} 道菜品</text></view>
+			<view v-if="shopSearchResults.length == 0" class="shop-search-empty"><text class="shop-search-empty-text">没有找到相关菜品，换个关键词试试</text></view>
+			<view v-for="product in shopSearchResults" :key="product.productId" class="shop-result" hover-class="shop-result-hover" @click="openShopResult(product)">
+				<view class="shop-result-image"><business-image :src="product.imageUrl" kind="product"></business-image></view>
+				<view class="shop-result-body"><text class="shop-result-name">{{ product.productName }}</text><text v-if="product.description.length > 0" class="shop-result-description">{{ product.description }}</text><text class="shop-result-price">¥{{ formatPrice(product.price) }}</text></view>
+				<text class="shop-result-arrow">›</text>
+			</view>
+		</scroll-view>
 		<view v-else class="catalog">
 			<!-- 左侧分类栏：纵向排列，选中项带主色竖条与实色底 -->
 			<scroll-view class="rail" direction="vertical" :scroll-into-view="railAnchor">
@@ -83,6 +102,7 @@
 
 							<view class="dish-body">
 								<text class="dish-name">{{ product.productName }}</text>
+								<text class="dish-rating">{{ cardRatingText(productRatings, product.productId) }}</text>
 								<text v-if="product.description.length > 0" class="dish-desc">{{ product.description }}</text>
 								<text class="dish-stock">{{ stockHint(product.productId) }}</text>
                                 <button class="review-menu-action" @click="openProductReviews(product)"><text class="review-menu-label">查看评价</text></button>
@@ -113,9 +133,26 @@
 				</view>
 			</scroll-view>
 		</view>
+		</view>
+		<scroll-view v-else class="shop-review-list" scroll-y="true" :lower-threshold="120" @scrolltolower="loadMoreShopReviews" :refresher-enabled="!shopReviewsLoading" :refresher-triggered="shopReviewsRefreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshShopReviews">
+			<refresh-header slot="refresher" :refreshing="shopReviewsRefreshing" :current-refresh-time="shopReviewsRefreshTime"></refresh-header>
+			<view class="shop-review-content">
+				<view class="shop-rating-card"><text class="shop-rating-value">{{ shopRatingReady && shopAverageScore != null ? shopAverageScore!.toFixed(1) : '--' }}</text><view class="shop-rating-info"><text class="shop-rating-title">店铺评分</text><text class="shop-rating-meta">{{ shopRatingReady ? shopReviewCount + ' 条评价' : '评分暂不可用' }}</text></view></view>
+				<view v-for="review in shopReviews" :key="review.commentId" class="shop-review-card">
+					<view class="shop-review-head"><text class="shop-review-author">{{ review.authorName }}</text><text class="shop-review-score">{{ review.score }} 分</text></view>
+					<text class="shop-review-date">{{ review.createdAt.replace('T', ' ').substring(0, 16) }}</text><text class="shop-review-body">{{ review.content }}</text>
+					<view v-if="review.tags.length > 0" class="shop-review-tags"><text v-for="tag in review.tags" :key="tag" class="shop-review-tag">{{ tag }}</text></view>
+					<view v-if="review.images.length > 0" class="shop-review-images"><image v-for="(url, index) in review.images" :key="url" class="shop-review-image" :src="shopReviewImage(url)" mode="aspectFill" @click="previewShopReview(review, index)"></image></view>
+				</view>
+				<text v-if="shopReviewsLoading" class="shop-review-status">正在获取评价…</text>
+				<text v-else-if="shopReviewsError.length > 0" class="shop-review-status">{{ shopReviewsError }}</text>
+				<text v-else-if="shopReviewsLoaded && shopReviews.length == 0" class="shop-review-status">还没有店铺评价，完成订单后可以分享用餐体验</text>
+				<text v-else-if="shopReviewsLoaded && !shopReviewsHasMore" class="shop-review-status">已经看到全部评价</text>
+			</view>
+		</scroll-view>
 
 		<!-- 底部购物车栏：菜单就绪后随页面出现；点击左侧信息区展开购物车清单 -->
-		<view v-if="!loading && loadError.length == 0" class="cartbar">
+		<view v-if="shopTab == 'menu' && !loading && loadError.length == 0" class="cartbar">
 			<view class="cartbar-info" hover-class="cartbar-info-hover" @click="toggleCartPanel">
 				<view class="cart-icon" :class="cartQuantity > 0 ? 'cart-icon-active' : ''">
 					<view class="cart-icon-handle"></view>
@@ -185,7 +222,7 @@
 </template>
 
 <script setup lang="uts">
-import { reactive, toRefs, nextTick, watch, getCurrentInstance } from 'vue'
+import { reactive, toRefs, computed, nextTick, watch, getCurrentInstance } from 'vue'
 import WindowMessage from '../../components/window-message/window-message.uvue';
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
@@ -197,6 +234,9 @@ import { isLoggedIn } from '../../store/auth.uts';
 // 导入菜单接口与类型：档口菜单快照。
 import { fetchWindowMenu, MenuProduct, WindowMenuResult } from '../../api/menu.uts';
 import { fetchWindowStocks, ProductStock, StockListResult } from '../../api/stock.uts';
+import { Review, CardRating, fetchCardRatings, cardRatingText, fetchWindowReviews, fetchWindowRating, commentPayload, parseWindowReviewPage } from '../../api/comments.uts';
+import { jsonNumber } from '../../common/json.uts';
+import { imageSource } from '../../common/images.uts';
 // 导入购物车接口与类型：数量增减与金额汇总。
 import { fetchCart, addToCart, setCartItemQuantity, removeCartItem, clearCartWindow, CartItem, CartWindow, CartResult, CartActionResult } from '../../api/cart.uts';
 /**
@@ -264,11 +304,14 @@ const initialEmptyQuantities: Array<QuantityEntry> = [];
 const initialEmptyCartItems: Array<CartItem> = [];
 const initialEmptyStocks: Array<ProductStock> = [];
 const initialCategoryOffsets: Array<CategoryOffset> = [];
+const initialShopReviews: Array<Review> = [];
+const initialProductRatings: Array<CardRating> = [];
 const menuInstance = getCurrentInstance();
 let measurementScheduled = false;
 let layoutVersion = 0;
 let menuDisposed = false;
 let locationVersion = 0;
+let productRatingVersion = 0;
 const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTime: '', cartLoading: false,
     // 状态栏高度（px），用于顶部占位。
     statusBarHeight: 0,
@@ -276,6 +319,11 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     windowId: 0,
     pendingProductId: 0,
     highlightedProductId: 0,
+    shopKeyword: '',
+    productRatings: initialProductRatings,
+    shopTab: 'menu', shopReviews: initialShopReviews, shopReviewsLoading: false, shopReviewsLoaded: false,
+    shopReviewsError: '', shopReviewsCursor: '', shopReviewsHasMore: false, shopReviewsRefreshing: false,
+    shopReviewsRefreshTime: '', shopRatingReady: false, shopAverageScore: null as number | null, shopReviewCount: 0,
     stocks: initialEmptyStocks,
     stockLoading: false,
     stockRequestVersion: 0,
@@ -314,7 +362,86 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     // 菜品卡片是否已就绪，控制依次浮入。
     listReady: false })
 
-const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHeight, windowId, highlightedProductId, stocks, stockLoading, stockRequestVersion, stockLoadError, windowName, windowImageUrl, windowLocation, windowDescription, loading, loadError, groups, activeCategoryId, dishesAnchor, railAnchor, dishesScrollTop, categoryTailHeight, categoryOffsets, quantities, cartItems, cartQuantity, cartAmount, cartPanelVisible, cartPanelReady, mutating, entered, listReady } = toRefs(state)
+const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHeight, windowId, highlightedProductId, shopKeyword, stocks, stockLoading, stockRequestVersion, stockLoadError, windowName, windowImageUrl, windowLocation, windowDescription, loading, loadError, groups, activeCategoryId, dishesAnchor, railAnchor, dishesScrollTop, categoryTailHeight, categoryOffsets, quantities, cartItems, cartQuantity, cartAmount, cartPanelVisible, cartPanelReady, mutating, entered, listReady } = toRefs(state)
+const { shopTab, shopReviews, shopReviewsLoading, shopReviewsLoaded, shopReviewsError, shopReviewsHasMore, shopReviewsRefreshing, shopReviewsRefreshTime, shopRatingReady, shopAverageScore, shopReviewCount } = toRefs(state)
+const { productRatings } = toRefs(state)
+
+const shopSearchResults = computed((): Array<MenuProduct> => {
+    const keyword = state.shopKeyword.trim().toLowerCase();
+    const results: Array<MenuProduct> = [];
+    if (keyword.length == 0) return results;
+    for (let i = 0; i < state.groups.length; i++) {
+        const products = state.groups[i].products;
+        for (let j = 0; j < products.length; j++) {
+            const product = products[j];
+            if (product.productName.toLowerCase().includes(keyword) || product.description.toLowerCase().includes(keyword)) results.push(product);
+        }
+    }
+    return results;
+});
+
+function clearShopSearch() { state.shopKeyword = ''; }
+
+function selectShopTab(tab: string) {
+    if (state.shopTab == tab) return;
+    state.shopTab = tab;
+    closeCartPanel();
+    if (tab == 'reviews' && !state.shopReviewsLoaded) { loadShopReviews(true); loadShopRating(); }
+    if (tab == 'menu' && state.shopKeyword.trim().length == 0) nextTick(() => { resetCategoryNavigation(); });
+}
+
+async function loadShopReviews(reset: boolean): Promise<void> {
+    if (state.windowId <= 0 || state.shopReviewsLoading || (!reset && !state.shopReviewsHasMore)) return;
+    state.shopReviewsLoading = true; state.shopReviewsError = '';
+    try {
+        const result = await fetchWindowReviews(state.windowId, reset ? '' : state.shopReviewsCursor);
+        const raw = commentPayload(result);
+        const page = raw == null ? null : parseWindowReviewPage(raw);
+        if (page == null || (!reset && page.hasMore && page.nextCursor == state.shopReviewsCursor) || page.items.some((item: Review): boolean => item.windowId != state.windowId)) {
+            state.shopReviewsError = result.message.length > 0 ? result.message : '评价暂不可用，请下拉重试'; return;
+        }
+        if (reset) state.shopReviews = page.items;
+        else for (let i = 0; i < page.items.length; i++) {
+            const item = page.items[i];
+            if (!state.shopReviews.some((existing: Review): boolean => existing.commentId == item.commentId)) state.shopReviews.push(item);
+        }
+        state.shopReviewsCursor = page.nextCursor; state.shopReviewsHasMore = page.hasMore; state.shopReviewsLoaded = true;
+    } finally { state.shopReviewsLoading = false; }
+}
+async function loadShopRating(): Promise<void> {
+    if (state.windowId <= 0) return;
+    const result = await fetchWindowRating(state.windowId);
+    const raw = commentPayload(result);
+    const count = raw == null ? null : jsonNumber(raw, 'reviewCount');
+    const average = raw == null ? null : jsonNumber(raw, 'averageScore');
+    if (count == null || count < 0 || (count > 0 && (average == null || average < 1 || average > 5))) { state.shopRatingReady = false; return; }
+    state.shopReviewCount = count; state.shopAverageScore = count == 0 ? null : average; state.shopRatingReady = true;
+}
+function loadMoreShopReviews() { if (!state.shopReviewsRefreshing) loadShopReviews(false); }
+function refreshShopReviews() {
+    if (state.shopReviewsRefreshing || state.shopReviewsLoading) return;
+    state.shopReviewsRefreshing = true;
+    const start = Date.now(); state.shopReviewsRefreshTime = refreshTimeLabel(start);
+    Promise.all([loadShopReviews(true), loadShopRating()]).then(() => {
+        finishPullRefresh(start, state.shopReviewsError.length == 0, (_time: string) => { state.shopReviewsRefreshing = false; });
+    }).catch(() => { finishPullRefresh(start, false, (_time: string) => { state.shopReviewsRefreshing = false; }); });
+}
+function shopReviewImage(url: string): string { return imageSource(url, 'product'); }
+function previewShopReview(review: Review, index: number) {
+    const urls: Array<string> = [];
+    for (let i = 0; i < review.images.length; i++) urls.push(shopReviewImage(review.images[i]));
+    if (index >= 0 && index < urls.length) uni.previewImage({ current: urls[index], urls: urls });
+}
+
+function openShopResult(product: MenuProduct) {
+    state.shopKeyword = '';
+    state.pendingProductId = product.productId;
+    nextTick(() => {
+        if (menuDisposed) return;
+        scheduleCategoryMeasurement();
+        locateRequestedProduct();
+    });
+}
 
 function refreshPage() {
     if (state.refreshing || state.loading || state.stockLoading || state.cartLoading || state.mutating)
@@ -409,6 +536,16 @@ function loadMenu(): Promise<void> {
         }
         // 写回分组列表，驱动页面渲染。
         state.groups = converted;
+        const ratingVersion = ++productRatingVersion;
+        state.productRatings = [];
+        const productIds: Array<number> = [];
+        for (let i = 0; i < converted.length; i++) for (let j = 0; j < converted[i].products.length; j++) {
+            const id = converted[i].products[j].productId;
+            if (id > 0 && !productIds.includes(id)) productIds.push(id);
+        }
+        fetchCardRatings('products', productIds).then((ratings: Array<CardRating>) => {
+            if (!menuDisposed && ratingVersion == productRatingVersion) state.productRatings = ratings;
+        });
         // 重新建立完整菜单的分类导航，不做单组过滤。
         resetCategoryNavigation();
         locateRequestedProduct();
@@ -1057,6 +1194,50 @@ onReady(() => {
 		color: #FFD9C7;
 	}
 
+	.shop-search-bar { flex-direction: row; align-items: center; margin: 10px 16px; padding: 0 12px; min-height: 42px; border-radius: 13px; background-color: #FFFFFF; border-width: 1px; border-style: solid; border-color: #EFE1D6; }
+	.shop-tabs { flex-direction: row; background-color: #FFFFFF; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #F0E5DC; }
+	.shop-tab { flex: 1; height: 48px; align-items: center; justify-content: center; }
+	.shop-tab-text { font-size: 15px; color: #8C7C6F; }
+	.shop-tab-text-active { color: #E4572E; font-weight: bold; }
+	.shop-tab-underline { position: absolute; bottom: 0; width: 28px; height: 3px; border-radius: 2px; background-color: #E4572E; }
+	.shop-menu-content { flex: 1; min-height: 0; }
+	.shop-review-list { flex: 1; min-height: 0; background-color: #FDF6F0; }
+	.shop-review-content { padding: 16px; }
+	.shop-rating-card { flex-direction: row; align-items: center; padding: 20px; margin-bottom: 14px; border-radius: 16px; background-color: #FFFFFF; }
+	.shop-rating-value { font-size: 32px; font-weight: bold; color: #E4572E; }
+	.shop-rating-info { margin-left: 16px; }
+	.shop-rating-title { font-size: 15px; font-weight: bold; color: #211C18; }
+	.shop-rating-meta { margin-top: 4px; font-size: 12px; color: #8C7C6F; }
+	.shop-review-card { padding: 16px; margin-bottom: 10px; border-radius: 14px; background-color: #FFFFFF; }
+	.shop-review-head { flex-direction: row; justify-content: space-between; align-items: center; }
+	.shop-review-author { font-size: 14px; font-weight: bold; color: #211C18; }
+	.shop-review-score { font-size: 13px; font-weight: bold; color: #E4572E; }
+	.shop-review-date { margin-top: 4px; font-size: 11px; color: #A2968B; }
+	.shop-review-body { margin-top: 10px; font-size: 14px; line-height: 21px; color: #40352D; }
+	.shop-review-tags { flex-direction: row; flex-wrap: wrap; margin-top: 10px; }
+	.shop-review-tag { margin-right: 6px; margin-bottom: 4px; padding: 3px 8px; border-radius: 9px; font-size: 12px; color: #C2410C; background-color: #FFF1E8; }
+	.shop-review-images { flex-direction: row; flex-wrap: wrap; margin-top: 8px; }
+	.shop-review-image { width: 72px; height: 72px; margin-right: 6px; margin-bottom: 6px; border-radius: 8px; }
+	.shop-review-status { padding: 20px 4px; font-size: 13px; color: #8C7C6F; text-align: center; }
+	.shop-search-icon { width: 13px; height: 13px; border-width: 2px; border-style: solid; border-color: #A2968B; border-radius: 7px; margin-right: 10px; }
+	.shop-search-input { flex: 1; min-width: 0; height: 40px; font-size: 14px; color: #211C18; }
+	.shop-search-clear { padding: 8px; }
+	.shop-search-clear-text { font-size: 12px; color: #C2410C; }
+	.shop-search-results { flex: 1; min-height: 0; background-color: #FDF6F0; padding: 0 16px; }
+	.shop-results-head { flex-direction: row; align-items: center; justify-content: space-between; padding: 10px 2px 12px; }
+	.shop-results-title { font-size: 15px; font-weight: bold; color: #211C18; }
+	.shop-results-count { font-size: 12px; color: #A2968B; }
+	.shop-search-empty { padding: 36px 12px; align-items: center; }
+	.shop-search-empty-text { font-size: 13px; color: #7A6C60; }
+	.shop-result { flex-direction: row; align-items: center; padding: 12px; margin-bottom: 10px; border-radius: 14px; background-color: #FFFFFF; }
+	.shop-result-hover { background-color: #FFF1E8; }
+	.shop-result-image { width: 62px; height: 62px; border-radius: 12px; overflow: hidden; flex-shrink: 0; }
+	.shop-result-body { flex: 1; min-width: 0; margin-left: 12px; }
+	.shop-result-name { font-size: 15px; font-weight: bold; color: #211C18; }
+	.shop-result-description { margin-top: 3px; font-size: 12px; color: #7A6C60; lines: 1; text-overflow: ellipsis; }
+	.shop-result-price { margin-top: 4px; font-size: 14px; font-weight: bold; color: #E4572E; }
+	.shop-result-arrow { margin-left: 8px; font-size: 22px; color: #B7A79B; }
+
 	.stock-status {
 		margin: 0;
 		padding: 12px;
@@ -1083,6 +1264,7 @@ onReady(() => {
 		line-height: 16px;
 		color: #7A6C60;
 	}
+	.dish-rating { margin-top: 4px; font-size: 11px; line-height: 16px; color: #C2410C; }
 
 	.step-disabled {
 		opacity: 0.4;

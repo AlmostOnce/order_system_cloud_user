@@ -86,6 +86,7 @@
 					<view class="stall-body">
 						<text class="stall-name">{{ item.windowName }}</text>
 						<text class="stall-meta">{{ stallMeta(item) }}</text>
+						<text class="stall-rating">{{ cardRatingText(windowRatings, item.windowId) }}</text>
 					</view>
 					<text class="stall-arrow">›</text>
 				</view>
@@ -148,6 +149,7 @@ import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { isLoggedIn, currentUser } from '../../store/auth.uts';
 // 导入商品查询与结果类型：档口列表、餐厅列表及其返回结构。
 import { listActiveWindows, listActiveRestaurants, WindowItem, WindowListResult, RestaurantItem, RestaurantListResult } from '../../api/product.uts';
+import { CardRating, fetchCardRatings, cardRatingText } from '../../api/comments.uts';
 /** 表示「全部餐厅」的哨兵值，与任何真实餐厅 ID 都不会冲突。 */
 const ALL_RESTAURANTS: number = 0;
 /** 「全部餐厅」的展示名称。 */
@@ -200,6 +202,8 @@ function shortenName(name: string): string {
 
 // 档口列表与可见档口共用同一份空数组，避免先渲染时出现 undefined。
 const initialEmptyWindows: Array<WindowItem> = [];
+const initialWindowRatings: Array<CardRating> = [];
+let windowRatingVersion = 0;
 // 餐厅列表的初始空数组。
 const initialEmptyRestaurants: Array<RestaurantItem> = [];
 const state = reactive({ refreshing: false, currentRefreshTime: '',
@@ -213,6 +217,7 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     roleCode: '',
     // 后端返回的档口全量列表。
     windows: initialEmptyWindows,
+    windowRatings: initialWindowRatings,
     // 按当前选中餐厅筛选后、供页面渲染的档口列表。
     visibleWindows: initialEmptyWindows,
     // 后端返回的餐厅列表，供选择面板渲染。
@@ -234,7 +239,7 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     // 餐厅选择面板是否已进入终态，控制其滑入滑出过渡。
     pickerReady: false })
 
-const { refreshing, currentRefreshTime, statusBarHeight, greeting, roleCode, windows, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, listReady, pickerVisible, pickerReady } = toRefs(state)
+const { refreshing, currentRefreshTime, statusBarHeight, greeting, roleCode, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, listReady, pickerVisible, pickerReady } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.loading || state.pickerVisible || state.roleCode != 'CUSTOMER')
@@ -376,6 +381,11 @@ function loadCatalog(): Promise<void> {
             }
             // 写入档口全量数据。
             state.windows = windowResult.items;
+            const version = ++windowRatingVersion;
+            state.windowRatings = [];
+            const ids: Array<number> = [];
+            for (let i = 0; i < state.windows.length; i++) if (state.windows[i].windowId > 0) ids.push(state.windows[i].windowId);
+            fetchCardRatings('windows', ids).then((ratings: Array<CardRating>) => { if (version == windowRatingVersion) state.windowRatings = ratings; });
             // 按当前选中餐厅算出可见档口。
             buildVisibleWindows();
             // 列表渲染完成后再切到「已入场」，卡片才会依次浮入。
@@ -870,6 +880,7 @@ onReady(() => {
 		color: #211C18;
 	}
 
+	.stall-rating { margin-top: 4px; font-size: 12px; color: #C2410C; }
 	.stall-meta {
 		margin-top: 5px;
 		font-size: 11px;
