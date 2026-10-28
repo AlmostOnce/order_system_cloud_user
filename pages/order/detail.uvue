@@ -12,7 +12,7 @@
             </view>
             <view v-if="order != null" class="account-card vapor-account-secondary--account-card">
                 <text class="account-heading">本次用餐</text>
-                <view v-for="item in order!.items" :key="item.productId" class="order-line"><view class="order-line-copy"><text class="order-line-name">{{ item.productName }}</text><text class="account-muted">¥{{ item.unitPrice.toFixed(2) }} × {{ item.quantity }}</text></view><text class="order-line-price">¥{{ item.lineAmount.toFixed(2) }}</text></view>
+                <view v-for="item in order!.items" :key="item.productId" class="order-line"><view class="order-line-copy"><text class="order-line-name">{{ item.productName }}</text><text class="account-muted">¥{{ item.unitPrice.toFixed(2) }} × {{ item.quantity }}</text></view><view class="review-order-tools"><text class="order-line-price">¥{{ item.lineAmount.toFixed(2) }}</text><button v-if="order!.status == '已完成'" class="review-order-action" :disabled="loading" @click="reviewProduct(item.productId)"><text class="review-menu-label">评价菜品</text></button></view></view>
                 <view class="order-total"><text class="account-muted">订单金额</text><text class="order-total-price">¥{{ order!.totalAmount.toFixed(2) }}</text></view>
                 <text class="account-note">订单号 {{ order!.orderNo }}</text><text class="account-note">下单时间 {{ formatDate(order!.createdAt) }}</text>
                 <text v-if="order!.remark.length > 0" class="account-note">备注：{{ order!.remark }}</text>
@@ -82,6 +82,11 @@ function goBack() {
 
 function formatDate(value: string): string {
     return accountDate(value);
+}
+
+function reviewProduct(productId: number) {
+    if (state.loading || state.order == null || state.order!.status != '已完成') return;
+    uni.navigateTo({ url: '/pages/review/create?orderId=' + state.orderId + '&productId=' + productId });
 }
 
 function openOrders() {
@@ -290,4 +295,5 @@ onUnload(() => {
 <style>
     @import '../../styles/account.css';
     @import '../../styles/order.css';
+    @import '../../styles/review.css';
 </style>

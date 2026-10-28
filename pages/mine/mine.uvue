@@ -32,6 +32,7 @@
                         <button class="order-center-shortcut" @click="openCancelledOrders"><view class="order-center-symbol"><view class="center-clock"></view><view class="center-cross"></view><view class="center-cross center-cross-other"></view></view><text class="order-center-label">已取消</text></button>
                     </view>
                 </view>
+                <view v-if="roleCode == 'CUSTOMER'" class="entry-group"><button class="account-entry" @click="openReviews"><view class="account-entry-icon"><image class="review-entry-icon" src="/static/review/star-outline.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的评价</text><text class="account-entry-note">回顾用餐感受，查看已发布评价</text></view><view class="account-arrow"></view></button></view>
                 <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">我的钱包</text>
 				<view v-if="roleCode == 'CUSTOMER'" class="entry-group">
                     <button class="account-entry" @click="openWallet">
@@ -53,11 +54,21 @@
 					<view v-if="roleCode == 'CUSTOMER'" class="entry-divider"></view>
 					<button v-if="roleCode == 'CUSTOMER'" class="account-entry" @click="openPayPassword"><view class="account-entry-icon"><view class="lock-hoop"></view><view class="lock-body"></view></view><view class="account-entry-body"><text class="account-entry-title">支付密码</text><text class="account-entry-note">{{ payPasswordSet ? '修改独立支付密码' : '设置后可充值和使用余额' }}</text></view><view class="account-arrow"></view></button>
 				</view>
-				<view v-if="signOutConfirm" class="account-card"><text class="account-heading">确认退出登录？</text><text class="account-note">退出后需要重新登录才能查看账户。</text><button class="account-primary" :disabled="signingOut" @click="signOut"><text class="account-primary-text">{{ signingOut ? '退出中…' : '确认退出' }}</text></button><button class="account-link" :disabled="signingOut" @click="cancelSignOut"><text class="account-link-text">继续使用</text></button></view>
-				<button v-else class="signout-button" hover-class="signout-button-pressed" @click="confirmSignOut"><view class="signout-icon"><view class="signout-door"></view><view class="signout-shaft"></view><view class="signout-tip"></view></view><text class="signout-label">退出登录</text></button>
+				<button class="signout-button" hover-class="signout-button-pressed" @click="confirmSignOut"><view class="signout-icon"><view class="signout-door"></view><view class="signout-shaft"></view><view class="signout-tip"></view></view><text class="signout-label">退出登录</text></button>
 				<text class="mine-footer">湖北经济学院 · 食堂管理中心</text>
 			</view>
 		</scroll-view>
+        <view v-if="signOutConfirm" class="signout-modal-mask" @click="cancelSignOut">
+            <view class="signout-modal" role="dialog" aria-label="确认退出登录" aria-modal="true" @click.stop>
+                <view class="signout-modal-symbol"><view class="signout-icon"><view class="signout-door"></view><view class="signout-shaft"></view><view class="signout-tip"></view></view></view>
+                <text class="signout-modal-title">确认退出登录？</text>
+                <text class="signout-modal-note">退出后需要重新登录才能查看账户。</text>
+                <view class="signout-modal-actions">
+                    <button class="signout-modal-cancel" :disabled="signingOut" @click="cancelSignOut"><text class="signout-modal-cancel-text">继续使用</text></button>
+                    <button class="signout-modal-confirm" :disabled="signingOut" @click="signOut"><text class="signout-modal-confirm-text">{{ signingOut ? '退出中…' : '确认退出' }}</text></button>
+                </view>
+            </view>
+        </view>
 	</view>
 </template>
 
@@ -134,6 +145,8 @@ function loadBalance(): Promise<void> {
     });
 }
 
+function openReviews() { uni.navigateTo({ url: '/pages/review/list' }); }
+
 function openOrders() {
     openOrderList('all');
 }
@@ -191,6 +204,7 @@ function confirmSignOut() {
 }
 
 function cancelSignOut() {
+    if (state.signingOut) return;
     state.signOutConfirm = false;
 }
 
@@ -223,6 +237,7 @@ onPageShow(() => {
 </script>
 
 <style>
+@import '../../styles/review.css';
 	@import '../../styles/account.css';
 	.mine-status { background-color: #E4572E; }
 	.mine-hero { background-color: #E4572E; padding: 20px 24px 24px 24px; }
@@ -246,6 +261,16 @@ onPageShow(() => {
 	.person-body { position: absolute; top: 17px; left: 8px; width: 16px; height: 9px; border-radius: 6px; border-width: 2px; border-style: solid; border-color: #C2410C; }
 	.lock-hoop { position: absolute; top: 6px; left: 11px; width: 10px; height: 10px; border-radius: 5px; border-width: 2px; border-style: solid; border-color: #C2410C; }
 	.lock-body { position: absolute; top: 14px; left: 8px; width: 16px; height: 12px; border-radius: 3px; background-color: #C2410C; }
+    .signout-modal-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; background-color: rgba(33, 28, 24, 0.58); }
+    .signout-modal { width: 100%; max-width: 340px; padding: 28px 24px 24px; border-radius: 20px; background-color: #FFFFFF; align-items: center; }
+    .signout-modal-symbol { display: flex; width: 52px; height: 52px; border-radius: 26px; background-color: #FDF0E8; align-items: center; justify-content: center; }
+    .signout-modal-title { margin-top: 18px; font-size: 19px; line-height: 28px; font-weight: bold; color: #211C18; text-align: center; }
+    .signout-modal-note { margin-top: 8px; font-size: 13px; line-height: 21px; color: #7A6C60; text-align: center; }
+    .signout-modal-actions { display: flex; flex-direction: row; width: 100%; margin-top: 24px; }
+    .signout-modal-cancel { display: flex; flex: 1; height: 46px; margin: 0 8px 0 0; padding: 0; border-width: 1px; border-style: solid; border-color: #E8DCD2; border-radius: 12px; background-color: #FFFFFF; align-items: center; justify-content: center; }
+    .signout-modal-confirm { display: flex; flex: 1; height: 46px; margin: 0; padding: 0; border-width: 0; border-radius: 12px; background-color: #E4572E; align-items: center; justify-content: center; }
+    .signout-modal-cancel-text { font-size: 14px; color: #7A6C60; }
+    .signout-modal-confirm-text { font-size: 14px; font-weight: bold; color: #FFFFFF; }
 	.signout-button { display: flex; flex-direction: row; width: 100%; min-height: 52px; margin: 4px 0 0 0; padding: 14px 20px; border-width: 1px; border-style: solid; border-color: #E8DCD2; border-radius: 16px; background-color: #FFFFFF; align-items: center; justify-content: center; }
 	.signout-button-pressed { background-color: #FDF0E8; border-color: #C2410C; }
 	.signout-label { margin-left: 10px; font-size: 15px; line-height: 22px; font-weight: 500; color: #7A6C60; }
@@ -256,6 +281,9 @@ onPageShow(() => {
 	.mine-footer { margin-top: 22px; font-size: 11px; line-height: 18px; text-align: center; color: #A2968B; }
 
 	/* #ifdef WEB */
+	.account-page .signout-modal-mask { flex-direction: row; align-items: center; justify-content: center; }
+    .account-page .signout-modal { align-items: center; }
+    .account-page .signout-modal-symbol, .account-page .signout-modal-actions { flex-direction: row; }
 	.account-page .signout-button { flex-direction: row; cursor: pointer; }
 	.signout-button:focus-visible { outline: 2px solid #C2410C; outline-offset: 3px; }
 	.account-page .profile-card { flex-direction: row; }

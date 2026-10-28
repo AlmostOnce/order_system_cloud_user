@@ -84,6 +84,7 @@
 								<text class="dish-name">{{ product.productName }}</text>
 								<text v-if="product.description.length > 0" class="dish-desc">{{ product.description }}</text>
 								<text class="dish-stock">{{ stockHint(product.productId) }}</text>
+                                <button class="review-menu-action" @click="openProductReviews(product)"><text class="review-menu-label">查看评价</text></button>
 
 							</view>
 								<view class="dish-foot">
@@ -652,6 +653,10 @@ function quantityOf(productId: number): number {
     return 0;
 }
 
+function openProductReviews(product: MenuProduct) {
+    uni.navigateTo({ url: '/pages/review/list?productId=' + product.productId + '&name=' + encodeURIComponent(product.productName) });
+}
+
 function productGlyph(product: MenuProduct): string {
     // 有名称时取首字。
     if (product.productName.length > 0) {
@@ -872,6 +877,7 @@ onReady(() => {
 </script>
 
 <style>
+@import '../../styles/review.css';
 	.page {
 		flex: 1;
 		background-color: #FDF6F0;

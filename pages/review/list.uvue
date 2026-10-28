@@ -1,0 +1,117 @@
+<template>
+    <view class="account-page account-secondary">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">{{ productId > 0 ? '菜品评价' : '我的评价' }}</text></view>
+        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="refreshing || (!loading && !ratingLoading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMore">
+            <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            <view class="account-content vapor-account-secondary--account-content">
+                <view class="review-intro"><text class="review-eyebrow">{{ productId > 0 ? '来自同学的用餐感受' : '我的用餐足迹' }}</text><text class="review-title">{{ productName.length > 0 ? productName : (productId > 0 ? '看看大家怎么说' : '每一餐，都有回味') }}</text><text class="review-subtitle">{{ productId > 0 ? '仅完成订单的顾客可发布评价' : '在已完成订单中，分享你的真实体验' }}</text></view>
+                <view v-if="productId > 0" class="review-summary"><view class="review-summary-number"><text class="review-average">{{ ratingReady && averageScore != null ? averageScore!.toFixed(1) : '--' }}</text><text class="review-summary-unit">/ 5</text></view><view class="review-summary-copy"><text class="account-heading">{{ ratingReady && reviewCount == 0 ? '还没有评分' : '用餐评分' }}</text><text class="account-muted">{{ ratingReady ? reviewCount + ' 条评价' : '评分暂不可用' }}</text></view></view>
+                <text v-if="ratingError.length > 0" class="account-error">{{ ratingError }}</text>
+                <view v-for="review in reviews" :key="review.commentId" class="account-card vapor-account-secondary--account-card">
+                    <view class="review-section-row"><view class="review-author"><text class="review-author-name">{{ review.authorName }}</text><text class="account-muted">{{ formatDate(review.createdAt) }}</text></view><view class="review-rating-pill"><image class="review-small-star" src="/static/review/star-filled.svg"></image><text class="review-rating-text">{{ review.score }} 分</text></view></view>
+                    <text class="review-body">{{ review.content }}</text>
+                    <view v-if="review.tags.length > 0" class="review-tags"><view v-for="tag in review.tags" :key="tag" class="review-tag"><text class="review-tag-label">{{ tag }}</text></view></view>
+                    <view v-if="review.images.length > 0" class="review-photos"><image v-for="(url, index) in review.images" :key="url" class="review-photo review-list-photo" :src="photoSource(url)" mode="aspectFill" @click="previewPhotos(review, index)"></image></view>
+                    <button v-if="productId == 0" class="review-product-link" @click="openProduct(review)"><text class="account-link-text">查看这道菜的评价</text><view class="account-arrow"></view></button>
+                </view>
+                <text v-if="loading" class="account-note">正在获取评价…</text>
+                <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
+                <view v-if="loaded && !loading && errorText.length == 0 && reviews.length == 0" class="review-empty"><image class="review-empty-star" src="/static/review/star-outline.svg"></image><text class="account-heading">{{ productId > 0 ? '这道菜还没有评价' : '还没有发布评价' }}</text><text class="review-subtitle">{{ productId > 0 ? '完成用餐后，来分享第一条感受吧' : '到已完成订单中，为吃过的菜品写评价' }}</text><button v-if="productId == 0" class="account-primary vapor-account-secondary--account-primary" @click="openCompleted"><text class="account-primary-text">查看已完成订单</text></button></view>
+                <button v-if="hasMore && !loading" class="account-link" @click="loadMore"><text class="account-link-text">加载更多评价</text></button>
+                <text v-if="loaded && !hasMore && reviews.length > 0 && errorText.length == 0" class="review-end">已经看到全部评价</text>
+            </view>
+        </scroll-view>
+    </view>
+</template>
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+import { Review, fetchComments, fetchProductRating, commentPayload, parseCommentPage, parseRating } from '../../api/comments.uts'
+import { currentUser } from '../../store/auth.uts'
+import { backToAccount, accountDate } from '../../common/account.uts'
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
+import { imageSource } from '../../common/images.uts'
+import { openOrderList } from '../../common/order-navigation.uts'
+
+const initialReviews: Array<Review> = []
+const state = reactive({ statusBarHeight: 0, productId: 0, productName: '', reviews: initialReviews, loading: false, loaded: false, errorText: '', nextCursor: '', hasMore: false,
+    refreshing: false, currentRefreshTime: '', ratingLoading: false, ratingReady: false, averageScore: null as number | null, reviewCount: 0, ratingError: '' })
+const { statusBarHeight, productId, productName, reviews, loading, loaded, errorText, hasMore, refreshing, currentRefreshTime, ratingLoading, ratingReady, averageScore, reviewCount, ratingError } = toRefs(state)
+async function loadReviews(reset: boolean): Promise<void> {
+    if (state.productId < 0 || state.loading || (!reset && !state.hasMore)) return
+    state.loading = true
+    state.errorText = ''
+    try {
+        const result = await fetchComments(state.productId, reset ? '' : state.nextCursor)
+        const raw = commentPayload(result)
+        const page = raw == null ? null : parseCommentPage(raw)
+        if (page == null || (page.hasMore && page.nextCursor == state.nextCursor && !reset)) { state.errorText = result.message.length > 0 ? result.message : '评价数据异常，请稍后查看'; return }
+        if (state.productId > 0 && page.items.some((item: Review): boolean => item.productId != state.productId)) { state.errorText = '菜品评价数据不匹配'; return }
+        if (reset) state.reviews = page.items
+        else {
+            for (let i = 0; i < page.items.length; i++) {
+                const item = page.items[i]
+                if (!state.reviews.some((existing: Review): boolean => existing.commentId == item.commentId)) state.reviews.push(item)
+            }
+        }
+        state.nextCursor = page.nextCursor
+        state.hasMore = page.hasMore
+        state.loaded = true
+    } finally { state.loading = false }
+}
+async function loadRating(): Promise<void> {
+    if (state.productId <= 0 || state.ratingLoading) return
+    state.ratingLoading = true
+    state.ratingError = ''
+    try {
+        const result = await fetchProductRating(state.productId)
+        const raw = commentPayload(result)
+        const rating = raw == null ? null : parseRating(raw)
+        if (rating == null || rating.productId != state.productId) { state.ratingError = result.message.length > 0 ? result.message : '评分暂不可用'; return }
+        state.averageScore = rating.averageScore
+        state.reviewCount = rating.reviewCount
+        state.ratingReady = true
+    } finally { state.ratingLoading = false }
+}
+function refreshPage() {
+    if (state.productId < 0 || state.refreshing || state.loading || state.ratingLoading) return
+    state.refreshing = true
+    const start = Date.now()
+    state.currentRefreshTime = refreshTimeLabel(start)
+    Promise.all([loadReviews(true), loadRating()]).then(() => { finishPullRefresh(start, state.errorText.length == 0 && state.ratingError.length == 0, (_time: string) => { state.refreshing = false }) })
+}
+function loadMore() { if (!state.refreshing) loadReviews(false) }
+function photoSource(url: string): string { return imageSource(url, 'product') }
+function previewPhotos(review: Review, index: number) {
+    const urls: Array<string> = []
+    for (let i = 0; i < review.images.length; i++) urls.push(photoSource(review.images[i]))
+    if (index >= 0 && index < urls.length) uni.previewImage({ current: urls[index], urls: urls })
+}
+function formatDate(value: string): string { return accountDate(value) }
+function goBack() { backToAccount() }
+function openCompleted() { openOrderList('completed') }
+function openProduct(review: Review) { uni.navigateTo({ url: '/pages/review/list?productId=' + review.productId }) }
+onLoad((options: OnLoadOptions) => {
+    if (options['productId'] != null) {
+        state.productId = Number(options['productId'])
+        if (!Number.isInteger(state.productId) || state.productId <= 0) { state.productId = -1; state.errorText = '菜品编号无效' }
+    }
+    const name = options['name'] ?? ''
+    try { state.productName = decodeURIComponent(name) ?? '' }
+    catch (error) { state.productName = '' }
+})
+onPageShow(() => {
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+    const user = currentUser()
+    if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
+    if (state.productId == 0 && user.roleCode != 'CUSTOMER') { uni.switchTab({ url: '/pages/home/home' }); return }
+    if (state.productId < 0) return
+    loadReviews(true)
+    loadRating()
+})
+</script>
+<style>
+@import '../../styles/account.css';
+@import '../../styles/review.css';
+</style>

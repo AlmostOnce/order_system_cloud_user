@@ -14,7 +14,8 @@ exports.loadSetup=function(source,resolve){
   if(ts.isImportDeclaration(s))continue;
   if(ts.isFunctionDeclaration(s)){
    const name=s.name.text;methods.push(name);
-   body+='let '+name+' = function '+name+'Impl('+s.parameters.map(p=>p.getText(sf)).join(',')+')'+(s.type?': '+s.type.getText(sf):'')+' '+s.body.getText(sf)+'\n';
+   const asyncPrefix=(s.modifiers??[]).some(m=>m.kind===ts.SyntaxKind.AsyncKeyword)?'async ':'';
+   body+='let '+name+' = '+asyncPrefix+'function '+name+'Impl('+s.parameters.map(p=>p.getText(sf)).join(',')+')'+(s.type?': '+s.type.getText(sf):'')+' '+s.body.getText(sf)+'\n';
   }else{
    body+=s.getText(sf)+'\n';
    if(ts.isVariableStatement(s))for(const d of s.declarationList.declarations){

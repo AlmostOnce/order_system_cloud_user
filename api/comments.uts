@@ -1,0 +1,58 @@
+import { httpGet, httpPost, HttpResult } from '../common/http.uts'
+import { jsonObject, jsonArray, jsonString, jsonNumber, jsonBoolean } from '../common/json.uts'
+
+export type Review = { commentId: string, productId: number, windowId: number, authorName: string, score: number, content: string, images: Array<string>, tags: Array<string>, createdAt: string }
+export type ReviewPage = { items: Array<Review>, nextCursor: string, hasMore: boolean }
+export type ProductRating = { productId: number, reviewCount: number, averageScore: number | null }
+
+export function commentPayload(result: HttpResult): UTSJSONObject | null {
+    return result.ok && result.data != null ? jsonObject(result.data, 'data') : null
+}
+export function strings(raw: UTSJSONObject, name: string): Array<string> | null {
+    const values = jsonArray(raw, name)
+    if (values == null) return null
+    const output: Array<string> = []
+    for (let i = 0; i < values.length; i++) {
+        if (typeof values[i] != 'string') return null
+        output.push(values[i] as string)
+    }
+    return output
+}
+export function parseComment(raw: UTSJSONObject): Review | null {
+    const id = jsonString(raw, 'commentId') ?? ''
+    const product = jsonNumber(raw, 'productId') ?? 0
+    const window = jsonNumber(raw, 'windowId') ?? 0
+    const score = jsonNumber(raw, 'score') ?? 0
+    const images = strings(raw, 'images')
+    const tags = strings(raw, 'tags')
+    if (id.length == 0 || product <= 0 || window <= 0 || !Number.isInteger(score) || score < 1 || score > 5 || images == null || tags == null) return null
+    return { commentId: id, productId: product, windowId: window, authorName: jsonString(raw, 'authorName') ?? '校园用户', score: score,
+        content: jsonString(raw, 'content') ?? '', images: images, tags: tags, createdAt: jsonString(raw, 'createdAt') ?? '' }
+}
+export function parseCommentPage(raw: UTSJSONObject): ReviewPage | null {
+    const rows = jsonArray(raw, 'items')
+    const more = jsonBoolean(raw, 'hasMore')
+    const cursor = jsonString(raw, 'nextCursor') ?? ''
+    if (rows == null || more == null || (more && (cursor.length == 0 || rows.length == 0))) return null
+    const items: Array<Review> = []
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) return null
+        const item = parseComment(rows[i] as UTSJSONObject)
+        if (item == null) return null
+        items.push(item)
+    }
+    return { items: items, nextCursor: cursor, hasMore: more }
+}
+export function parseRating(raw: UTSJSONObject): ProductRating | null {
+    const id = jsonNumber(raw, 'productId') ?? 0
+    const count = jsonNumber(raw, 'reviewCount')
+    const average = jsonNumber(raw, 'averageScore')
+    if (id <= 0 || count == null || !Number.isInteger(count) || count < 0 || (count > 0 && (average == null || average < 1 || average > 5))) return null
+    return { productId: id, reviewCount: count, averageScore: count == 0 ? null : average }
+}
+export function fetchComments(productId: number, cursor: string): Promise<HttpResult> {
+    const base = productId > 0 ? '/comments/products/' + productId : '/comments/me'
+    return httpGet(base + '?limit=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : ''), true)
+}
+export function fetchProductRating(productId: number): Promise<HttpResult> { return httpGet('/comments/products/' + productId + '/rating', true) }
+export function createComment(body: UTSJSONObject, key: string): Promise<HttpResult> { return httpPost('/comments', body, true, key) }

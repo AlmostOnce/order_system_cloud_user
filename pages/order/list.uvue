@@ -12,7 +12,7 @@
                 <view class="order-list-top"><text class="order-line-name">窗口 {{ item.windowId }}</text><text class="order-list-status">{{ item.status }}</text></view>
                 <text class="account-muted order-list-date">{{ formatDate(item.createdAt) }}</text>
                 <text class="account-muted">订单号 {{ item.orderNo }}</text>
-                <view class="order-list-top order-list-bottom"><text class="account-muted">查看订单详情</text><text class="order-total-price">¥{{ item.totalAmount.toFixed(2) }}</text></view>
+                <view class="order-list-top order-list-bottom"><text class="account-muted">{{ item.status == '已完成' ? '查看详情并评价' : '查看订单详情' }}</text><text class="order-total-price">¥{{ item.totalAmount.toFixed(2) }}</text></view>
             </button>
             <view v-if="!loading && visibleOrders.length == 0 && errorText.length == 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">{{ selectedStatus == 'all' ? '还没有订单' : '暂无该状态的订单' }}</text><text class="account-note">去食堂挑选喜欢的菜品，开启下一餐。</text><button class="account-primary vapor-account-secondary--account-primary" @click="goHome"><text class="account-primary-text">去点餐</text></button></view>
             <text v-if="loading" class="account-note">正在获取订单…</text><text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
