@@ -37,8 +37,29 @@ export function walletPayload(result: HttpResult): UTSJSONObject | null {
 	return result.ok && result.data != null ? jsonObject(result.data, 'data') : null
 }
 
-/** 更新本人资料；只传递允许编辑的字段，换绑邮箱时附登录密码。 */
-export function updateMyProfile(username: string, email: string, loginPassword: string): Promise<HttpResult> {
-    const body: UTSJSONObject = { username: username, email: email, loginPassword: loginPassword }
+/** 仅更新本人昵称，不接受邮箱或安全凭据。 */
+export function updateMyProfile(username: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { username: username }
     return httpPut('/users/me/profile', body, true)
+}
+
+export function authorizeEmailChange(loginPassword: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { loginPassword: loginPassword }
+    return httpPost('/users/me/email/authorization', body, true)
+}
+
+export function verifyEmailCaptcha(email: string, authorizationToken: string, captchaId: string, captchaCode: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { email: email, authorizationToken: authorizationToken, captchaId: captchaId, captchaCode: captchaCode }
+    return httpPost('/users/me/email/captcha', body, true)
+}
+
+export function sendEmailCode(email: string, authorizationToken: string, captchaVerificationToken: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { email: email, authorizationToken: authorizationToken, captchaVerificationToken: captchaVerificationToken }
+    return httpPost('/users/me/email/verification-code', body, true)
+}
+
+/** 仅执行本人邮箱换绑，密码已经在前置步骤校验，不重复传递。 */
+export function changeMyEmail(email: string, authorizationToken: string, emailCode: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { email: email, authorizationToken: authorizationToken, emailCode: emailCode }
+    return httpPut('/users/me/email', body, true)
 }

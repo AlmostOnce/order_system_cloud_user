@@ -56,6 +56,10 @@
 			"path": "pages/account/profile",
 			"style": { "navigationStyle": "custom" }
 		},
+		{
+			"path": "pages/account/email-change",
+			"style": { "navigationStyle": "custom" }
+		},
 		{ "path": "pages/order/confirm", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/notifications/list", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/order/detail", "style": { "navigationStyle": "custom" } },

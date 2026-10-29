@@ -1,0 +1,14 @@
+/** Keep the short-lived email-change authorization in memory only. */
+let authorizationToken = ''
+
+export function setEmailChangeAuthorization(token: string): void {
+	authorizationToken = token
+}
+
+export function getEmailChangeAuthorization(): string {
+	return authorizationToken
+}
+
+export function clearEmailChangeAuthorization(): void {
+	authorizationToken = ''
+}
