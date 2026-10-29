@@ -156,7 +156,7 @@ function loadUnreadCount(): Promise<void> {
         state.unreadCount = count != null && count > 0 ? count : 0;
     });
 }
-function openNotifications() { uni.navigateTo({ url: '/pages/notifications/list' }); }
+function openNotifications() { uni.switchTab({ url: '/pages/notifications/list' }); }
 
 function openOrders() {
     openOrderList('all');

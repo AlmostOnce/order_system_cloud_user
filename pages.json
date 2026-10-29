@@ -89,6 +89,12 @@
 				"selectedIconPath": "static/tabbar/ranking-active.png"
 			},
 			{
+				"pagePath": "pages/notifications/list",
+				"text": "消息",
+				"iconPath": "static/tabbar/messages.png",
+				"selectedIconPath": "static/tabbar/messages-active.png"
+			},
+			{
 				"pagePath": "pages/mine/mine",
 				"text": "我的",
 				"iconPath": "static/tabbar/mine.png",

@@ -1,7 +1,7 @@
 <template>
     <view class="account-page account-secondary">
         <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">消息通知</text></view>
+        <view class="account-nav vapor-account-secondary--account-nav notification-nav"><text class="account-title notification-page-title">消息</text></view>
         <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMore">
             <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
             <view class="account-content vapor-account-secondary--account-content">
@@ -23,7 +23,7 @@ import { reactive, toRefs } from 'vue'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
 import { NotificationItem, fetchNotifications, markNotificationRead, parseNotificationPage, requestNotificationSocketTicket, parseNotificationSocketTicket } from '../../api/notifications.uts'
 import { API_BASE_URL } from '../../common/config.uts'
-import { backToAccount, accountDate } from '../../common/account.uts'
+import { accountDate } from '../../common/account.uts'
 import { currentUser } from '../../store/auth.uts'
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 import { toast } from '../../common/feedback.uts'
@@ -71,7 +71,6 @@ async function openNotification(item: NotificationItem): Promise<void> {
     } finally { state.opening = false }
 }
 function formatDate(value: string): string { return accountDate(value) }
-function goBack() { backToAccount() }
 function stopSocket() {
     socketVisible = false; socketVersion++; socketRetry = 0; socketRefreshPending = false
     const current = socket; socket = null
@@ -114,6 +113,8 @@ onUnload(() => { stopSocket() })
 </script>
 <style>
 @import '../../styles/account.css';
+.notification-nav { padding-left: 20px; min-height: 56px; }
+.notification-page-title { margin-left: 0; font-size: 23px; line-height: 32px; }
 .notification-intro { padding: 6px 2px 20px; }
 .notification-heading { color: #211C18; font-size: 20px; font-weight: bold; }
 .notification-subtitle { color: #8C7C6F; font-size: 13px; margin-top: 6px; }
@@ -127,4 +128,7 @@ onUnload(() => { stopSocket() })
 .notification-link { margin-top: 12px; font-size: 12px; color: #C2410C; }
 .notification-empty { padding: 45px 18px; align-items: center; }
 .notification-end { padding: 12px; text-align: center; font-size: 12px; color: #A2968B; }
+/* #ifdef WEB */
+.account-page .notification-head, .account-page .notification-title-row { flex-direction: row; }
+/* #endif */
 </style>
