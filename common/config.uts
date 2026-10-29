@@ -6,21 +6,21 @@
  */
 
 /**
- * 后端网关地址（可变量，便于按平台改写）。
+ * 后端 Nginx 入口地址（可变量，便于按平台改写）。
  *
  * 对外地址 = 网关地址 + /api + 服务自身路径，
  * 例如认证服务的 /auth/login 对外即 {API_BASE_URL}/auth/login。
  */
-let apiBaseUrl = 'http://localhost:9090/api'
+let apiBaseUrl = 'http://localhost:8088/api'
 
 // #ifdef APP-ANDROID
 // Android 模拟器（AVD）通过 10.0.2.2 回环访问开发机；如用真机调试，请改成开发机局域网 IP，
-// 例如 'http://192.168.1.10:9090/api'，并确保手机与开发机在同一网段。
-apiBaseUrl = 'http://10.0.2.2:9090/api'
+// 例如 'http://192.168.1.10:8088/api'，并确保手机与开发机在同一网段。
+apiBaseUrl = 'http://10.0.2.2:8088/api'
 // #endif
 
 /**
- * 网关统一入口地址。
+ * Nginx 统一入口地址，Nginx 将 /api 转发给网关。
  *
  * - 微信小程序：开发者工具运行在开发机上，保持 localhost 即可，
  *   但需在开发者工具中勾选「不校验合法域名」。
