@@ -73,7 +73,7 @@
 </template>
 
 <script setup lang="uts">
-import { reactive, toRefs } from 'vue'
+import { reactive, toRefs, computed } from 'vue'
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
@@ -83,13 +83,14 @@ import { HttpResult } from '../../common/http.uts';
 import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts';
 import { accountRoleLabel } from '../../common/account.uts';
 import { openOrderList } from '../../common/order-navigation.uts';
-import { fetchUnreadNotificationCount } from '../../api/notifications.uts';
+import { notificationState, startNotificationSession, refreshNotificationCount } from '../../store/notifications.uts';
 
 const state = reactive({ refreshing: false, currentRefreshTime: '', profileLoading: false, statusBarHeight: 0, username: '校园用户', roleName: '', roleCode: '', userUuid: '',
     email: '', avatarUrl: '', profileError: '', balanceLoading: false, balanceReady: false,
-    balanceText: '--', balanceError: '', payPasswordSet: false, signOutConfirm: false, signingOut: false, unreadCount: 0 })
+    balanceText: '--', balanceError: '', payPasswordSet: false, signOutConfirm: false, signingOut: false })
 
-const { refreshing, currentRefreshTime, profileLoading, statusBarHeight, username, roleName, roleCode, userUuid, email, avatarUrl, profileError, balanceLoading, balanceReady, balanceText, balanceError, payPasswordSet, signOutConfirm, signingOut, unreadCount } = toRefs(state)
+const { refreshing, currentRefreshTime, profileLoading, statusBarHeight, username, roleName, roleCode, userUuid, email, avatarUrl, profileError, balanceLoading, balanceReady, balanceText, balanceError, payPasswordSet, signOutConfirm, signingOut } = toRefs(state)
+const unreadCount = computed((): number => notificationState.unreadCount)
 
 function refreshPage() {
     if (state.refreshing || state.profileLoading || state.balanceLoading || state.signingOut)
@@ -149,12 +150,8 @@ function loadBalance(): Promise<void> {
 
 function openReviews() { uni.navigateTo({ url: '/pages/review/list' }); }
 function loadUnreadCount(): Promise<void> {
-    const user = state.userUuid;
-    return fetchUnreadNotificationCount().then((result: HttpResult) => {
-        if (state.userUuid != user) return;
-        const count = result.ok && result.data != null ? jsonNumber(result.data, 'data') : null;
-        state.unreadCount = count != null && count > 0 ? count : 0;
-    });
+    startNotificationSession();
+    return refreshNotificationCount();
 }
 function openNotifications() { uni.switchTab({ url: '/pages/notifications/list' }); }
 
@@ -177,6 +174,7 @@ function openCompletedOrders() {
 function openCancelledOrders() {
     openOrderList('cancelled');
 }
+
 
 function openImageManagement() {
     uni.navigateTo({ url: '/pages/manage/images' });
@@ -223,10 +221,15 @@ function signOut() {
     if (state.signingOut)
         return;
     state.signingOut = true;
-    doLogout().then(() => { state.signingOut = false; uni.reLaunch({ url: '/pages/login/login' }); });
+    doLogout().catch(() => {}).finally(() => {
+        state.signingOut = false;
+        state.signOutConfirm = false;
+        uni.reLaunch({ url: '/pages/login/login' });
+    });
 }
 
 onPageShow(() => {
+    startNotificationSession()
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     if (!isLoggedIn()) {
         uni.reLaunch({ url: '/pages/login/login' });

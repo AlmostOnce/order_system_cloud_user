@@ -1,134 +1,97 @@
 <template>
     <view class="account-page account-secondary">
         <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-        <view class="account-nav vapor-account-secondary--account-nav notification-nav"><text class="account-title notification-page-title">消息</text></view>
-        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMore">
+        <view class="account-nav vapor-account-secondary--account-nav conversation-nav"><text class="conversation-page-title">消息</text></view>
+        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
             <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
-            <view class="account-content vapor-account-secondary--account-content">
-                <view class="notification-intro"><text class="notification-heading">订单消息</text><text class="notification-subtitle">用餐进度，一目了然</text></view>
-                <view v-for="item in items" :key="item.notificationId" class="notification-card" @click="openNotification(item)">
-                    <view class="notification-head"><view class="notification-title-row"><view v-if="item.readAt.length == 0" class="notification-dot"></view><text class="notification-title">{{ item.title }}</text></view><text class="notification-date">{{ formatDate(item.createdAt) }}</text></view>
-                    <text class="notification-body">{{ item.content }}</text><text v-if="item.orderId > 0" class="notification-link">查看订单 ›</text>
-                </view>
-                <text v-if="loading" class="account-note">正在获取消息…</text>
-                <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
-                <view v-if="loaded && !loading && errorText.length == 0 && items.length == 0" class="notification-empty"><text class="notification-heading">暂无消息</text><text class="notification-subtitle">订单有新的进展时会显示在这里</text></view>
-                <text v-if="loaded && !hasMore && items.length > 0" class="notification-end">已经看到全部消息</text>
+            <view class="conversation-list">
+                <button class="conversation-entry" aria-label="订单中心，查看所有订单通知" @click="openOrders">
+                    <view class="conversation-avatar-wrap"><image class="conversation-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image><view v-if="unreadCount > 0" class="conversation-badge"><text class="conversation-badge-text">{{ unreadCount > 99 ? '99+' : unreadCount }}</text></view></view>
+                    <view class="conversation-copy"><view class="conversation-title-row"><text class="conversation-name">订单中心</text><text v-if="latest != null" class="conversation-time">{{ latestTime }}</text></view><text class="conversation-preview">{{ preview }}</text></view>
+                </button>
+                <text v-if="errorText.length > 0" class="conversation-error" role="alert">{{ errorText }}</text>
             </view>
         </scroll-view>
     </view>
 </template>
 <script setup lang="uts">
-import { reactive, toRefs } from 'vue'
+import { reactive, toRefs, computed } from 'vue'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
-import { NotificationItem, fetchNotifications, markNotificationRead, parseNotificationPage, requestNotificationSocketTicket, parseNotificationSocketTicket } from '../../api/notifications.uts'
-import { API_BASE_URL } from '../../common/config.uts'
-import { accountDate } from '../../common/account.uts'
+import { NotificationItem, fetchNotifications, parseNotificationPage } from '../../api/notifications.uts'
+import { notificationState, startNotificationSession, subscribeNotifications, unsubscribeNotifications, refreshNotificationCount } from '../../store/notifications.uts'
 import { currentUser } from '../../store/auth.uts'
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
-import { toast } from '../../common/feedback.uts'
+import { accountDate } from '../../common/account.uts'
 
-const initialItems: Array<NotificationItem> = []
-const state = reactive({ statusBarHeight: 0, userUuid: '', version: 0, items: initialItems, loading: false, loaded: false, refreshing: false, currentRefreshTime: '', errorText: '', cursor: '', hasMore: false, opening: false })
-let socket: SocketTask | null = null
-let socketVersion = 0
-let socketVisible = false
-let socketRetry = 0
-let socketRefreshPending = false
-const { statusBarHeight, items, loading, loaded, refreshing, currentRefreshTime, errorText, hasMore } = toRefs(state)
-async function load(reset: boolean): Promise<void> {
-    if (state.loading || (!reset && !state.hasMore)) return
+const state = reactive({ statusBarHeight: 0, userUuid: '', version: 0, loading: false, loaded: false, refreshing: false, currentRefreshTime: '', errorText: '', latest: null as NotificationItem | null })
+const { statusBarHeight, loading, refreshing, currentRefreshTime, errorText, latest } = toRefs(state)
+const unreadCount = computed((): number => notificationState.unreadCount)
+const preview = computed((): string => {
+    const item = state.latest
+    return item != null ? item.content : (state.loading ? '正在获取最新通知…' : (state.loaded ? '暂无订单通知' : '订单状态更新会显示在这里'))
+})
+const latestTime = computed((): string => {
+    const item = state.latest
+    return item == null ? '' : accountDate(item.createdAt).substring(5, 16)
+})
+let visible = false
+let pending = false
+async function load(): Promise<void> {
+    if (state.loading) { pending = true; return }
     state.loading = true; state.errorText = ''
     const version = state.version
     try {
-        const result = await fetchNotifications(reset ? '' : state.cursor)
-        if (version != state.version) return
+        const result = await fetchNotifications('')
+        if (version != state.version || currentUser()?.userUuid != state.userUuid) return
         const page = parseNotificationPage(result)
-        if (page == null || (!reset && page.hasMore && page.nextCursor == state.cursor)) { state.errorText = result.message.length > 0 ? result.message : '消息暂时不可用，请下拉重试'; return }
-        if (reset) state.items = page.items
-        else for (let i = 0; i < page.items.length; i++) { const item = page.items[i]; if (!state.items.some((old: NotificationItem): boolean => old.notificationId == item.notificationId)) state.items.push(item) }
-        state.cursor = page.nextCursor; state.hasMore = page.hasMore; state.loaded = true
+        if (page == null) { state.errorText = result.message.length > 0 ? result.message : '消息暂时不可用，请下拉重试'; return }
+        state.latest = page.items.length > 0 ? page.items[0] : null
+        state.loaded = true
     } finally {
         if (version == state.version) {
             state.loading = false
-            if (socketRefreshPending && socketVisible) { socketRefreshPending = false; load(true) }
+            if (pending && visible) { pending = false; load() }
         }
     }
 }
-function loadMore() { if (!state.refreshing) load(false) }
-function refreshPage() {
+function refreshPage(): void {
     if (state.loading || state.refreshing) return
-    state.refreshing = true; const start = Date.now(); state.currentRefreshTime = refreshTimeLabel(start)
-    load(true).then(() => { finishPullRefresh(start, state.errorText.length == 0, (_time: string) => { state.refreshing = false }) }).catch(() => { finishPullRefresh(start, false, (_time: string) => { state.refreshing = false }) })
+    state.refreshing = true
+    const start = Date.now(); state.currentRefreshTime = refreshTimeLabel(start)
+    Promise.all([load(), refreshNotificationCount()]).finally(() => {
+        finishPullRefresh(start, state.errorText.length == 0, (_time: string) => { state.refreshing = false })
+    })
 }
-async function openNotification(item: NotificationItem): Promise<void> {
-    if (state.opening) return
-    state.opening = true
-    const version = state.version
-    try {
-        if (item.readAt.length == 0) { const result = await markNotificationRead(item.notificationId); if (version != state.version) return; if (!result.ok) { toast(result.message.length > 0 ? result.message : '消息状态更新失败'); return } item.readAt = new Date().toISOString() }
-        if (item.orderId > 0) uni.navigateTo({ url: '/pages/order/detail?orderId=' + item.orderId })
-    } finally { state.opening = false }
-}
-function formatDate(value: string): string { return accountDate(value) }
-function stopSocket() {
-    socketVisible = false; socketVersion++; socketRetry = 0; socketRefreshPending = false
-    const current = socket; socket = null
-    if (current != null) current.close({})
-}
-function scheduleSocketRetry(version: number) {
-    if (!socketVisible || version != socketVersion) return
-    const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(socketRetry, 5)))
-    socketRetry++
-    setTimeout(() => { if (socketVisible && version == socketVersion) connectSocket(version) }, delay)
-}
-async function connectSocket(version: number): Promise<void> {
-    if (!socketVisible || version != socketVersion) return
-    const result = await requestNotificationSocketTicket()
-    if (!socketVisible || version != socketVersion) return
-    const ticket = parseNotificationSocketTicket(result)
-    if (!/^[A-Za-z0-9_-]{43}$/.test(ticket)) { scheduleSocketRetry(version); return }
-    const base = API_BASE_URL.replace(/^http/, 'ws')
-    let task: SocketTask
-    try { task = uni.connectSocket({ url: base + '/notifications/ws', protocols: ['notification.v1', 'ticket.' + ticket] }) }
-    catch (_error) { scheduleSocketRetry(version); return }
-    socket = task
-    let ended = false
-    const finish = () => { if (ended) return; ended = true; if (version == socketVersion) { socket = null; scheduleSocketRetry(version) } }
-    task.onOpen((_event) => { if (version == socketVersion) { socketRetry = 0; if (state.loading) socketRefreshPending = true; else load(true) } })
-    task.onMessage((_event) => { if (socketVisible && version == socketVersion) { if (state.loading) socketRefreshPending = true; else load(true) } })
-    task.onClose((_event) => { finish() })
-    task.onError((_event) => { finish(); task.close({}) })
-}
+function changed(): void { if (visible) load() }
+function openOrders(): void { uni.navigateTo({ url: '/pages/notifications/orders' }) }
 onPageShow(() => {
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight
     const user = currentUser()
     if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
-    if (state.userUuid != user.userUuid) { state.version++; state.userUuid = user.userUuid; state.items = []; state.loading = false; state.loaded = false; state.cursor = ''; state.hasMore = false; state.errorText = '' }
-    load(true)
-    stopSocket(); socketVisible = true; connectSocket(socketVersion)
+    if (user.userUuid != state.userUuid) { state.version++; state.userUuid = user.userUuid; state.latest = null; state.loaded = false; state.loading = false; state.errorText = '' }
+    visible = true; subscribeNotifications(changed); startNotificationSession(); load()
 })
-onPageHide(() => { stopSocket() })
-onUnload(() => { stopSocket() })
+onPageHide(() => { visible = false; pending = false; unsubscribeNotifications(changed) })
+onUnload(() => { visible = false; state.version++; unsubscribeNotifications(changed) })
 </script>
 <style>
 @import '../../styles/account.css';
-.notification-nav { padding-left: 20px; min-height: 56px; }
-.notification-page-title { margin-left: 0; font-size: 23px; line-height: 32px; }
-.notification-intro { padding: 6px 2px 20px; }
-.notification-heading { color: #211C18; font-size: 20px; font-weight: bold; }
-.notification-subtitle { color: #8C7C6F; font-size: 13px; margin-top: 6px; }
-.notification-card { background-color: #FFFFFF; border-radius: 16px; margin-bottom: 12px; padding: 16px; }
-.notification-head { flex-direction: row; justify-content: space-between; align-items: center; }
-.notification-title-row { flex-direction: row; align-items: center; }
-.notification-dot { width: 7px; height: 7px; border-radius: 4px; margin-right: 7px; background-color: #E4572E; }
-.notification-title { font-size: 15px; font-weight: bold; color: #211C18; }
-.notification-date { font-size: 11px; color: #A2968B; }
-.notification-body { margin-top: 10px; font-size: 14px; color: #6F5B4D; line-height: 21px; }
-.notification-link { margin-top: 12px; font-size: 12px; color: #C2410C; }
-.notification-empty { padding: 45px 18px; align-items: center; }
-.notification-end { padding: 12px; text-align: center; font-size: 12px; color: #A2968B; }
+.conversation-nav { padding: 12px 22px 18px; }
+.conversation-page-title { color: #211C18; font-size: 25px; line-height: 34px; font-weight: bold; }
+.conversation-list { padding: 4px 16px 24px; }
+.conversation-entry { display: flex; flex-direction: row; align-items: center; width: 100%; padding: 20px 14px; margin: 0; border: 1px solid #F1E5DA; border-radius: 18px; background-color: #FFFFFF; text-align: left; overflow: visible; }
+.conversation-avatar-wrap { position: relative; width: 54px; height: 54px; flex-shrink: 0; margin-right: 14px; overflow: visible; }
+.conversation-avatar { width: 54px; height: 54px; border-radius: 17px; }
+.conversation-badge { position: absolute; top: -8px; right: -6px; z-index: 1; min-width: 20px; height: 20px; padding: 0 4px; align-items: center; justify-content: center; border: 2px solid #FFFFFF; border-radius: 12px; background-color: #C9442B; }
+.conversation-badge-text { color: #FFFFFF; font-size: 10px; line-height: 14px; }
+.conversation-copy { flex: 1; min-width: 0; }
+.conversation-title-row { flex-direction: row; align-items: center; justify-content: space-between; }
+.conversation-name { color: #211C18; font-size: 17px; line-height: 25px; font-weight: bold; }
+.conversation-time { color: #A2968B; font-size: 10px; line-height: 16px; flex-shrink: 0; margin-left: 8px; }
+.conversation-preview { color: #8B7B6F; font-size: 13px; line-height: 21px; margin-top: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.conversation-error { padding: 16px 8px; color: #B73920; font-size: 12px; line-height: 20px; }
 /* #ifdef WEB */
-.account-page .notification-head, .account-page .notification-title-row { flex-direction: row; }
+.account-page .conversation-title-row { flex-direction: row; }
+.account-page .conversation-preview { display: block; overflow-wrap: normal; }
 /* #endif */
 </style>

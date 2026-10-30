@@ -1,4 +1,6 @@
 import { jsonObject, jsonString } from '../common/json.uts'
+import { clearEmailChangeAuthorization } from '../common/email-change-session.uts'
+import { startNotificationSession, stopNotificationSession } from './notifications.uts'
 /**
  * 登录态管理。
  *
@@ -13,7 +15,7 @@ import { login as loginApi, register as registerApi, logout as logoutApi } from 
 // 导入统一请求结果类型，用于标注接口返回值。
 import { HttpResult } from '../common/http.uts'
 // 导入本地凭据读写：保存/清除双令牌，以及「记住账号」的读写。
-import { saveTokens, clearTokens, getAccessToken, getRefreshToken, setRememberedAccount, clearRememberedAccount } from '../common/storage.uts'
+import { saveTokens, clearTokens, getAccessToken, getRefreshToken, setRememberedAccount, clearRememberedAccount, beginSessionClose } from '../common/storage.uts'
 // 导入 JWT 载荷解析，用于在不请求后端的情况下读取当前登录身份。
 import { parseTokenPayload, TokenPayload } from '../common/jwt.uts'
 
@@ -75,7 +77,9 @@ export function login(account: string, password: string, captchaId: string, capt
 			}
 
 			// 双令牌齐全，写入本地存储，后续请求即携带该访问令牌。
+			clearTokens()
 			saveTokens(accessToken, refreshToken)
+			startNotificationSession()
 			// 勾选「记住账号」：只记用户名，不落盘密码。
 			if (rememberAccount) {
 				setRememberedAccount(account)
@@ -117,24 +121,23 @@ export function register(username: string, email: string, password: string): Pro
  * 先通知服务端失效刷新令牌，无论结果如何都清空本地凭据——本地退出必须成功，
  * 否则用户会卡在「退不出去」的状态。
  */
+let logoutPending: Promise<void> | null = null
 export function logout(): Promise<void> {
-	// 用 Promise<void> 表达「退出动作已完成」，页面只关心何时可以跳回登录页。
-	return new Promise<void>((resolve) => {
-		// 读取刷新令牌：注销接口需要它来定位并失效服务端会话。
-		const refreshToken = getRefreshToken()
-		// 本地已无刷新令牌：无需请求后端，直接清凭据并结束。
-		if (refreshToken.length == 0) {
-			clearTokens()
-			resolve()
-			return
-		}
-		// 通知服务端失效刷新令牌与访问令牌。
-		logoutApi(refreshToken).then((result: HttpResult) => {
-			// 无论后端成功与否都清空本地凭据，保证本地一定能退出。
-			clearTokens()
-			resolve()
-		})
-	})
+    if (logoutPending != null) return logoutPending
+    beginSessionClose()
+    const operation = Promise.resolve().then(() => {
+        try {
+            // 同步取得退出时的凭据快照，撤销请求在后台完成，不阻塞页面返回。
+            if (getRefreshToken().length > 0) logoutApi().catch(() => {})
+        } finally {
+            clearTokens()
+            clearEmailChangeAuthorization()
+            // 通知 UI 或连接清理失败不能阻止本地退出。
+            try { stopNotificationSession(true) } catch (_error) {}
+        }
+    }).finally(() => { logoutPending = null })
+    logoutPending = operation
+    return operation
 }
 
 /**

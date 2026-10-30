@@ -6,7 +6,7 @@
  */
 
 // 导入统一请求入口：本层只负责拼装请求体与路径，不处理令牌与存储。
-import { httpGet, httpPost, HttpResult } from '../common/http.uts'
+import { httpGet, httpPost, httpLogout, HttpResult } from '../common/http.uts'
 
 /**
  * 获取登录用图片验证码。
@@ -59,12 +59,8 @@ export function register(username: string, email: string, password: string): Pro
 /**
  * 注销当前会话，使刷新令牌在服务端失效。
  *
- * @param refreshToken 刷新令牌
  * @return 请求结果
  */
-export function logout(refreshToken: string): Promise<HttpResult> {
-	// 按后端 RefreshTokenRequest 契约组装请求体，注销只依赖刷新令牌。
-	const body: UTSJSONObject = { refreshToken: refreshToken }
-	// 注销需要携带访问令牌：后端要据此校验刷新令牌归属并写入黑名单。
-	return httpPost('/auth/logout', body, true)
+export function logout(): Promise<HttpResult> {
+    return httpLogout()
 }

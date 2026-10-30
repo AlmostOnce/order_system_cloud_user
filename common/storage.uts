@@ -11,6 +11,11 @@
  */
 // 键名统一用 auth_ 前缀，避开 uni-app 系统保留的 uni_、dcloud_ 前缀。
 const KEY_ACCESS_TOKEN: string = 'auth_access_token'
+let sessionVersion = 0
+let sessionClosing = false
+export function getSessionVersion(): number { return sessionVersion }
+export function beginSessionClose(): void { sessionClosing = true }
+export function isSessionClosing(): boolean { return sessionClosing }
 
 /**
  * 刷新令牌的存储键。
@@ -75,6 +80,8 @@ export function saveTokens(accessToken: string, refreshToken: string): void {
  * 清除登录凭据，保留「记住账号」。
  */
 export function clearTokens(): void {
+    sessionVersion++
+    sessionClosing = false
 	// 移除访问令牌，使本地立即进入未登录状态。
 	uni.removeStorageSync(KEY_ACCESS_TOKEN)
 	// 移除刷新令牌，避免登出后仍可用旧凭据续期。

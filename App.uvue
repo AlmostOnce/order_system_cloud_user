@@ -1,4 +1,5 @@
 <script setup lang="uts">
+import { startNotificationSession, stopNotificationSession } from './store/notifications.uts'
 // #ifdef APP-ANDROID
 let firstBackTime = 0
 onLastPageBackPress(() => {
@@ -13,9 +14,9 @@ onLastPageBackPress(() => {
 })
 // #endif
 onLaunch(() => { console.log('App Launch') })
-onShow(() => { console.log('App Show') })
-onHide(() => { console.log('App Hide') })
-onExit(() => { console.log('App Exit') })
+onShow(() => { startNotificationSession() })
+onHide(() => { stopNotificationSession() })
+onExit(() => { stopNotificationSession() })
 </script>
 
 <style>

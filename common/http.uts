@@ -12,7 +12,7 @@ import { jsonObject, jsonString, parseJsonObject } from './json.uts'
 // 导入网关地址、超时与成功码常量；本层不硬编码这些配置值。
 import { API_BASE_URL, API_TIMEOUT, SUCCESS_CODE } from './config.uts'
 // 导入本地凭据读写：发请求时注入令牌、续期成功后落盘新令牌、会话失效时清空。
-import { getAccessToken, getRefreshToken, saveTokens, clearTokens } from './storage.uts'
+import { getAccessToken, getRefreshToken, saveTokens, clearTokens, getSessionVersion, isSessionClosing } from './storage.uts'
 
 /**
  * 请求结果。
@@ -175,17 +175,20 @@ function postOnce(
 	path: string,
 	body: UTSJSONObject | null,
 	needAuth: boolean,
-	idempotencyKey: string = ''
+	idempotencyKey: string = '',
+    capturedAccessToken: string | null = null
 ): Promise<HttpResult> {
 	// 用 Promise 包住回调式请求，把 uni.request 的回调结果统一为 Promise 结果。
 	return new Promise<HttpResult>((resolve) => {
+        const requestHeader = buildHeader(needAuth, idempotencyKey)
+        if (capturedAccessToken != null) requestHeader['Authorization'] = 'Bearer ' + capturedAccessToken
 		uni.request({
 			// 网关地址与业务路径拼接，调用方只传服务自身路径。
 			url: API_BASE_URL + path,
 			// 固定使用 POST 字面量，避免把 method 作为字符串参数带来的类型问题。
 			method: 'POST',
 			// 请求头按是否需要鉴权动态拼装。
-			header: buildHeader(needAuth, idempotencyKey),
+			header: requestHeader,
 			// POST 请求体，允许为空对象以外的 null（如无请求体接口）。
 			data: body,
 			// 使用全局统一超时时间。
@@ -362,12 +365,17 @@ function deleteOnce(path: string, needAuth: boolean): Promise<HttpResult> {
 function sendWithRefresh(
 	send: () => Promise<HttpResult>,
 	needAuth: boolean,
-	allowRefresh: boolean
+	allowRefresh: boolean,
+    allowDuringClose: boolean = false
 ): Promise<HttpResult> {
+    const sessionVersion = getSessionVersion()
+    if (needAuth && isSessionClosing() && !allowDuringClose) return Promise.resolve(failureResult('正在退出登录', 401))
 	// 用 Promise 包住整段续期流程，调用方只关心最终结果。
 	return new Promise<HttpResult>((resolve) => {
 		// 先发送一次原请求，再根据其结果决定是否续期重试。
 		send().then((result: HttpResult) => {
+            if (needAuth && isSessionClosing() && !allowDuringClose) { resolve(failureResult('正在退出登录', 401)); return }
+            if (needAuth && sessionVersion != getSessionVersion()) { resolve(failureResult('登录会话已结束', 401)); return }
 			// 非「鉴权失败」的情况一律直接返回：成功、非 401、免鉴权请求或已重试过。
 			if (result.ok || result.statusCode != 401 || !needAuth || !allowRefresh) {
 				resolve(result)
@@ -376,6 +384,7 @@ function sendWithRefresh(
 
 			// 鉴权失败时先尝试续期：成功则带新令牌重试，失败则判定会话失效。
 			refreshSession().then((refreshed: boolean) => {
+                if (sessionVersion != getSessionVersion()) { resolve(failureResult('登录会话已结束', 401)); return }
 				// 续期失败（无刷新令牌、已过期或被消费）：清凭据回登录页，返回原始 401。
 				if (!refreshed) {
 					handleSessionExpired()
@@ -383,7 +392,7 @@ function sendWithRefresh(
 					return
 				}
 				// 续期成功：带着新访问令牌重试一次原请求，allowRefresh 置 false 防止无限循环。
-				sendWithRefresh(send, needAuth, false).then((retryResult: HttpResult) => {
+				sendWithRefresh(send, needAuth, false, allowDuringClose).then((retryResult: HttpResult) => {
 					resolve(retryResult)
 				})
 			})
@@ -393,6 +402,7 @@ function sendWithRefresh(
 
 /** 进行中的刷新请求；非空表示已有请求在续期，其它 401 请求复用它而不重复刷新。 */
 let refreshingPromise: Promise<boolean> | null = null
+let refreshingVersion = -1
 
 /**
  * 单飞刷新令牌：并发多个 401 只发起一次刷新，其余请求等待同一结果。
@@ -405,7 +415,7 @@ let refreshingPromise: Promise<boolean> | null = null
  */
 function refreshSession(): Promise<boolean> {
 	// 已有刷新在进行中：直接复用同一个 Promise，调用方各自等待其最终结果。
-	if (refreshingPromise != null) {
+	if (refreshingPromise != null && refreshingVersion == getSessionVersion()) {
 		return refreshingPromise
 	}
 
@@ -413,9 +423,10 @@ function refreshSession(): Promise<boolean> {
 	const current: Promise<boolean> = performRefresh()
 	// 立即占位，使后续并发 401 都指向这次刷新。
 	refreshingPromise = current
+    refreshingVersion = getSessionVersion()
 	// 刷新结束后释放单飞占位，后续再次过期时仍可重新续期。
 	current.then((refreshed: boolean) => {
-		refreshingPromise = null
+        if (refreshingPromise == current) refreshingPromise = null
 	})
 	// 返回本次刷新结果给当前调用方。
 	return current
@@ -427,6 +438,7 @@ function refreshSession(): Promise<boolean> {
  * @return 刷新成功返回 true
  */
 function performRefresh(): Promise<boolean> {
+    const sessionVersion = getSessionVersion()
 	// 把刷新结果统一收敛为布尔值：true 表示已换到并落盘新双令牌。
 	return new Promise<boolean>((resolve) => {
 		// 读取本地刷新令牌，作为换取新令牌的凭据。
@@ -441,6 +453,16 @@ function performRefresh(): Promise<boolean> {
 		const body: UTSJSONObject = { refreshToken: refreshToken }
 		// 刷新接口免鉴权，且直接调用 postOnce，天然不会再触发续期。
 		postOnce('/auth/refresh', body, false).then((result: HttpResult) => {
+            if (sessionVersion != getSessionVersion() || getRefreshToken() != refreshToken) {
+                // 退出后晚到的轮换结果不落盘，同时尝试撤销新签发的会话。
+                const late = result.ok && result.data != null ? jsonObject(result.data, 'data') : null
+                if (late != null) {
+                    const access = jsonString(late, 'accessToken') ?? ''
+                    const refresh = jsonString(late, 'refreshToken') ?? ''
+                    if (access.length > 0 && refresh.length > 0) revokeCapturedSession(access, refresh).catch(() => {})
+                }
+                resolve(false); return
+            }
 			// 刷新请求本身失败（如旧令牌已被消费）时判定刷新失败。
 			if (!result.ok) {
 				resolve(false)
@@ -506,6 +528,28 @@ export function httpPost(path: string, body: UTSJSONObject | null, needAuth: boo
 	return sendWithRefresh(() => {
 		return postOnce(path, body, needAuth, idempotencyKey)
 	}, needAuth, true)
+}
+
+/** 独立使用退出时的凭据，后台撤销不依赖本地仍保持登录。 */
+async function revokeCapturedSession(access: string, refresh: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { refreshToken: refresh }
+    return postOnce('/auth/logout', body, true, '', access)
+}
+export async function httpLogout(): Promise<HttpResult> {
+    const access = getAccessToken()
+    const refresh = getRefreshToken()
+    if (access.length == 0 || refresh.length == 0) return failureResult('登录会话已结束', 401)
+    const result = await revokeCapturedSession(access, refresh)
+    if (result.statusCode != 401) return result
+    // 过期访问令牌仍可用快照续期后撤销，但绝不把新令牌写回本地。
+    const body: UTSJSONObject = { refreshToken: refresh }
+    const renewed = await postOnce('/auth/refresh', body, false)
+    const data = renewed.ok && renewed.data != null ? jsonObject(renewed.data, 'data') : null
+    if (data == null) return renewed
+    const nextAccess = jsonString(data, 'accessToken') ?? ''
+    const nextRefresh = jsonString(data, 'refreshToken') ?? ''
+    if (nextAccess.length == 0 || nextRefresh.length == 0) return failureResult('注销凭据无效', 401)
+    return revokeCapturedSession(nextAccess, nextRefresh)
 }
 
 /**

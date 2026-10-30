@@ -11,6 +11,7 @@ global.uni = {
 };
 function load(file) {
  file = path.resolve(root, file);
+ if (file === path.join(root, 'store/notifications.uts')) return { startNotificationSession() {}, stopNotificationSession() {} };
  if (file === path.join(root, 'common/http.uts')) return {
   httpPost: async (...args) => { calls.push(args); return result; }, httpGet: async () => result
  };

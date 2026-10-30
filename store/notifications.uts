@@ -1,0 +1,99 @@
+import { reactive } from 'vue'
+import { fetchUnreadNotificationCount, requestNotificationSocketTicket, parseNotificationSocketTicket } from '../api/notifications.uts'
+import { API_BASE_URL } from '../common/config.uts'
+import { getAccessToken, isSessionClosing } from '../common/storage.uts'
+import { parseTokenPayload } from '../common/jwt.uts'
+import { jsonNumber } from '../common/json.uts'
+
+export const notificationState = reactive({ unreadCount: 0 })
+let owner = ''
+let active = false
+let generation = 0
+let retry = 0
+let socket: SocketTask | null = null
+let retryTimer = 0
+let pollTimer = 0
+let refreshing = false
+const listeners: Array<() => void> = []
+
+export function subscribeNotifications(listener: () => void): void {
+    if (listeners.indexOf(listener) < 0) listeners.push(listener)
+}
+export function unsubscribeNotifications(listener: () => void): void {
+    const index = listeners.indexOf(listener)
+    if (index >= 0) listeners.splice(index, 1)
+}
+function identity(): string {
+    if (isSessionClosing()) return ''
+    return parseTokenPayload(getAccessToken())?.userUuid ?? ''
+}
+function renderBadge(): void {
+    if (notificationState.unreadCount > 0) uni.setTabBarBadge({ index: 2, text: notificationState.unreadCount > 99 ? '99+' : notificationState.unreadCount.toString() })
+    else uni.removeTabBarBadge({ index: 2 })
+}
+export async function refreshNotificationCount(): Promise<void> {
+    if (!active || refreshing) return
+    refreshing = true
+    const version = generation
+    try {
+        const result = await fetchUnreadNotificationCount()
+        if (!active || version != generation) return
+        if (identity() != owner) { stopNotificationSession(true); return }
+        const count = result.ok && result.data != null ? jsonNumber(result.data, 'data') : null
+        if (count != null && count >= 0) { notificationState.unreadCount = count; renderBadge() }
+    } finally { if (version == generation) refreshing = false }
+}
+function changed(): void {
+    refreshNotificationCount()
+    for (let i = 0; i < listeners.length; i++) listeners[i]()
+}
+function reconnect(version: number): void {
+    if (!active || version != generation || retryTimer > 0) return
+    const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(retry++, 5)))
+    retryTimer = setTimeout(() => { retryTimer = 0; connect(version) }, delay)
+}
+async function connect(version: number): Promise<void> {
+    if (!active || version != generation) return
+    if (identity() != owner) { stopNotificationSession(true); return }
+    const result = await requestNotificationSocketTicket()
+    if (!active || version != generation) return
+    if (identity() != owner) { stopNotificationSession(true); return }
+    const ticket = parseNotificationSocketTicket(result)
+    if (!/^[A-Za-z0-9_-]{43}$/.test(ticket)) { reconnect(version); return }
+    let task: SocketTask
+    try { task = uni.connectSocket({ url: API_BASE_URL.replace(/^http/, 'ws') + '/notifications/ws', protocols: ['notification.v1', 'ticket.' + ticket] }) }
+    catch (_error) { reconnect(version); return }
+    socket = task
+    let ended = false
+    const finish = () => {
+        if (ended) return
+        ended = true
+        if (version == generation) { socket = null; reconnect(version) }
+    }
+    task.onOpen((_event) => { if (active && version == generation) { retry = 0; changed() } })
+    task.onMessage((_event) => { if (active && version == generation && identity() == owner) changed() })
+    task.onClose((_event) => { finish() })
+    task.onError((_event) => { finish(); task.close({}) })
+}
+export function startNotificationSession(): void {
+    const user = identity()
+    if (user.length == 0) { stopNotificationSession(true); return }
+    if (active && owner == user) { renderBadge(); return }
+    stopNotificationSession(owner != user)
+    owner = user; active = true
+    refreshNotificationCount()
+    connect(generation)
+    // The list remains recoverable if the push connection is unavailable.
+    pollTimer = setInterval(() => {
+        if (identity() != owner) { stopNotificationSession(true); return }
+        refreshNotificationCount()
+    }, 30000)
+}
+export function stopNotificationSession(clear: boolean = false): void {
+    active = false; generation++; refreshing = false; retry = 0
+    if (retryTimer > 0) { clearTimeout(retryTimer); retryTimer = 0 }
+    if (pollTimer > 0) { clearInterval(pollTimer); pollTimer = 0 }
+    const current = socket; socket = null
+    if (current != null) current.close({})
+    if (clear) { owner = ''; notificationState.unreadCount = 0; renderBadge() }
+}

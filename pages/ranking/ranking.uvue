@@ -27,6 +27,7 @@
 </template>
 
 <script setup lang="uts">
+import { startNotificationSession } from '../../store/notifications.uts'
 import { reactive, toRefs } from 'vue'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
@@ -92,6 +93,7 @@ function openWindow(item: SalesRankItem) {
 }
 
 onPageShow(() => {
+    startNotificationSession()
     if (!isLoggedIn()) {
         uni.reLaunch({ url: '/pages/login/login' });
         return;

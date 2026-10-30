@@ -1,0 +1,141 @@
+<template>
+    <view class="account-page account-secondary order-thread">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回消息" @click="goBack"><view class="account-back-icon"></view></button><view class="thread-heading"><text class="account-title thread-title">订单中心</text><text class="thread-subtitle">订单状态通知</text></view></view>
+        <scroll-view class="account-scroll" scroll-y="true" :scroll-into-view="scrollTarget" @scrolltoupper="loadMore" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#F7F3EF" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
+            <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            <view class="thread-content">
+                <text v-if="loading" class="thread-history-hint">正在获取通知…</text>
+                <text v-else-if="loaded && !hasMore && chronologicalItems.length > 0" class="thread-history-hint">以上为全部订单通知</text>
+                <text v-else-if="hasMore" class="thread-history-hint">向上滑动查看更早通知</text>
+                <text v-if="errorText.length > 0" class="account-error" role="alert">{{ errorText }}</text>
+                <view v-if="loaded && items.length == 0 && errorText.length == 0" class="thread-empty"><image class="thread-empty-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image><text class="thread-empty-title">暂无订单通知</text><text class="thread-empty-note">订单状态更新后，通知会显示在这里</text></view>
+                <view v-for="item in chronologicalItems" :id="'notice-' + item.notificationId" :key="item.notificationId" class="thread-message">
+                    <text class="thread-time">{{ formatDate(item.createdAt) }}</text>
+                    <view class="thread-message-row"><image class="thread-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image><view class="thread-message-content"><text class="thread-sender">订单中心</text><button class="thread-bubble" :disabled="item.orderId <= 0" @click="openNotification(item)"><text class="thread-bubble-title">{{ item.title }}</text><text class="thread-body">{{ item.content }}</text><view v-if="item.orderId > 0" class="thread-order-link"><text class="thread-order-label">查看订单</text><view class="thread-order-arrow"></view></view></button></view></view>
+                </view>
+                <view id="thread-bottom" class="thread-bottom"></view>
+            </view>
+        </scroll-view>
+        <view class="thread-footer"><text class="thread-footer-text">订单中心为你同步订单进度</text></view>
+    </view>
+</template>
+<script setup lang="uts">
+import { reactive, toRefs, computed } from 'vue'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+import { NotificationItem, fetchNotifications, markNotificationRead, parseNotificationPage } from '../../api/notifications.uts'
+import { startNotificationSession, subscribeNotifications, unsubscribeNotifications, refreshNotificationCount } from '../../store/notifications.uts'
+import { accountDate } from '../../common/account.uts'
+import { currentUser } from '../../store/auth.uts'
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
+import { toast } from '../../common/feedback.uts'
+
+const initialItems: Array<NotificationItem> = []
+const state = reactive({ statusBarHeight: 0, userUuid: '', version: 0, items: initialItems, loading: false, loaded: false, refreshing: false, currentRefreshTime: '', errorText: '', cursor: '', hasMore: false, opening: false, scrollTarget: '' })
+let pageVisible = false
+let pendingRefresh = false
+const chronologicalItems = computed((): Array<NotificationItem> => state.items.slice().reverse())
+const { statusBarHeight, items, loading, loaded, refreshing, currentRefreshTime, errorText, hasMore, scrollTarget } = toRefs(state)
+async function load(reset: boolean): Promise<void> {
+    if (state.loading || (!reset && !state.hasMore)) return
+    state.loading = true; state.errorText = ''
+    const version = state.version
+    try {
+        const result = await fetchNotifications(reset ? '' : state.cursor)
+        if (version != state.version || currentUser()?.userUuid != state.userUuid) return
+        const page = parseNotificationPage(result)
+        if (page == null || (!reset && page.hasMore && page.nextCursor == state.cursor)) { state.errorText = result.message.length > 0 ? result.message : '消息暂时不可用，请下拉重试'; return }
+        const previousOldest = state.items.length > 0 ? state.items[state.items.length - 1].notificationId : ''
+        const overlaps = page.items.some((item: NotificationItem): boolean => state.items.some((old: NotificationItem): boolean => old.notificationId == item.notificationId))
+        const firstPage = !state.loaded || state.items.length == 0 || (reset && !overlaps && page.hasMore)
+        if (reset) {
+            const older = firstPage ? [] as Array<NotificationItem> : state.items.filter((old: NotificationItem): boolean => !page.items.some((item: NotificationItem): boolean => item.notificationId == old.notificationId))
+            state.items = page.items.concat(older)
+        }
+        else for (let i = 0; i < page.items.length; i++) { const item = page.items[i]; if (!state.items.some((old: NotificationItem): boolean => old.notificationId == item.notificationId)) state.items.push(item) }
+        if (!reset || firstPage) { state.cursor = page.nextCursor; state.hasMore = page.hasMore }
+        state.loaded = true
+        state.scrollTarget = ''
+        setTimeout(() => {
+            if (version == state.version && pageVisible) state.scrollTarget = reset ? 'thread-bottom' : 'notice-' + previousOldest
+        }, 0)
+        // Only notifications actually loaded into this conversation are marked read.
+        await Promise.all(page.items.map(async (item: NotificationItem): Promise<void> => {
+            if (item.readAt.length > 0) return
+            const readResult = await markNotificationRead(item.notificationId)
+            if (version != state.version || currentUser()?.userUuid != state.userUuid) return
+            if (readResult.ok) item.readAt = new Date().toISOString()
+        }))
+        refreshNotificationCount()
+    } finally {
+        if (version == state.version) {
+            state.loading = false
+            if (pendingRefresh && pageVisible) { pendingRefresh = false; load(true) }
+        }
+    }
+}
+function loadMore() { if (!state.refreshing) load(false) }
+function refreshPage() {
+    if (state.loading || state.refreshing) return
+    state.refreshing = true; const start = Date.now(); state.currentRefreshTime = refreshTimeLabel(start)
+    load(true).then(() => { finishPullRefresh(start, state.errorText.length == 0, (_time: string) => { state.refreshing = false }) }).catch(() => { finishPullRefresh(start, false, (_time: string) => { state.refreshing = false }) })
+}
+async function openNotification(item: NotificationItem): Promise<void> {
+    if (state.opening) return
+    state.opening = true
+    const version = state.version
+    try {
+        if (item.readAt.length == 0) { const result = await markNotificationRead(item.notificationId); if (version != state.version || currentUser()?.userUuid != state.userUuid) return; if (!result.ok) { toast(result.message.length > 0 ? result.message : '消息状态更新失败'); return } item.readAt = new Date().toISOString(); refreshNotificationCount() }
+        if (item.orderId > 0) uni.navigateTo({ url: '/pages/order/detail?orderId=' + item.orderId })
+    } finally { state.opening = false }
+}
+function goBack() { uni.navigateBack({ delta: 1, fail: () => { uni.switchTab({ url: '/pages/notifications/list' }) } }) }
+function formatDate(value: string): string { return accountDate(value) }
+function notificationChanged(): void {
+    if (!pageVisible) return
+    if (state.loading) pendingRefresh = true
+    else load(true)
+}
+onPageShow(() => {
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+    const user = currentUser()
+    if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
+    if (state.userUuid != user.userUuid) { state.version++; state.userUuid = user.userUuid; state.items = []; state.loading = false; state.loaded = false; state.cursor = ''; state.hasMore = false; state.errorText = ''; state.scrollTarget = '' }
+    load(true)
+    pageVisible = true; subscribeNotifications(notificationChanged); startNotificationSession()
+})
+onPageHide(() => { pageVisible = false; pendingRefresh = false; unsubscribeNotifications(notificationChanged) })
+onUnload(() => { pageVisible = false; state.version++; unsubscribeNotifications(notificationChanged) })
+</script>
+<style>
+@import '../../styles/account.css';
+.order-thread { background-color: #F7F3EF; }
+.thread-heading { flex: 1; }
+.thread-title { font-size: 18px; line-height: 25px; }
+.thread-subtitle { margin-left: 12px; margin-top: 2px; color: #928174; font-size: 11px; line-height: 16px; }
+.thread-content { padding: 16px 18px 0; }
+.thread-history-hint { text-align: center; font-size: 11px; line-height: 18px; color: #A2968B; padding: 0 0 16px; }
+.thread-message { margin-bottom: 22px; }
+.thread-time { color: #A2968B; font-size: 11px; line-height: 18px; text-align: center; margin-bottom: 16px; }
+.thread-message-row { flex-direction: row; align-items: flex-start; }
+.thread-avatar { width: 40px; height: 40px; flex-shrink: 0; border-radius: 13px; }
+.thread-message-content { flex: 1; min-width: 0; margin-left: 10px; margin-right: 20px; }
+.thread-sender { color: #8B7B6F; font-size: 11px; line-height: 17px; margin-bottom: 5px; }
+.thread-bubble { display: flex; flex-direction: column; width: 100%; margin: 0; padding: 16px; border: 1px solid #F0E7DE; border-radius: 3px 16px 16px 16px; background-color: #FFFFFF; text-align: left; }
+.thread-bubble-title { color: #211C18; font-size: 15px; line-height: 22px; font-weight: bold; }
+.thread-body { margin-top: 8px; color: #6B5F56; font-size: 14px; line-height: 23px; text-align: left; }
+.thread-order-link { flex-direction: row; align-items: center; justify-content: space-between; margin-top: 14px; padding-top: 12px; border-top: 1px solid #F4EBE4; width: 100%; }
+.thread-order-label { color: #C2410C; font-size: 12px; line-height: 18px; }
+.thread-order-arrow { width: 6px; height: 6px; border-right: 1px solid #C2410C; border-top: 1px solid #C2410C; transform: rotate(45deg); margin-right: 3px; }
+.thread-footer { padding: 14px 20px 20px; }
+.thread-footer-text { color: #A2968B; font-size: 11px; line-height: 18px; text-align: center; }
+.thread-bottom { height: 12px; }
+.thread-empty { align-items: center; padding: 70px 12px; }
+.thread-empty-avatar { width: 62px; height: 62px; margin-bottom: 18px; }
+.thread-empty-title { font-size: 17px; line-height: 25px; color: #6B5F56; font-weight: bold; }
+.thread-empty-note { margin-top: 8px; font-size: 12px; line-height: 20px; color: #A2968B; text-align: center; }
+/* #ifdef WEB */
+.account-page .thread-message-row, .account-page .thread-order-link { flex-direction: row; }
+.account-page .thread-bubble { box-sizing: border-box; }
+/* #endif */
+</style>
