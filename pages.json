@@ -68,6 +68,7 @@
         { "path": "pages/review/create", "style": { "navigationStyle": "custom" } },
         { "path": "pages/review/list", "style": { "navigationStyle": "custom" } },
         { "path": "pages/manage/images", "style": { "navigationStyle": "custom" } },
+        { "path": "pages/manage/pickup", "style": { "navigationStyle": "custom" } },
         { "path": "pages/ranking/ranking", "style": { "navigationStyle": "custom" } }
 	],
 	"tabBar": {

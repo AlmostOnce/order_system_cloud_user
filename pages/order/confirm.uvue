@@ -8,7 +8,7 @@
             <view class="account-banner"><view class="banner-copy"><text class="banner-kicker">校园食堂 · 到店取餐</text><text class="banner-title">确认这一餐</text><text class="banner-note">核对菜品与数量，提交后前往支付。</text></view></view>
             <view v-if="loading" class="account-card vapor-account-secondary--account-card"><text class="account-muted">正在核对购物车…</text></view>
             <view v-if="items.length > 0" class="account-card vapor-account-secondary--account-card">
-                <text class="account-heading">{{ windowName.length > 0 ? windowName : '窗口 ' + windowId }}</text>
+                <text class="account-heading">{{ windowName.length > 0 ? windowName : '店铺名称暂不可用' }}</text>
                 <text class="account-note">到店自取</text>
                 <view v-for="item in items" :key="item.productId" class="order-line">
                     <view class="order-line-copy"><text class="order-line-name">{{ item.productName }}</text><text class="account-muted">¥{{ item.unitPrice.toFixed(2) }} × {{ item.quantity }}</text></view>

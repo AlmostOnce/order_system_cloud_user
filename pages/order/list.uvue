@@ -9,10 +9,10 @@
             <view class="account-banner"><view class="banner-copy"><text class="banner-kicker">校园食堂 · 用餐记录</text><text class="banner-title">这一餐，进行到哪了</text><text class="banner-note">查看订单进度，继续支付或到窗口取餐。</text></view></view>
             <view v-if="pendingWindowId > 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">有一笔提交结果待确认</text><text class="account-note">继续确认原订单，避免重复下单。</text><button class="account-primary vapor-account-secondary--account-primary" @click="resume"><text class="account-primary-text">继续确认</text></button></view>
             <button v-for="item in visibleOrders" :key="item.orderId" class="order-list-card" @click="openOrder(item.orderId)">
-                <view class="order-list-top"><text class="order-line-name">窗口 {{ item.windowId }}</text><text class="order-list-status">{{ item.status }}</text></view>
+                <view class="order-list-top"><text class="order-line-name">{{ item.windowName.length > 0 ? item.windowName : '店铺名称暂不可用' }}</text><text class="order-list-status">{{ item.status }}</text></view>
                 <text class="account-muted order-list-date">{{ formatDate(item.createdAt) }}</text>
                 <text class="account-muted">订单号 {{ item.orderNo }}</text>
-                <view class="order-list-top order-list-bottom"><text class="account-muted">{{ item.status == '已完成' ? '查看详情并评价' : '查看订单详情' }}</text><text class="order-total-price">¥{{ item.totalAmount.toFixed(2) }}</text></view>
+                <view class="order-list-top order-list-bottom"><text class="account-muted">{{ item.status == '已完成' ? '查看详情与评价' : '查看订单详情' }}</text><text class="order-total-price">¥{{ item.totalAmount.toFixed(2) }}</text></view>
             </button>
             <view v-if="!loading && visibleOrders.length == 0 && errorText.length == 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">{{ selectedStatus == 'all' ? '还没有订单' : '暂无该状态的订单' }}</text><text class="account-note">去食堂挑选喜欢的菜品，开启下一餐。</text><button class="account-primary vapor-account-secondary--account-primary" @click="goHome"><text class="account-primary-text">去点餐</text></button></view>
             <text v-if="loading" class="account-note">正在获取订单…</text><text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>

@@ -1,0 +1,63 @@
+<template>
+    <view class="account-page account-secondary">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" :disabled="verifying" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">取餐核销</text></view>
+        <scroll-view class="account-scroll" scroll-y="true"><view class="account-content vapor-account-secondary--account-content">
+            <view class="pickup-intro"><text class="pickup-heading">核对凭据，确认交付</text><text class="pickup-note">输入顾客出示的六位取餐码，核对餐品后确认交付。</text></view>
+            <view v-if="succeeded" class="account-success"><text class="account-success-text">核销成功 · 订单已完成</text><text class="account-note">餐品已交付，顾客将收到订单完成通知。</text><button class="account-primary vapor-account-secondary--account-primary" @click="nextOrder"><text class="account-primary-text">继续核销</text></button></view>
+            <view v-else class="account-card vapor-account-secondary--account-card">
+                <text class="account-heading">取餐凭据</text>
+                <text class="account-label vapor-account-secondary--account-label">取餐码</text>
+                <input class="account-input vapor-account-secondary--account-input merchant-pickup-input" v-model="pickupCode" type="number" :maxlength="6" :disabled="verifying" placeholder="顾客出示的六位数字" aria-label="取餐码" />
+                <text class="account-note">仅可核销你负责窗口的待取货订单，取餐码由顾客持有。</text>
+                <text v-if="errorText.length > 0" class="account-error" role="alert">{{ errorText }}</text>
+                <button class="account-primary vapor-account-secondary--account-primary" :disabled="verifying" @click="verify"><text class="account-primary-text">{{ verifying ? '正在核销…' : '确认交付并核销' }}</text></button>
+            </view>
+        </view></scroll-view>
+    </view>
+</template>
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import { verifyOrderPickup, orderPayload } from '../../api/order.uts'
+import { HttpResult } from '../../common/http.uts'
+import { jsonString } from '../../common/json.uts'
+import { currentUser } from '../../store/auth.uts'
+
+const state = reactive({ statusBarHeight: 0, pickupCode: '', verifying: false, errorText: '', succeeded: false })
+const { statusBarHeight, pickupCode, verifying, errorText, succeeded } = toRefs(state)
+let visible = false
+function verify(): Promise<void> {
+    if (state.verifying || state.succeeded || !visible) return Promise.resolve()
+    if (!/^[0-9]{6}$/.test(state.pickupCode)) { state.errorText = '请输入六位数字取餐码'; return Promise.resolve() }
+    const owner = currentUser()?.userUuid ?? ''
+    state.verifying = true; state.errorText = ''
+    return verifyOrderPickup(state.pickupCode).then((result: HttpResult) => {
+        if (!visible || owner.length == 0 || currentUser()?.userUuid != owner) return
+        const data = orderPayload(result)
+        if (!result.ok || data == null || jsonString(data, 'status') != '已完成') {
+            state.errorText = result.message.length > 0 ? result.message : '核销结果未确认，请核对订单状态后再试'
+            return
+        }
+        state.succeeded = true
+    }).catch(() => { state.errorText = '核销结果未确认，请核对订单状态后再试' }).finally(() => {
+        state.pickupCode = ''; state.verifying = false
+    })
+}
+function nextOrder(): void { state.pickupCode = ''; state.errorText = ''; state.succeeded = false }
+function goBack(): void { if (!state.verifying) uni.navigateBack({ delta: 1, fail: () => { uni.switchTab({ url: '/pages/mine/mine' }) } }) }
+onPageShow(() => {
+    const user = currentUser()
+    if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
+    if (user.roleCode != 'STALL_MANAGER' && user.roleCode != 'RESTAURANT_MANAGER') { uni.switchTab({ url: '/pages/mine/mine' }); return }
+    visible = true; state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+})
+onPageHide(() => { visible = false; state.pickupCode = '' })
+onUnload(() => { visible = false; state.pickupCode = '' })
+</script>
+<style>
+@import '../../styles/account.css';
+.pickup-intro { padding: 12px 2px 22px; }
+.pickup-heading { color: #211C18; font-size: 22px; line-height: 31px; font-weight: bold; }
+.pickup-note { color: #8B7B6F; font-size: 13px; line-height: 22px; margin-top: 8px; }
+.merchant-pickup-input { letter-spacing: 3px; }
+</style>

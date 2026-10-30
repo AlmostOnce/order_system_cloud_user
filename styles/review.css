@@ -50,3 +50,9 @@
 /* #endif */
 
 .review-order-tools { display: flex; flex-direction: column; align-items: flex-end; margin-left: 12px; }
+
+.review-author-avatar { width: 40px; height: 40px; flex-shrink: 0; border-radius: 20px; overflow: hidden; margin-right: 12px; background-color: #FDF6F0; }
+
+.review-choice { display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin: 0 0 0 12px; min-height: 44px; padding: 8px 12px; border: 1px solid #E8DED4; border-radius: 10px; background-color: #FFFFFF; }
+.review-choice-active { background-color: #FFF0E6; border-color: #E4572E; }
+.review-done-label { margin-left: 12px; font-size: 13px; color: #7A6C60; }

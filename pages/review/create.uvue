@@ -1,178 +1,176 @@
 <template>
     <view class="account-page account-secondary">
         <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" :disabled="submitting || imageBusy" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">{{ productId > 0 ? '评价菜品' : '评价店铺' }}</text></view>
-        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!submitting && !imageBusy && !pending && !succeeded && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
+        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" :disabled="submitting || imageBusy" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">订单评价</text></view>
+        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!submitting && !imageBusy && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
             <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
             <view class="account-content vapor-account-secondary--account-content">
-                <view class="review-intro"><text class="review-eyebrow">记录这次用餐</text><text class="review-title">{{ productName.length > 0 ? productName : '分享你的真实感受' }}</text><text class="review-subtitle">{{ productId > 0 ? '每笔已完成订单中的每道菜可评价一次' : '每笔已完成订单可评价店铺一次' }}</text></view>
-                <view v-if="succeeded" class="account-success"><text class="account-success-text">评价已发布</text><text class="account-note">谢谢分享，其他同学可以看到你的用餐评价。</text><button class="account-primary vapor-account-secondary--account-primary" @click="openMine"><text class="account-primary-text">查看我的评价</text></button></view>
-                <view v-if="eligible && !succeeded" class="account-card vapor-account-secondary--account-card">
-                    <text class="account-heading">这道菜怎么样？</text>
-                    <view class="review-stars"><button v-for="value in scores" :key="value" class="review-star-button" :aria-label="value + '星'" :disabled="pending || submitting" @click="setScore(value)"><image class="review-star" :src="score >= value ? '/static/review/star-filled.svg' : '/static/review/star-outline.svg'"></image></button></view>
-                    <text class="review-score-hint">{{ score == 0 ? '请选择评分' : score + ' 星 · ' + scoreLabels[score - 1] }}</text>
-                    <text class="account-label">用餐感受</text>
-                    <textarea class="review-textarea" v-model="content" :maxlength="1000" :disabled="pending || submitting" placeholder="聊聊味道、分量，或你希望改进的地方" aria-label="评价内容"></textarea>
-                    <text class="review-counter">{{ content.length }} / 1000</text>
-                    <text class="account-label">印象标签（选填）</text>
-                    <view class="review-tags"><button v-for="tag in tagOptions" :key="tag" class="review-tag-button" :class="tags.indexOf(tag) >= 0 ? 'review-tag-selected' : ''" :disabled="pending || submitting" @click="toggleTag(tag)"><text class="review-tag-label" :class="tags.indexOf(tag) >= 0 ? 'review-tag-label-selected' : ''">{{ tag }}</text></button></view>
-                    <view class="review-section-row"><text class="account-label">用餐照片（选填）</text><text class="account-muted">{{ photos.length }} / 6</text></view>
-                    <view class="review-photos"><view v-for="(photo, index) in photos" :key="photo.fileKey" class="review-photo-cell"><image class="review-photo" :src="photoSource(photo.url)" mode="aspectFill" @click="previewPhoto(index)"></image><button v-if="!pending && !submitting" class="review-photo-remove" :disabled="imageBusy" :aria-label="'移除第' + (index + 1) + '张照片'" @click="removePhoto(index)"><text class="review-remove-label">移除</text></button></view><button v-if="photos.length < 6 && !pending" class="review-add-photo" :disabled="imageBusy || submitting" @click="addPhoto"><text class="review-add-mark">＋</text><text class="account-muted">{{ imageBusy ? '正在处理…' : '添加照片' }}</text></button></view>
-                    <text v-if="pending" class="review-pending">上次提交结果待确认，内容已保留。请重试确认，不会重复发布。</text>
-                    <button class="account-primary vapor-account-secondary--account-primary" :class="submitting || imageBusy || loading ? 'account-disabled' : ''" :disabled="submitting || imageBusy || loading" @click="submit"><text class="account-primary-text">{{ submitting ? '正在发布…' : (pending ? '重试确认评价' : '发布评价') }}</text></button>
-                    <text class="account-note">评价将展示你的昵称，请勿填写个人联系方式。</text>
+                <view class="review-intro"><text class="review-eyebrow">记录这次用餐</text><text class="review-title">店铺与菜品，分别评价</text><text class="review-subtitle">只评分也可以，文字和照片选填，菜品可选择评价。</text></view>
+                <view v-for="(section, index) in sections" :key="section.productId" class="account-card vapor-account-secondary--account-card">
+                    <view class="review-section-row"><view class="review-author"><text class="review-eyebrow">{{ section.productId == 0 ? '店铺体验' : '菜品体验' }}</text><text class="account-heading">{{ section.name }}</text></view><text v-if="section.saved != null" class="review-done-label">已评价</text><button v-else class="review-choice" :class="section.selected ? 'review-choice-active' : ''" :disabled="submitting || imageBusy || section.pending" @click="toggleSection(index)"><text class="review-menu-label">{{ section.selected ? '已选择' : '选择评价' }}</text></button></view>
+                    <view v-if="section.saved != null">
+                        <text class="review-score-hint">{{ section.saved!.score }} 星</text><text v-if="section.saved!.content.length > 0" class="review-body">{{ section.saved!.content }}</text>
+                        <view v-if="section.saved!.images.length > 0" class="review-photos"><image v-for="(url, photoIndex) in section.saved!.images" :key="url" class="review-photo review-list-photo" :src="photoSource(url)" mode="aspectFill" @click="previewSaved(index, photoIndex)"></image></view>
+                    </view>
+                    <view v-else-if="section.selected">
+                        <view class="review-stars"><button v-for="value in scores" :key="value" class="review-star-button" :aria-label="section.name + value + '星'" :disabled="submitting || section.pending" @click="setScore(index, value)"><image class="review-star" :src="section.score >= value ? '/static/review/star-filled.svg' : '/static/review/star-outline.svg'"></image></button></view>
+                        <text class="review-score-hint">{{ section.score == 0 ? '请选择评分' : section.score + ' 星 · ' + scoreLabels[section.score - 1] }}</text>
+                        <textarea class="review-textarea" v-model="section.content" :maxlength="1000" :disabled="submitting || section.pending" :placeholder="section.productId == 0 ? '选填：聊聊服务、出餐速度或整体体验' : '选填：聊聊这道菜的味道和分量'" :aria-label="section.name + '评价内容'"></textarea>
+                        <text class="review-counter">{{ section.content.length }} / 1000</text>
+                        <view class="review-tags"><button v-for="tag in tagOptions" :key="tag" class="review-tag-button" :class="section.tags.includes(tag) ? 'review-tag-selected' : ''" :disabled="submitting || section.pending" @click="toggleTag(index, tag)"><text class="review-tag-label">{{ tag }}</text></button></view>
+                        <view class="review-photos"><view v-for="(photo, photoIndex) in section.photos" :key="photo.fileKey" class="review-photo-cell"><image class="review-photo" :src="photoSource(photo.url)" mode="aspectFill" @click="previewPhoto(index, photoIndex)"></image><button v-if="!section.pending" class="review-photo-remove" :disabled="submitting || imageBusy" @click="removePhoto(index, photoIndex)"><text class="review-remove-label">移除</text></button></view><button v-if="section.photos.length < 6 && !section.pending" class="review-add-photo" :disabled="submitting || imageBusy" @click="addPhoto(index)"><text class="review-add-mark">＋</text><text class="account-muted">添加照片</text></button></view>
+                        <text v-if="section.pending" class="review-pending">提交结果待确认，重试会使用原请求，不会重复发布。</text>
+                    </view>
                 </view>
-                <text v-if="loading" class="account-note">正在确认订单信息…</text>
-                <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
-                <button v-if="!succeeded" class="account-link" :disabled="submitting || imageBusy" @click="openMine"><text class="account-link-text">查看我的评价</text></button>
+                <text v-if="loading" class="account-note">正在获取订单与评价状态…</text>
+                <text v-if="errorText.length > 0" class="account-error" role="alert">{{ errorText }}</text>
+                <text v-if="successText.length > 0" class="account-success-text" role="status">{{ successText }}</text>
+                <button v-if="ready && hasUnreviewed" class="account-primary vapor-account-secondary--account-primary" :disabled="submitting || imageBusy || loading" @click="submit"><text class="account-primary-text">{{ submitting ? '正在发布…' : '发布所选评价' }}</text></button>
+                <text v-if="ready && !hasUnreviewed" class="account-note">这笔订单的店铺和菜品均已评价。</text>
+                <text v-if="ready" class="account-note">每项只可评价一次。已发布的评价会保留在此处。</text>
             </view>
         </scroll-view>
     </view>
 </template>
 <script setup lang="uts">
-import { reactive, toRefs } from 'vue'
+import { reactive, toRefs, computed } from 'vue'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
-import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 import { currentUser } from '../../store/auth.uts'
 import { backToAccount } from '../../common/account.uts'
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 import { fetchOrder, orderPayload, parseOrder } from '../../api/order.uts'
-import { commentPayload, createComment, createWindowReview, parseComment, strings } from '../../api/comments.uts'
-import { commentPendingKey, newCommentKey, readPendingReview } from '../../common/comments.uts'
+import { Review, fetchOrderReviews, parseOrderReviews, commentPayload, createComment, createWindowReview, parseComment, parseWindowReviewPage, strings } from '../../api/comments.uts'
+import { PendingReview, commentPendingKey, newCommentKey, readPendingReview } from '../../common/comments.uts'
 import { uploadImage } from '../../api/files.uts'
 import { chooseLocalImage } from '../../common/image-picker.uts'
 import { imageSource } from '../../common/images.uts'
 import { jsonNumber, jsonString } from '../../common/json.uts'
 
 type ReviewPhoto = { fileKey: string, url: string }
-const initialPhotos: Array<ReviewPhoto> = []
-const initialTags: Array<string> = []
-const state = reactive({ statusBarHeight: 0, orderId: 0, productId: 0, userUuid: '', productName: '', loading: false, eligible: false,
-    refreshing: false, currentRefreshTime: '', score: 0, content: '', tags: initialTags, photos: initialPhotos,
-    scores: [1, 2, 3, 4, 5], scoreLabels: ['不满意', '有待改进', '还不错', '很满意', '非常满意'],
-    tagOptions: ['味道好', '分量足', '出餐快', '包装好', '值得推荐'], imageBusy: false, submitting: false, pending: false, succeeded: false, requestKey: '', errorText: '' })
-const { statusBarHeight, productId, productName, loading, eligible, refreshing, currentRefreshTime, score, content, tags, photos, scores, scoreLabels, tagOptions, imageBusy, submitting, pending, succeeded, errorText } = toRefs(state)
-
-function setScore(value: number) { if (!state.pending && !state.submitting) state.score = value }
-function toggleTag(value: string) {
-    if (state.pending || state.submitting) return
-    const index = state.tags.indexOf(value)
-    if (index >= 0) state.tags.splice(index, 1)
-    else if (state.tags.length < 5) state.tags.push(value)
+type ReviewSection = { productId: number, name: string, selected: boolean, score: number, content: string, photos: Array<ReviewPhoto>, tags: Array<string>, pending: boolean, key: string, saved: Review | null }
+const initialSections: Array<ReviewSection> = []
+const state = reactive({ statusBarHeight: 0, orderId: 0, focusProductId: 0, userUuid: '', sections: initialSections, ready: false, loading: false, submitting: false, imageBusy: false, errorText: '', successText: '', refreshing: false, currentRefreshTime: '', tagOptions: ['味道好','分量足','出餐快','包装好','值得推荐'], scores: [1,2,3,4,5], scoreLabels: ['不满意','有待改进','还不错','很满意','非常满意'] })
+const { statusBarHeight, sections, ready, loading, submitting, imageBusy, errorText, successText, refreshing, currentRefreshTime, tagOptions, scores, scoreLabels } = toRefs(state)
+const hasUnreviewed = computed((): boolean => state.sections.some((section: ReviewSection): boolean => section.saved == null))
+function makeSection(productId: number, name: string, saved: Review | null): ReviewSection {
+    const section: ReviewSection = { productId: productId, name: name, selected: saved == null && productId == state.focusProductId, score: 0, content: '', photos: [], tags: [], pending: false, key: '', saved: saved }
+    const storageKey = commentPendingKey(state.userUuid, state.orderId, productId)
+    if (saved != null) { uni.removeStorageSync(storageKey); return section }
+    const draft = readPendingReview(storageKey, state.orderId, productId)
+    if (draft != null) {
+        section.pending = true; section.selected = true; section.key = draft.key
+        section.score = jsonNumber(draft.body, 'score') ?? 0; section.content = jsonString(draft.body, 'content') ?? ''; section.tags = strings(draft.body, 'tags') ?? []
+        const keys = strings(draft.body, 'imageFileKeys') ?? []
+        for (let i = 0; i < keys.length; i++) section.photos.push({ fileKey: keys[i], url: '/api/files/' + keys[i] + '/content' })
+    }
+    return section
+}
+async function loadOrder(): Promise<void> {
+    if (state.loading || state.submitting || state.imageBusy) return
+    state.ready = false; state.errorText = ''
+    if (!Number.isInteger(state.orderId) || state.orderId <= 0) { state.errorText = '订单编号无效'; return }
+    state.loading = true
+    try {
+        const orderResult = await fetchOrder(state.orderId)
+        const orderRaw = orderPayload(orderResult); const order = orderRaw == null ? null : parseOrder(orderRaw)
+        if (order == null || order.status != '已完成') { state.errorText = order == null ? orderResult.message : '完成取餐后才可以评价'; return }
+        const result = await fetchOrderReviews(state.orderId)
+        const raw = commentPayload(result); const reviews = raw == null ? null : parseOrderReviews(raw)
+        if (reviews == null || reviews.orderId != state.orderId) { state.errorText = result.message.length > 0 ? result.message : '评价状态暂不可用'; return }
+        const next: Array<ReviewSection> = [makeSection(0, '本次店铺体验', reviews.windowReview)]
+        for (let i = 0; i < order.items.length; i++) {
+            const item = order.items[i]
+            if (next.some((entry: ReviewSection): boolean => entry.productId == item.productId)) continue
+            next.push(makeSection(item.productId, item.productName, reviews.productReviews.find((entry: Review): boolean => entry.productId == item.productId) ?? null))
+        }
+        // 返回页面或刷新时保留尚未提交的填写内容；服务端已评价状态始终优先。
+        for (let i = 0; i < next.length; i++) {
+            const previous = state.sections.find((entry: ReviewSection): boolean => entry.productId == next[i].productId)
+            if (next[i].saved == null && !next[i].pending && previous != null && previous.saved == null) next[i] = previous
+        }
+        state.sections = next; state.ready = true
+    } finally { state.loading = false }
+}
+function toggleSection(index: number) { const s = state.sections[index]; if (state.ready && !state.submitting && !state.imageBusy && s.saved == null && !s.pending) s.selected = !s.selected }
+function setScore(index: number, score: number) { const s = state.sections[index]; if (state.ready && !state.submitting && s.saved == null && !s.pending) s.score = score }
+function toggleTag(index: number, tag: string) {
+    const s = state.sections[index]
+    if (!state.ready || state.submitting || s.saved != null || s.pending) return
+    const found = s.tags.indexOf(tag)
+    if (found >= 0) s.tags.splice(found, 1)
+    else if (s.tags.length < 5) s.tags.push(tag)
 }
 function photoSource(url: string): string { return imageSource(url, 'product') }
-function previewPhoto(index: number) {
-    const urls: Array<string> = []
-    for (let i = 0; i < state.photos.length; i++) urls.push(photoSource(state.photos[i].url))
-    if (index >= 0 && index < urls.length) uni.previewImage({ current: urls[index], urls: urls })
-}
-function removePhoto(index: number) { if (!state.pending && !state.submitting && !state.imageBusy) state.photos.splice(index, 1) }
-async function addPhoto(): Promise<void> {
-    if (state.pending || state.submitting || state.imageBusy || state.photos.length >= 6) return
-    state.imageBusy = true
-    state.errorText = ''
+function previewPhoto(index: number, photoIndex: number) { const urls = state.sections[index].photos.map((p: ReviewPhoto): string => photoSource(p.url)); if (photoIndex >= 0 && photoIndex < urls.length) uni.previewImage({current: urls[photoIndex], urls: urls}) }
+function previewSaved(index: number, photoIndex: number) { const saved = state.sections[index].saved; if (saved == null) return; const urls = saved.images.map((url: string): string => photoSource(url)); if (photoIndex >= 0 && photoIndex < urls.length) uni.previewImage({current: urls[photoIndex], urls: urls}) }
+function removePhoto(index: number, photoIndex: number) { const s = state.sections[index]; if (!state.submitting && !state.imageBusy && !s.pending && s.saved == null) s.photos.splice(photoIndex, 1) }
+async function addPhoto(index: number): Promise<void> {
+    const s = state.sections[index]
+    if (!state.ready || state.submitting || state.imageBusy || s.pending || s.saved != null || s.photos.length >= 6) return
+    state.imageBusy = true; state.errorText = ''
     try {
         const choice = await chooseLocalImage()
         if (choice.error.length > 0) { state.errorText = choice.error; return }
         if (choice.path.length == 0) return
-        const result = await uploadImage(choice.path, 'COMMENT_IMAGE', 0)
-        const data = commentPayload(result)
-        const key = data == null ? '' : (jsonString(data, 'fileKey') ?? '')
-        if (!result.ok || !/^[a-f0-9]{32}$/.test(key)) { state.errorText = result.message.length > 0 ? result.message : '照片上传结果异常'; return }
-        state.photos.push({ fileKey: key, url: '/api/files/' + key + '/content' })
+        const result = await uploadImage(choice.path, 'COMMENT_IMAGE', 0); const raw = commentPayload(result)
+        const key = raw == null ? '' : (jsonString(raw, 'fileKey') ?? '')
+        if (!result.ok || !/^[a-f0-9]{32}$/.test(key)) { state.errorText = result.message.length > 0 ? result.message : '图片上传失败'; return }
+        s.photos.push({fileKey: key, url: '/api/files/' + key + '/content'})
     } finally { state.imageBusy = false }
 }
-async function loadOrder(): Promise<void> {
-    if (state.loading || state.submitting || state.succeeded) return
-    state.eligible = false
-    if (!Number.isInteger(state.orderId) || state.orderId <= 0 || !Number.isInteger(state.productId) || state.productId < 0) { state.errorText = '评价入口无效，请从已完成订单进入'; return }
-    state.loading = true
-    state.errorText = ''
-    try {
-        const result = await fetchOrder(state.orderId)
-        const raw = orderPayload(result)
-        const order = raw == null ? null : parseOrder(raw)
-        if (order == null) { state.errorText = result.message.length > 0 ? result.message : '订单信息暂不可用'; return }
-        if (order.status != '已完成') { state.errorText = '完成取餐后才可以评价'; return }
-        if (state.productId == 0) { state.productName = '评价本次店铺体验'; state.eligible = true; return }
-        for (let i = 0; i < order.items.length; i++) {
-            if (order.items[i].productId == state.productId) { state.productName = order.items[i].productName; state.eligible = true; return }
-        }
-        state.errorText = '这笔订单中没有这道菜'
-    } finally { state.loading = false }
-}
-function restorePending() {
-    const draft = readPendingReview(commentPendingKey(state.userUuid, state.orderId, state.productId), state.orderId, state.productId)
-    if (draft == null) return
-    state.requestKey = draft.key
-    state.pending = true
-    state.score = jsonNumber(draft.body, 'score') ?? 0
-    state.content = jsonString(draft.body, 'content') ?? ''
-    state.tags = strings(draft.body, 'tags') ?? []
-    const keys = strings(draft.body, 'imageFileKeys') ?? []
-    state.photos = []
-    for (let i = 0; i < keys.length; i++) state.photos.push({ fileKey: keys[i], url: '/api/files/' + keys[i] + '/content' })
-}
 async function submit(): Promise<void> {
-    if (state.loading || state.submitting || state.imageBusy || !state.eligible || state.succeeded) return
-    state.errorText = ''
-    if (state.score < 1 || state.score > 5 || state.content.trim().length == 0) { state.errorText = '请选择评分，并填写用餐感受'; return }
-    const storageKey = commentPendingKey(state.userUuid, state.orderId, state.productId)
-    let body: UTSJSONObject
-    if (state.pending) {
-        const draft = readPendingReview(storageKey, state.orderId, state.productId)
-        if (draft == null) { state.errorText = '待确认评价读取失败，请保留此页面稍后重试'; return }
-        body = draft.body
-        state.requestKey = draft.key
-    } else {
-        const keys: Array<string> = []
-        for (let i = 0; i < state.photos.length; i++) keys.push(state.photos[i].fileKey)
-        body = state.productId > 0
-            ? { orderId: state.orderId, productId: state.productId, score: state.score, content: state.content.trim(), imageFileKeys: keys, tags: state.tags.slice() }
-            : { orderId: state.orderId, score: state.score, content: state.content.trim(), imageFileKeys: keys, tags: state.tags.slice() }
-        state.requestKey = newCommentKey()
-        try { uni.setStorageSync(storageKey, JSON.stringify({ key: state.requestKey, body: body })) }
-        catch (error) { state.errorText = '无法保存提交记录，请检查设备存储空间后重试'; return }
-        state.pending = true
-    }
+    if (!state.ready || state.loading || state.submitting || state.imageBusy) return
+    const selected = state.sections.filter((s: ReviewSection): boolean => s.selected && s.saved == null)
+    state.errorText = ''; state.successText = ''
+    if (selected.length == 0) { state.errorText = '请选择尚未评价的店铺或菜品'; return }
+    for (let i = 0; i < selected.length; i++) if (selected[i].score < 1 || selected[i].score > 5) { state.errorText = '请为“' + selected[i].name + '”评分'; return }
     state.submitting = true
+    let published = 0
     try {
-        const result = state.productId > 0 ? await createComment(body, state.requestKey) : await createWindowReview(body, state.requestKey)
-        const raw = commentPayload(result)
-        const saved = raw == null || state.productId == 0 ? null : parseComment(raw)
-        const savedWindowId = raw == null ? 0 : (jsonNumber(raw, 'windowId') ?? 0)
-        const savedReviewId = raw == null ? '' : (jsonString(raw, 'reviewId') ?? '')
-        if (result.ok && ((saved != null && saved.productId == state.productId) || (state.productId == 0 && savedWindowId > 0 && savedReviewId.length > 0))) {
-            uni.removeStorageSync(storageKey)
-            state.pending = false
-            state.succeeded = true
-            return
+        // 先保存全部所选内容，后续任意一项超时或页面重开都可恢复。
+        for (let i = 0; i < selected.length; i++) {
+            const s = selected[i]
+            if (s.pending) continue
+            const keys = s.photos.map((photo: ReviewPhoto): string => photo.fileKey)
+            const body: UTSJSONObject = s.productId > 0 ? { orderId: state.orderId, productId: s.productId, score: s.score, content: s.content.trim(), imageFileKeys: keys, tags: s.tags } : { orderId: state.orderId, score: s.score, content: s.content.trim(), imageFileKeys: keys, tags: s.tags }
+            const draft: PendingReview = { key: newCommentKey(), body: body }
+            try { uni.setStorageSync(commentPendingKey(state.userUuid, state.orderId, s.productId), JSON.stringify(draft)) }
+            catch (_error) { state.errorText = '无法保存提交记录，请检查设备存储空间'; return }
+            s.key = draft.key; s.pending = true
         }
-        // 明确业务拒绝允许修改；超时、限流与服务异常仍保留原始请求确认结果。
-        if (result.statusCode == 400 || result.statusCode == 403 || result.statusCode == 404 || result.statusCode == 409 || result.statusCode == 422) {
-            uni.removeStorageSync(storageKey)
-            state.pending = false
+        for (let i = 0; i < selected.length; i++) {
+            const s = selected[i]; const storageKey = commentPendingKey(state.userUuid, state.orderId, s.productId)
+            const draft = readPendingReview(storageKey, state.orderId, s.productId)
+            if (draft == null) { state.errorText = '待确认记录读取失败，请稍后重试'; break }
+            const result = s.productId > 0 ? await createComment(draft.body, draft.key) : await createWindowReview(draft.body, draft.key)
+            const raw = commentPayload(result)
+            let saved: Review | null = null
+            if (raw != null) {
+                if (s.productId > 0) saved = parseComment(raw)
+                else { const page = parseWindowReviewPage({items: [raw], hasMore: false, nextCursor: null}); if (page != null) saved = page.items[0] }
+            }
+            if (saved != null && saved.productId == s.productId) { s.saved = saved; s.selected = false; s.pending = false; uni.removeStorageSync(storageKey); published++; continue }
+            if ([400,403,404,409,422].includes(result.statusCode)) { s.pending = false; uni.removeStorageSync(storageKey) }
+            if (result.statusCode == 409) state.ready = false
+            state.errorText = '“' + s.name + '”：' + (result.message.length > 0 ? result.message : '提交结果待确认，请重试')
+            break
         }
-        state.errorText = result.message.length > 0 ? result.message : '评价结果暂未确认，请重试确认'
+        if (published > 0) state.successText = '已发布 ' + published + ' 项评价'
     } finally { state.submitting = false }
 }
 function refreshPage() {
-    if (state.refreshing || state.loading || state.submitting || state.imageBusy || state.pending || state.succeeded) return
-    state.refreshing = true
-    const start = Date.now()
-    state.currentRefreshTime = refreshTimeLabel(start)
-    loadOrder().then(() => { finishPullRefresh(start, state.errorText.length == 0, (_time: string) => { state.refreshing = false }) })
+    if (state.refreshing || state.loading || state.submitting || state.imageBusy) return
+    state.refreshing = true; const start = Date.now(); state.currentRefreshTime = refreshTimeLabel(start)
+    loadOrder().then(() => { finishPullRefresh(start, state.ready, (_time: string) => { state.refreshing = false }) })
 }
 function goBack() { if (!state.submitting && !state.imageBusy) backToAccount() }
-function openMine() { if (!state.submitting && !state.imageBusy) uni.navigateTo({ url: '/pages/review/list' }) }
-onLoad((options: OnLoadOptions) => { state.orderId = Number(options['orderId'] ?? '0'); state.productId = Number(options['productId'] ?? '0') })
+onLoad((options: OnLoadOptions) => { state.orderId = Number(options['orderId'] ?? '0'); state.focusProductId = Number(options['productId'] ?? '0') })
 onPageShow(() => {
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight
     const user = currentUser()
-    if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
-    if (user.roleCode != 'CUSTOMER') { uni.switchTab({ url: '/pages/home/home' }); return }
-    state.userUuid = user.userUuid
-    restorePending()
-    loadOrder()
+    if (user == null) { uni.reLaunch({url: '/pages/login/login'}); return }
+    if (user.roleCode != 'CUSTOMER') { uni.switchTab({url: '/pages/home/home'}); return }
+    state.userUuid = user.userUuid; loadOrder()
 })
 </script>
 <style>

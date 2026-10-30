@@ -23,7 +23,7 @@ export function readPendingReview(storageKey: string, orderId: number, productId
     const content = jsonString(body, 'content') ?? ''
     const images = strings(body, 'imageFileKeys')
     const tags = strings(body, 'tags')
-    if (jsonNumber(body, 'orderId') != orderId || (productId > 0 && jsonNumber(body, 'productId') != productId) || !Number.isInteger(score) || score < 1 || score > 5 || content.trim().length == 0 || content.length > 1000 || images == null || images.length > 6 || tags == null || tags.length > 5) return null
+    if (jsonNumber(body, 'orderId') != orderId || (productId > 0 && jsonNumber(body, 'productId') != productId) || !Number.isInteger(score) || score < 1 || score > 5 || content.length > 1000 || images == null || images.length > 6 || tags == null || tags.length > 5) return null
     for (let i = 0; i < images.length; i++) if (!/^[a-f0-9]{32}$/.test(images[i])) return null
     for (let i = 0; i < tags.length; i++) if (tags[i].trim().length == 0 || tags[i].length > 20) return null
     return { key: key, body: body }

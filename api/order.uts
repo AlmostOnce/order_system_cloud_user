@@ -2,7 +2,7 @@ import { httpGet, httpPost, httpPatch, HttpResult } from '../common/http.uts'
 import { jsonObject, jsonArray, jsonNumber, jsonString } from '../common/json.uts'
 
 export type OrderLine = { productId: number, productName: string, quantity: number, unitPrice: number, lineAmount: number }
-export type CustomerOrder = { orderId: number, orderNo: string, windowId: number, totalAmount: number, status: string, remark: string, pickupCode: string, createdAt: string, items: Array<OrderLine> }
+export type CustomerOrder = { orderId: number, orderNo: string, windowId: number, windowName: string, totalAmount: number, status: string, remark: string, pickupCode: string, createdAt: string, items: Array<OrderLine> }
 
 export function orderPayload(result: HttpResult): UTSJSONObject | null {
     return result.ok && result.data != null ? jsonObject(result.data, 'data') : null
@@ -29,13 +29,19 @@ export function parseOrder(data: UTSJSONObject): CustomerOrder | null {
             items.push({ productId: productId, productName: jsonString(raw, 'productName') ?? '菜品', quantity: quantity, unitPrice: unit, lineAmount: line })
         }
     }
-    return { orderId: id, orderNo: jsonString(data, 'orderNo') ?? '', windowId: windowId, totalAmount: amount, status: status,
+    return { orderId: id, orderNo: jsonString(data, 'orderNo') ?? '', windowId: windowId, windowName: jsonString(data, 'windowName') ?? '', totalAmount: amount, status: status,
         remark: jsonString(data, 'remark') ?? '', pickupCode: jsonString(data, 'pickupCode') ?? '', createdAt: jsonString(data, 'createdAt') ?? '', items: items }
 }
 
 export function createOrder(body: UTSJSONObject, key: string): Promise<HttpResult> { return httpPost('/orders', body, true, key) }
 export function fetchOrders(): Promise<HttpResult> { return httpGet('/orders/list', true) }
 export function fetchOrder(id: number): Promise<HttpResult> { return httpGet('/orders/' + id, true) }
+/** 仅订单所属顾客可读取，取餐码不随普通订单查询返回。 */
+export function fetchPickupCode(id: number): Promise<HttpResult> { return httpGet('/orders/' + id + '/pickup-code', true) }
+export function verifyOrderPickup(pickupCode: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { pickupCode: pickupCode }
+    return httpPost('/orders/pickup/verify', body, true)
+}
 export function cancelOrder(id: number): Promise<HttpResult> { return httpPatch('/orders/' + id + '/cancel', null, true) }
 export function payOrder(id: number, password: string): Promise<HttpResult> {
     const body: UTSJSONObject = { orderId: id, channelCode: 'BALANCE', payPassword: password }

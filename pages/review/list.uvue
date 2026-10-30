@@ -10,8 +10,8 @@
                 <view v-if="productId > 0 || windowId > 0" class="review-summary"><view class="review-summary-number"><text class="review-average">{{ ratingReady && averageScore != null ? averageScore!.toFixed(1) : '--' }}</text><text class="review-summary-unit">/ 5</text></view><view class="review-summary-copy"><text class="account-heading">{{ ratingReady && reviewCount == 0 ? '还没有评分' : '用餐评分' }}</text><text class="account-muted">{{ ratingReady ? reviewCount + ' 条评价' : '评分暂不可用' }}</text></view></view>
                 <text v-if="ratingError.length > 0" class="account-error">{{ ratingError }}</text>
                 <view v-for="review in reviews" :key="review.commentId" class="account-card vapor-account-secondary--account-card">
-                    <view class="review-section-row"><view class="review-author"><text class="review-author-name">{{ review.authorName }}</text><text class="account-muted">{{ formatDate(review.createdAt) }}</text></view><view class="review-rating-pill"><image class="review-small-star" src="/static/review/star-filled.svg"></image><text class="review-rating-text">{{ review.score }} 分</text></view></view>
-                    <text class="review-body">{{ review.content }}</text>
+                    <view class="review-section-row"><view class="review-author-avatar"><business-image :src="review.authorAvatarUrl" kind="avatar"></business-image></view><view class="review-author"><text class="review-author-name">{{ review.authorName }}</text><text class="account-muted">{{ formatDate(review.createdAt) }}</text></view><view class="review-rating-pill"><image class="review-small-star" src="/static/review/star-filled.svg"></image><text class="review-rating-text">{{ review.score }} 分</text></view></view>
+                    <text v-if="review.content.length > 0" class="review-body">{{ review.content }}</text>
                     <view v-if="review.tags.length > 0" class="review-tags"><view v-for="tag in review.tags" :key="tag" class="review-tag"><text class="review-tag-label">{{ tag }}</text></view></view>
                     <view v-if="review.images.length > 0" class="review-photos"><image v-for="(url, index) in review.images" :key="url" class="review-photo review-list-photo" :src="photoSource(url)" mode="aspectFill" @click="previewPhotos(review, index)"></image></view>
                     <button v-if="productId == 0 && windowId == 0 && !showWindowReviews" class="review-product-link" @click="openProduct(review)"><text class="account-link-text">查看这道菜的评价</text><view class="account-arrow"></view></button>
@@ -27,6 +27,7 @@
 </template>
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
+import BusinessImage from '../../components/business-image/business-image.uvue'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
 import { Review, fetchComments, fetchProductRating, fetchWindowReviews, fetchWindowRating, commentPayload, parseCommentPage, parseWindowReviewPage, parseRating } from '../../api/comments.uts'
 import { jsonNumber } from '../../common/json.uts'

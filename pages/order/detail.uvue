@@ -7,16 +7,22 @@
 <view class="account-content vapor-account-secondary--account-content">
             <view v-if="order != null" class="order-status-card">
                 <text class="order-status-label">{{ order!.status }}</text>
-                <text class="order-status-note">{{ order!.status == '待支付' ? (paymentSuccess ? '支付已成功，订单状态确认中' : '完成支付后，窗口将收到你的订单') : (order!.status == '已取消' ? '订单已取消' : '请留意订单进度，到窗口取餐') }}</text>
-                <text v-if="order!.pickupCode.length > 0 && order!.status != '待支付' && order!.status != '已取消'" class="order-pickup">取餐码 {{ order!.pickupCode }}</text>
+                <text class="order-status-note">{{ order!.status == '待支付' ? (paymentSuccess ? '支付已成功，订单状态确认中' : '完成支付后，窗口将收到你的订单') : (order!.status == '已取消' ? '订单已取消' : (order!.status == '已完成' ? '已凭取餐码核销，订单已完成' : '请留意订单进度，到窗口取餐')) }}</text>
+            </view>
+            <view v-if="order != null && (order!.status == '已支付' || order!.status == '制作中' || order!.status == '待取货')" class="account-card vapor-account-secondary--account-card pickup-code-card">
+                <text class="pickup-code-label">取餐码</text>
+                <text v-if="pickupCode.length > 0" class="pickup-code-number">{{ pickupCode }}</text>
+                <text v-else class="account-note">{{ pickupLoading ? '正在获取取餐码…' : '取餐码暂不可用' }}</text>
+                <text class="pickup-code-note">{{ order!.status == '待取货' ? '到窗口向商家出示，核销成功后完成订单' : '制作完成后凭码取餐，请勿提前泄露' }}</text>
+                <text v-if="pickupError.length > 0" class="account-error" role="alert">{{ pickupError }}</text>
             </view>
             <view v-if="order != null" class="account-card vapor-account-secondary--account-card">
-                <text class="account-heading">本次用餐</text>
+                <text class="account-heading">{{ order!.windowName.length > 0 ? order!.windowName : '店铺名称暂不可用' }}</text>
                 <view v-for="item in order!.items" :key="item.productId" class="order-line"><view class="order-line-copy"><text class="order-line-name">{{ item.productName }}</text><text class="account-muted">¥{{ item.unitPrice.toFixed(2) }} × {{ item.quantity }}</text></view><text class="order-line-price">¥{{ item.lineAmount.toFixed(2) }}</text></view>
                 <view class="order-total"><text class="account-muted">订单金额</text><text class="order-total-price">¥{{ order!.totalAmount.toFixed(2) }}</text></view>
                 <text class="account-note">订单号 {{ order!.orderNo }}</text><text class="account-note">下单时间 {{ formatDate(order!.createdAt) }}</text>
                 <text v-if="order!.remark.length > 0" class="account-note">备注：{{ order!.remark }}</text>
-                <button v-if="order!.status == '已完成'" class="account-primary vapor-account-secondary--account-primary" :disabled="loading" @click="reviewWindow"><text class="account-primary-text">评价店铺</text></button>
+                <button v-if="order!.status == '已完成'" class="account-primary vapor-account-secondary--account-primary" :disabled="loading" @click="reviewWindow"><text class="account-primary-text">{{ reviewStatusReady ? (orderReviewComplete ? '查看评价' : (orderReviewed ? '查看评价 / 继续评价' : '评价订单')) : '订单评价' }}</text></button>
             </view>
             <view v-if="order != null && order!.status == '待支付' && !paymentSuccess" class="account-card vapor-account-secondary--account-card">
                 <text class="account-heading">余额支付</text>
@@ -45,9 +51,10 @@
 </template>
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
+import { Review, fetchOrderReviews, parseOrderReviews, commentPayload } from '../../api/comments.uts'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
-import { CustomerOrder, fetchOrder, fetchOrderPayment, payOrder, cancelOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts';
+import { OrderLine, CustomerOrder, fetchOrder, fetchPickupCode, fetchOrderPayment, payOrder, cancelOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts';
 import { fetchMyBalance, walletPayload } from '../../api/wallet.uts';
 import { HttpResult } from '../../common/http.uts';
 import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts';
@@ -55,9 +62,11 @@ import { readStoredObject, cleanupKey, paymentPendingKey } from '../../common/ch
 import { currentUser } from '../../store/auth.uts';
 import { backToAccount, accountDate } from '../../common/account.uts';
 
-const state = reactive({ refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
+let pickupPageVisible = false
+let pickupVersion = 0
+const state = reactive({ reviewStatusReady: false, orderReviewed: false, orderReviewComplete: false, pickupCode: '', pickupLoading: false, pickupError: '', refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
 
-const { refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
+const { reviewStatusReady, orderReviewed, orderReviewComplete, pickupCode, pickupLoading, pickupError, refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.loading || state.paying || state.cancelling || state.balanceLoading || state.cleanupLoading)
@@ -83,6 +92,16 @@ function goBack() {
 
 function formatDate(value: string): string {
     return accountDate(value);
+}
+
+async function loadReviewStatus(): Promise<void> {
+    state.reviewStatusReady = false; state.orderReviewed = false; state.orderReviewComplete = false
+    if (state.order == null || state.order!.status != '已完成') return
+    const result = await fetchOrderReviews(state.orderId)
+    const raw = commentPayload(result); const reviews = raw == null ? null : parseOrderReviews(raw)
+    if (reviews != null && reviews.orderId == state.orderId) { state.reviewStatusReady = true; state.orderReviewed = reviews.windowReview != null || reviews.productReviews.length > 0
+        state.orderReviewComplete = reviews.windowReview != null && state.order != null && state.order!.items.every((item: OrderLine): boolean => reviews.productReviews.some((review: Review): boolean => review.productId == item.productId))
+    }
 }
 
 function reviewWindow() {
@@ -147,13 +166,14 @@ function refresh(): Promise<void> {
             return;
         }
         state.order = order;
+        state.pickupCode = ''; state.pickupError = '';
         if (order.status != '待支付') {
             closePayment();
             state.paymentUncertain = false;
             uni.removeStorageSync(paymentPendingKey(state.userUuid, state.orderId));
             state.loading = false;
             state.paymentReady = true;
-            return;
+            return Promise.all([loadPickupCode(), loadReviewStatus()]).then(() => {});
         }
         // 未发起过支付时只读取订单与余额，不查询尚不存在的支付单。
         if (!state.paymentUncertain && !state.paymentSuccess) {
@@ -176,6 +196,21 @@ function refresh(): Promise<void> {
         });
         return Promise.all([paymentTask, loadBalance()]).then(() => { });
     });
+}
+
+function loadPickupCode(): Promise<void> {
+    if (!pickupPageVisible || state.order == null || !['已支付', '制作中', '待取货'].includes(state.order!.status)) return Promise.resolve();
+    const id = state.orderId;
+    const owner = state.userUuid;
+    const version = ++pickupVersion;
+    state.pickupLoading = true;
+    return fetchPickupCode(id).then((result: HttpResult) => {
+        if (!pickupPageVisible || version != pickupVersion || state.orderId != id || currentUser()?.userUuid != owner) return;
+        const data = orderPayload(result);
+        const code = data == null ? '' : (jsonString(data, 'pickupCode') ?? '');
+        if (!result.ok || !/^[0-9]{6}$/.test(code)) { state.pickupError = result.message.length > 0 ? result.message : '取餐码获取失败，请下拉重试'; return; }
+        state.pickupCode = code;
+    }).finally(() => { if (version == pickupVersion) state.pickupLoading = false; });
 }
 
 function loadBalance(): Promise<void> {
@@ -267,6 +302,7 @@ onLoad((options: OnLoadOptions) => {
 })
 
 onPageShow(() => {
+    pickupPageVisible = true;
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     const user = currentUser();
     if (user == null) {
@@ -284,11 +320,13 @@ onPageShow(() => {
 })
 
 onPageHide(() => {
+    pickupPageVisible = false; pickupVersion++; state.pickupCode = ""; state.pickupLoading = false;
     state.paymentExpanded = false;
     state.payPassword = '';
 })
 
 onUnload(() => {
+    pickupPageVisible = false; pickupVersion++; state.pickupCode = ""; state.pickupLoading = false;
     state.paymentExpanded = false;
     state.payPassword = '';
 })
@@ -297,4 +335,8 @@ onUnload(() => {
     @import '../../styles/account.css';
     @import '../../styles/order.css';
     @import '../../styles/review.css';
+    .pickup-code-card { align-items: center; }
+    .pickup-code-label { color: #7A6C60; font-size: 13px; line-height: 20px; }
+    .pickup-code-number { color: #C2410C; font-size: 38px; line-height: 54px; letter-spacing: 7px; font-weight: bold; margin-top: 10px; }
+    .pickup-code-note { color: #8B7B6F; font-size: 12px; line-height: 20px; margin-top: 10px; text-align: center; }
 </style>

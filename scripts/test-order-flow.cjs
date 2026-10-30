@@ -13,6 +13,7 @@ for (const method of ['httpGet', 'httpPost', 'httpPatch']) http[method] = (...ar
 const cache = new Map();
 function load(relative) {
     const file = path.resolve(root, relative);
+    if (file === path.resolve(root, 'store/notifications.uts')) return { notificationState: { unreadCount: 0 }, startNotificationSession() {}, refreshNotificationCount: () => Promise.resolve() };
     if (cache.has(file)) return cache.get(file);
     if (file === path.resolve(root, 'common/http.uts')) return http;
     if (file === path.resolve(root, 'store/auth.uts')) return { currentUser: () => ({ userUuid: '12345678-1234-4234-8234-123456789abc', roleCode: 'CUSTOMER' }) };
@@ -36,6 +37,9 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
 
 (async () => {
     const api = load('api/order.uts');
+    await api.verifyOrderPickup('012345');
+    assert.deepEqual(calls.at(-1).args.slice(0,2),['/orders/pickup/verify',{pickupCode:'012345'}]);
+    calls.length=0;
     const checkout = load('common/checkout.uts');
     const draft = { key: 'order-original', windowId: 2, windowName: '一食堂', remark: '少辣', items: [{ productId: 3, productName: '饭', quantity: 2, revision: 'rev-original', unitPrice: 9, lineAmount: 18 }] };
     assert.deepEqual(checkout.orderBody(draft), { windowId: 2, remark: '少辣', items: [{ productId: 3, quantity: 2 }] });
@@ -43,6 +47,8 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
     assert.equal(api.parseOrder({ ...orderData, totalAmount: null }), null);
     assert.equal(api.parseOrder({ ...orderData, items: [null] }), null);
     assert.equal(api.parseOrder(orderData).items[0].lineAmount, 18);
+    assert.equal(api.parseOrder({...orderData,windowName:'川味小厨'}).windowName,'川味小厨');
+    assert.equal(api.parseOrder(orderData).windowName,'','missing name never becomes an internal window id');
 
     const { vm, component } = page('pages/order/confirm.uvue');
     Object.assign(vm, { userUuid: '12345678-1234-4234-8234-123456789abc', windowId: 2, windowName: draft.windowName, items: draft.items, remark: draft.remark });

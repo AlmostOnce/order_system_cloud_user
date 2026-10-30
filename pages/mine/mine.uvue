@@ -47,7 +47,7 @@
 				</view>
 
 				<text v-if="roleCode == 'STALL_MANAGER' || roleCode == 'RESTAURANT_MANAGER'" class="account-section-label">窗口管理</text>
-                <view v-if="roleCode == 'STALL_MANAGER' || roleCode == 'RESTAURANT_MANAGER'" class="entry-group"><button class="account-entry" @click="openImageManagement"><view class="account-entry-icon"><view class="account-icon-line"></view><view class="account-icon-line"></view></view><view class="account-entry-body"><text class="account-entry-title">窗口与菜品图片</text><text class="account-entry-note">上传封面，维护菜品展示图片</text></view><view class="account-arrow"></view></button></view>
+                <view v-if="roleCode == 'STALL_MANAGER' || roleCode == 'RESTAURANT_MANAGER'" class="entry-group"><button class="account-entry" @click="openPickupVerification"><view class="account-entry-icon"><view class="center-receipt"></view></view><view class="account-entry-body"><text class="account-entry-title">取餐核销</text><text class="account-entry-note">输入顾客取餐码，确认餐品交付</text></view><view class="account-arrow"></view></button><view class="entry-divider"></view><button class="account-entry" @click="openImageManagement"><view class="account-entry-icon"><view class="account-icon-line"></view><view class="account-icon-line"></view></view><view class="account-entry-body"><text class="account-entry-title">窗口与菜品图片</text><text class="account-entry-note">上传封面，维护菜品展示图片</text></view><view class="account-arrow"></view></button></view>
                 <text class="account-section-label">账号与安全</text>
 				<view class="entry-group">
 					<button class="account-entry" @click="openProfile"><view class="account-entry-icon"><view class="person-head"></view><view class="person-body"></view></view><view class="account-entry-body"><text class="account-entry-title">个人资料</text><text class="account-entry-note">用户名、联系方式与账号信息</text></view><view class="account-arrow"></view></button>
@@ -175,6 +175,7 @@ function openCancelledOrders() {
     openOrderList('cancelled');
 }
 
+function openPickupVerification() { uni.navigateTo({ url: '/pages/manage/pickup' }); }
 
 function openImageManagement() {
     uni.navigateTo({ url: '/pages/manage/images' });
