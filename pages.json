@@ -65,6 +65,7 @@
 		{ "path": "pages/notifications/orders", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/order/detail", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/order/list", "style": { "navigationStyle": "custom" } },
+        { "path": "pages/account/password-recovery", "style": { "navigationStyle": "custom" } },
         { "path": "pages/review/create", "style": { "navigationStyle": "custom" } },
         { "path": "pages/review/list", "style": { "navigationStyle": "custom" } },
         { "path": "pages/manage/images", "style": { "navigationStyle": "custom" } },

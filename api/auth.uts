@@ -64,3 +64,17 @@ export function register(username: string, email: string, password: string): Pro
 export function logout(): Promise<HttpResult> {
     return httpLogout()
 }
+
+/** 匿名找回登录密码，凭据仅在当前页面内存中保留。 */
+export function sendPasswordResetCode(email: string, captchaId: string, captchaCode: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { email: email, captchaId: captchaId, captchaCode: captchaCode }
+    return httpPost('/auth/password-reset/code', body, false)
+}
+export function verifyPasswordResetCode(email: string, code: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { email: email, code: code }
+    return httpPost('/auth/password-reset/verify', body, false)
+}
+export function confirmPasswordReset(resetToken: string, newPassword: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { resetToken: resetToken, newPassword: newPassword }
+    return httpPost('/auth/password-reset/confirm', body, false)
+}

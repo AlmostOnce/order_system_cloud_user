@@ -119,6 +119,8 @@
 				<text class="options-hint">登录即表示同意校园食堂服务条款</text>
 			</view>
 
+            <button class="forgot-password-action" :disabled="submitting" @click="openPasswordRecovery"><text class="forgot-password-label">忘记密码？</text></button>
+
 			<!-- 按钮不单独做入场：卡片整体淡入时已带着它一起出现，此处只负责按压反馈 -->
 			<view
 				class="submit"
@@ -319,6 +321,10 @@ function submit() {
         // 首页已是底部导航的 tab 页，必须用 switchTab 跳转并重置页面栈。
         uni.switchTab({ url: '/pages/home/home' });
     });
+}
+
+function openPasswordRecovery(): void {
+    if (!state.submitting) uni.navigateTo({ url: '/pages/account/password-recovery' })
 }
 
 function toRegister() {
@@ -867,4 +873,9 @@ onReady(() => {
 		color: #C9BDB2;
 		letter-spacing: 1px;
 	}
+.forgot-password-action { display: flex; align-items: center; justify-content: flex-end; min-height: 44px; margin: 0; padding: 0; border-width: 0; background-color: transparent; }
+/* #ifdef WEB */
+.forgot-password-action::after { border: none; }
+/* #endif */
+.forgot-password-label { color: #C2410C; font-size: 13px; line-height: 22px; }
 </style>
