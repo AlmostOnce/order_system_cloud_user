@@ -36,3 +36,13 @@
 /* Preserve VDOM Web specificity; native uses explicit vapor-* classes above. */
 .order-filter-on .order-filter-text { color: #FFFFFF; font-weight: bold; }
 /* #endif */
+
+.order-payment-countdown { margin-top: 18px; }
+.order-countdown-label { font-size: 12px; line-height: 20px; color: #F4DCCB; }
+.order-countdown-number { margin-top: 2px; font-size: 36px; line-height: 46px; font-weight: bold; color: #FFD5B7; }
+.order-list-countdown { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 14px; width: 100%; padding: 10px 12px; border-radius: 10px; background-color: #FDF6F0; }
+.order-list-countdown-label { flex-shrink: 0; margin-right: 12px; font-size: 12px; line-height: 20px; color: #7A6C60; }
+.order-list-countdown-value { font-size: 15px; line-height: 22px; font-weight: bold; color: #C2410C; }
+/* #ifdef WEB */
+.account-page .order-list-countdown { flex-direction: row; box-sizing: border-box; }
+/* #endif */

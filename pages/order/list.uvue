@@ -10,6 +10,7 @@
             <view v-if="pendingWindowId > 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">有一笔提交结果待确认</text><text class="account-note">继续确认原订单，避免重复下单。</text><button class="account-primary vapor-account-secondary--account-primary" @click="resume"><text class="account-primary-text">继续确认</text></button></view>
             <button v-for="item in visibleOrders" :key="item.orderId" class="order-list-card" @click="openOrder(item.orderId)">
                 <view class="order-list-top"><text class="order-line-name">{{ item.windowName.length > 0 ? item.windowName : '店铺名称暂不可用' }}</text><text class="order-list-status">{{ item.status }}</text></view>
+                <view v-if="item.status == '待支付'" class="order-list-countdown"><text class="order-list-countdown-label">剩余支付时间</text><text class="order-list-countdown-value">{{ paymentTime(item) }}</text></view>
                 <text class="account-muted order-list-date">{{ formatDate(item.createdAt) }}</text>
                 <text class="account-muted">订单号 {{ item.orderNo }}</text>
                 <view class="order-list-top order-list-bottom"><text class="account-muted">{{ item.status == '已完成' ? '查看详情与评价' : '查看订单详情' }}</text><text class="order-total-price">¥{{ item.totalAmount.toFixed(2) }}</text></view>
@@ -22,6 +23,7 @@
 </template>
 <script setup lang="uts">
 import { reactive, toRefs, computed } from 'vue'
+import { orderPaymentDeadline, orderPaymentTimeLabel } from '../../common/order-countdown.uts'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { normalizeOrderStatusFilter } from '../../common/order-navigation.uts';
@@ -38,7 +40,7 @@ type OrderFilterTab = {
 
 const initialOrders: Array<CustomerOrder> = [];
 const initialFilterTabs: Array<OrderFilterTab> = [{ code: 'all', label: '全部' }, { code: 'pending', label: '待支付' }, { code: 'active', label: '进行中' }, { code: 'completed', label: '已完成' }, { code: 'cancelled', label: '已取消' }];
-const state = reactive({ refreshing: false, currentRefreshTime: '', selectedStatus: 'all', filterTabs: initialFilterTabs, statusBarHeight: 0, orders: initialOrders, loading: false, errorText: '', pendingWindowId: 0 })
+const state = reactive({ clockNow: Date.now(), receivedAt: Date.now(), refreshing: false, currentRefreshTime: '', selectedStatus: 'all', filterTabs: initialFilterTabs, statusBarHeight: 0, orders: initialOrders, loading: false, errorText: '', pendingWindowId: 0 })
 
 const { refreshing, currentRefreshTime, selectedStatus, filterTabs, statusBarHeight, orders, loading, errorText, pendingWindowId } = toRefs(state)
 
@@ -67,6 +69,24 @@ const visibleOrders = computed((): Array<CustomerOrder> => {
         return item.status == '已支付' || item.status == '制作中' || item.status == '待取货';
     });
 })
+
+let countdownTimer = 0
+let listVisible = false
+let loadVersion = 0
+function stopCountdown() { if (countdownTimer > 0) { clearInterval(countdownTimer); countdownTimer = 0 } }
+function startCountdown() {
+    stopCountdown(); state.clockNow = Date.now()
+    if (listVisible && state.orders.some((item: CustomerOrder): boolean => item.status == '待支付')) {
+        countdownTimer = setInterval(() => { state.clockNow = Date.now() }, 1000)
+    }
+}
+function paymentTime(item: CustomerOrder): string {
+    const deadline = orderPaymentDeadline(item.createdAt)
+    if (deadline <= 0) return '--:--'
+    const now = item.serverTime > 0 ? item.serverTime + Math.max(0, state.clockNow - state.receivedAt) : state.clockNow
+    const seconds = Math.max(0, Math.ceil((deadline - now) / 1000))
+    return seconds == 0 ? '已超时，等待系统确认' : orderPaymentTimeLabel(seconds)
+}
 
 function refreshPage() {
     if (state.refreshing || state.loading)
@@ -112,9 +132,11 @@ function resume() {
 function load(): Promise<void> {
     if (state.loading)
         return Promise.resolve();
+    const version = ++loadVersion;
     state.loading = true;
     state.errorText = '';
     return fetchOrders().then((result: HttpResult) => {
+        if (!listVisible || version != loadVersion) return;
         state.loading = false;
         const rows = result.ok && result.data != null ? jsonArray(result.data, 'data') : null;
         if (rows == null) {
@@ -136,6 +158,8 @@ function load(): Promise<void> {
         }
         orders.sort((a: CustomerOrder, b: CustomerOrder): number => b.orderId - a.orderId);
         state.orders = orders;
+        state.receivedAt = Date.now();
+        startCountdown();
     });
 }
 
@@ -146,6 +170,7 @@ onLoad((options: OnLoadOptions) => {
 })
 
 onPageShow(() => {
+    listVisible = true;
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     const user = currentUser();
     if (user == null) {
@@ -160,6 +185,8 @@ onPageShow(() => {
     state.pendingWindowId = draft == null ? 0 : draft.windowId;
     load();
 })
+onPageHide(() => { listVisible = false; loadVersion++; state.loading = false; stopCountdown() })
+onUnload(() => { listVisible = false; loadVersion++; state.loading = false; stopCountdown() })
 </script>
 <style>
     @import '../../styles/account.css';

@@ -1,0 +1,13 @@
+const fs=require('fs'),path=require('path'),assert=require('assert/strict');
+const ts=require('D:/HBuilderX/plugins/compile-typescript/node_modules/typescript/lib/typescript.js');
+const root=path.resolve(__dirname,'..'),mod={exports:{}};
+new Function('require','module','exports',ts.transpileModule(fs.readFileSync(path.join(root,'common/order-countdown.uts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(require,mod,mod.exports);
+const {orderPaymentDeadline,orderPaymentTimeLabel}=mod.exports;
+const created=Date.parse('2026-11-04T12:00:00+08:00');
+assert.equal(orderPaymentDeadline('2026-11-04T12:00:00'),created+900000);
+assert.equal(orderPaymentDeadline('2026-11-04 12:00:00'),created+900000);
+assert.equal(orderPaymentDeadline('2026-11-04T04:00:00Z'),created+900000);
+assert.equal(orderPaymentDeadline('2026-11-04T12:00:00+08:00'),created+900000);
+assert.equal(orderPaymentDeadline(''),0);assert.equal(orderPaymentDeadline('bad-date'),0);
+assert.equal(orderPaymentTimeLabel(900),'15:00');assert.equal(orderPaymentTimeLabel(487),'08:07');assert.equal(orderPaymentTimeLabel(0),'00:00');assert.equal(orderPaymentTimeLabel(-1),'--:--');
+console.log('Creation-based countdown passed: UTC+8, explicit offsets, fifteen minutes, invalid timestamps and MM:SS.');

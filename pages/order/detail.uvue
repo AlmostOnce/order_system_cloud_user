@@ -7,8 +7,13 @@
 <view class="account-content vapor-account-secondary--account-content">
             <view v-if="order != null" class="order-status-card">
                 <text class="order-status-label">{{ order!.status }}</text>
-                <text v-if="order!.status == '待支付' && !paymentSuccess" class="order-status-note">{{ paymentExpired ? '支付期限已到，正在等待系统确认订单状态' : '剩余支付时间 ' + remainingPaymentText }}</text>
-                <text class="order-status-note">{{ order!.status == '待支付' ? (paymentSuccess ? '支付已成功，订单状态确认中' : '完成支付后，窗口将收到你的订单') : (order!.status == '已取消' ? '订单已取消' : (order!.status == '已完成' ? '已凭取餐码核销，订单已完成' : '请留意订单进度，到窗口取餐')) }}</text>
+                <view v-if="order!.status == '待支付' && !paymentSuccess" class="order-payment-countdown">
+                    <text class="order-countdown-label">剩余支付时间</text>
+                    <text class="order-countdown-number">{{ remainingPaymentText }}</text>
+                    <text v-if="!paymentDeadlineKnown" class="order-status-note">下单时间暂不可用，请下拉刷新。</text>
+                    <text v-else-if="paymentExpired" class="order-status-note">支付期限已到，正在等待系统确认订单状态。</text>
+                </view>
+                <text class="order-status-note">{{ order!.status == '待支付' ? (paymentSuccess ? '支付已成功，订单状态确认中' : (paymentExpired ? '订单状态以系统确认为准' : '请在下单后十五分钟内完成支付')) : (order!.status == '已取消' ? '订单已取消' : (order!.status == '已完成' ? '已凭取餐码核销，订单已完成' : '请留意订单进度，到窗口取餐')) }}</text>
             </view>
             <view v-if="order != null && (order!.status == '已支付' || order!.status == '制作中' || order!.status == '待取货')" class="account-card vapor-account-secondary--account-card pickup-code-card">
                 <text class="pickup-code-label">取餐码</text>
@@ -52,6 +57,7 @@
 </template>
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
+import { orderPaymentDeadline, orderPaymentTimeLabel } from '../../common/order-countdown.uts'
 import { Review, fetchOrderReviews, parseOrderReviews, commentPayload } from '../../api/comments.uts'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
@@ -65,22 +71,25 @@ import { backToAccount, accountDate } from '../../common/account.uts';
 
 let pickupPageVisible = false
 let pickupVersion = 0
-const state = reactive({ paymentExpired: false, remainingPaymentText: '--:--', reviewStatusReady: false, orderReviewed: false, orderReviewComplete: false, pickupCode: '', pickupLoading: false, pickupError: '', refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
+const state = reactive({ paymentDeadlineKnown: false, paymentExpired: false, remainingPaymentText: '--:--', reviewStatusReady: false, orderReviewed: false, orderReviewComplete: false, pickupCode: '', pickupLoading: false, pickupError: '', refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
 
-const { paymentExpired, remainingPaymentText, reviewStatusReady, orderReviewed, orderReviewComplete, pickupCode, pickupLoading, pickupError, refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
+const { paymentDeadlineKnown, paymentExpired, remainingPaymentText, reviewStatusReady, orderReviewed, orderReviewComplete, pickupCode, pickupLoading, pickupError, refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
 
 let paymentClock = 0
 let deadlineChecked = false
 function stopPaymentClock() { if (paymentClock > 0) { clearInterval(paymentClock); paymentClock = 0 } }
 function startPaymentClock(order: CustomerOrder) {
     stopPaymentClock()
-    if (order.status != '待支付') { state.paymentExpired = false; return }
+    if (order.status != '待支付') { state.paymentExpired = false; state.paymentDeadlineKnown = false; return }
     const receivedAt = Date.now()
-    const initialRemaining = order.paymentExpiresAt > 0 && order.serverTime > 0 ? Math.max(0, order.paymentExpiresAt - order.serverTime) : 0
+    const deadline = orderPaymentDeadline(order.createdAt)
+    state.paymentDeadlineKnown = deadline > 0
+    if (!state.paymentDeadlineKnown) { state.paymentExpired = true; state.remainingPaymentText = '--:--'; closePayment(); return }
+    const initialRemaining = Math.max(0, deadline - (order.serverTime > 0 ? order.serverTime : receivedAt))
     const tick = () => {
         const seconds = Math.max(0, Math.ceil((initialRemaining - Math.max(0, Date.now() - receivedAt)) / 1000))
         state.paymentExpired = seconds == 0
-        state.remainingPaymentText = Math.floor(seconds / 60).toString().padStart(2, '0') + ':' + (seconds % 60).toString().padStart(2, '0')
+        state.remainingPaymentText = orderPaymentTimeLabel(seconds)
         if (state.paymentExpired) {
             closePayment()
             if (deadlineChecked) { stopPaymentClock(); return }
