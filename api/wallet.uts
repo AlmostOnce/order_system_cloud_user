@@ -63,3 +63,21 @@ export function changeMyEmail(email: string, authorizationToken: string, emailCo
     const body: UTSJSONObject = { email: email, authorizationToken: authorizationToken, emailCode: emailCode }
     return httpPut('/users/me/email', body, true)
 }
+
+/** 支付密码找回只作用于已登录本人，不接收目标用户或邮箱。 */
+export function authorizePayPasswordRecovery(loginPassword: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { loginPassword: loginPassword }
+    return httpPost('/users/me/pay-password/recovery/authorization', body, true)
+}
+export function sendPayPasswordRecoveryCode(authorizationToken: string, captchaId: string, captchaCode: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { authorizationToken: authorizationToken, captchaId: captchaId, captchaCode: captchaCode }
+    return httpPost('/users/me/pay-password/recovery/code', body, true)
+}
+export function verifyPayPasswordRecoveryCode(authorizationToken: string, code: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { authorizationToken: authorizationToken, code: code }
+    return httpPost('/users/me/pay-password/recovery/verify', body, true)
+}
+export function confirmPayPasswordRecovery(resetToken: string, newPayPassword: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { resetToken: resetToken, newPayPassword: newPayPassword }
+    return httpPost('/users/me/pay-password/recovery/confirm', body, true)
+}

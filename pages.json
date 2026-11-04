@@ -49,7 +49,11 @@
 			"style": { "navigationStyle": "custom" }
 		},
 		{
-			"path": "pages/account/pay-password",
+			"path": "pages/account/pay-password-recovery",
+            "style": { "navigationStyle": "custom" }
+        },
+        {
+            "path": "pages/account/pay-password",
 			"style": { "navigationStyle": "custom" }
 		},
 		{
