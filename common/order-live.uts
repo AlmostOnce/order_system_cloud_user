@@ -1,0 +1,31 @@
+import { startNotificationSession, subscribeNotifications, unsubscribeNotifications } from '../store/notifications.uts'
+
+/** 复用通知连接；合并连续推送，操作进行中保留一次补查。 */
+export function startOrderLiveRefresh(reload: () => Promise<void>, busy: () => boolean): () => void {
+    let active = true
+    let running = false
+    let dirty = false
+    let timer = 0
+    const schedule = (): void => {
+        if (!active || timer > 0 || running) return
+        timer = setTimeout(() => {
+            timer = 0
+            if (!active) return
+            if (busy()) { schedule(); return }
+            dirty = false
+            running = true
+            reload().catch(() => {}).finally(() => {
+                running = false
+                if (dirty) schedule()
+            })
+        }, 250)
+    }
+    const changed = () => { dirty = true; schedule() }
+    subscribeNotifications(changed)
+    startNotificationSession()
+    return () => {
+        active = false
+        if (timer > 0) { clearTimeout(timer); timer = 0 }
+        unsubscribeNotifications(changed)
+    }
+}

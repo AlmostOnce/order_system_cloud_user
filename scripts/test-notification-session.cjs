@@ -26,6 +26,7 @@ const api = moduleData.exports, tick = () => new Promise(resolve => setImmediate
  api.subscribeNotifications(() => changes++);
  api.startNotificationSession(); await tick(); assert.equal(sockets.length, 1); assert.equal(badge, '3');
  api.startNotificationSession(); await tick(); assert.equal(sockets.length, 1);
+ sockets[0].handlers.open(); await tick(); assert.equal(changes, 1, 'connection recovery notifies page subscribers'); changes = 0;
  count = 5; sockets[0].handlers.message(); await tick(); assert.equal(badge, '5'); assert.equal(changes, 1);
  api.stopNotificationSession(); sockets[0].handlers.message(); await tick(); assert.equal(changes, 1); assert.equal(closed, 1);
  owner = 'user-b'; count = 0; api.startNotificationSession(); await tick(); assert.equal(sockets.length, 2); assert.equal(badge, '');

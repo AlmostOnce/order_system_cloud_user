@@ -41,11 +41,7 @@
                     <button class="account-link account-link-text button-text button-text-44" :disabled="paying" @click="openRecharge">前往充值</button>
                 <text v-if="!paymentReady" class="account-note">支付状态暂未确认，请稍后查看。</text>
                 <text v-if="paymentUncertain" class="account-note">上次支付结果待确认，请稍后查看或重试同一订单，避免重复操作。</text>
-                    <view v-if="cancelConfirm"><text class="account-note">确认取消这个待支付订单？</text>
-                        <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="paying || cancelling || loading" @click="cancel">{{ cancelling ? '正在取消…' : '确认取消订单' }}</button>
-                        <button class="account-link account-link-text button-text button-text-44" :disabled="cancelling" @click="keepOrder">保留订单</button>
-                    </view>
-                    <button v-else class="account-link account-muted button-text button-text-44" :disabled="paying || loading || !paymentReady || paymentUncertain" @click="askCancel">取消订单</button>
+                    <button class="account-link account-muted button-text button-text-44" :disabled="cancelConfirm || cancelling || paying || loading || !paymentReady || paymentUncertain" @click="askCancel">{{ cancelling ? '正在取消…' : '取消订单' }}</button>
             </view>
             <text v-if="loading" class="account-note">正在获取订单…</text>
             <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
@@ -56,11 +52,14 @@
                 <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
             </view>
         </scroll-view>
+        <confirm-dialog v-if="cancelConfirm" title="取消订单？" message="确认后将取消这笔待支付订单，想吃的话可以重新下单。" cancel-text="保留订单" confirm-text="确认取消" :busy="cancelling" busy-text="正在取消…" @cancel="keepOrder" @confirm="cancel" />
     </view>
 </template>
 <script setup lang="uts">
+import ConfirmDialog from '../../components/confirm-dialog/confirm-dialog.uvue';
 import { requestPaymentPassword, cancelPaymentPassword } from '../../common/payment-password.uts'
 import { toast } from '../../common/feedback.uts'
+import { startOrderLiveRefresh } from '../../common/order-live.uts'
 import { reactive, toRefs } from 'vue'
 import { orderPaymentDeadline, orderPaymentTimeLabel } from '../../common/order-countdown.uts'
 import { Review, fetchOrderReviews, parseOrderReviews, commentPayload } from '../../api/comments.uts'
@@ -76,6 +75,11 @@ import { backToAccount, accountDate } from '../../common/account.uts';
 
 let pickupPageVisible = false
 let pickupVersion = 0
+let orderLoadVersion = 0
+let stopLiveOrders: (() => void) | null = null
+function stopOrderUpdates() {
+    if (stopLiveOrders != null) { stopLiveOrders!(); stopLiveOrders = null }
+}
 const state = reactive({ paymentDeadlineKnown: false, paymentExpired: false, remainingPaymentText: '--:--', reviewStatusReady: false, orderReviewed: false, orderReviewComplete: false, pickupCode: '', pickupLoading: false, pickupError: '', refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
 
 const { paymentDeadlineKnown, paymentExpired, remainingPaymentText, reviewStatusReady, orderReviewed, orderReviewComplete, pickupCode, pickupLoading, pickupError, refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
@@ -134,9 +138,11 @@ function formatDate(value: string): string {
 }
 
 async function loadReviewStatus(): Promise<void> {
+    const version = orderLoadVersion;
     state.reviewStatusReady = false; state.orderReviewed = false; state.orderReviewComplete = false
     if (state.order == null || state.order!.status != '已完成') return
     const result = await fetchOrderReviews(state.orderId)
+    if (version != orderLoadVersion) return;
     const raw = commentPayload(result); const reviews = raw == null ? null : parseOrderReviews(raw)
     if (reviews != null && reviews.orderId == state.orderId) { state.reviewStatusReady = true; state.orderReviewed = reviews.windowReview != null || reviews.productReviews.length > 0
         state.orderReviewComplete = reviews.windowReview != null && state.order != null && state.order!.items.every((item: OrderLine): boolean => reviews.productReviews.some((review: Review): boolean => review.productId == item.productId))
@@ -186,13 +192,13 @@ function closePayment() {
 }
 
 function keepOrder() {
-    state.cancelConfirm = false;
+    if (!state.cancelling) state.cancelConfirm = false;
 }
 
 function askCancel() {
+    if (state.cancelConfirm || state.cancelling || state.paymentUncertain || !state.paymentReady || state.paymentSuccess || state.paying || state.loading || state.order == null || state.order!.status != '待支付') return;
     closePayment();
-    if (!state.paymentUncertain && state.paymentReady && !state.paying && !state.loading)
-        state.cancelConfirm = true;
+    state.cancelConfirm = true;
 }
 
 function refresh(): Promise<void> {
@@ -202,11 +208,13 @@ function refresh(): Promise<void> {
         state.errorText = '订单编号无效';
         return Promise.resolve();
     }
+    const version = ++orderLoadVersion;
     state.loading = true;
     state.errorText = '';
     state.paymentReady = false;
     state.cancelConfirm = false;
     return fetchOrder(state.orderId).then((result: HttpResult) => {
+        if (version != orderLoadVersion) return;
         const data = orderPayload(result);
         const order = data == null ? null : parseOrder(data);
         if (order == null) {
@@ -229,9 +237,10 @@ function refresh(): Promise<void> {
         // 未发起过支付时只读取订单与余额，不查询尚不存在的支付单。
         if (!state.paymentUncertain && !state.paymentSuccess) {
             state.paymentReady = true;
-            return loadBalance().then(() => { state.loading = false; });
+            return loadBalance().then(() => { if (version == orderLoadVersion) state.loading = false; });
         }
         const paymentTask = fetchOrderPayment(state.orderId).then((payment: HttpResult) => {
+            if (version != orderLoadVersion) return;
             const payData = orderPayload(payment);
             state.paymentSuccess = state.paymentSuccess || (payData != null && jsonString(payData, 'status') == 'SUCCESS');
             const status = payData == null ? '' : (jsonString(payData, 'status') ?? '');
@@ -265,9 +274,11 @@ function loadPickupCode(): Promise<void> {
 }
 
 function loadBalance(): Promise<void> {
+    const version = orderLoadVersion;
     state.balanceLoading = true;
     state.balanceReady = false;
     return fetchMyBalance().then((result: HttpResult) => {
+        if (version != orderLoadVersion) return;
         state.balanceLoading = false;
         const data = walletPayload(result);
         if (data == null || jsonNumber(data, 'balance') == null) {
@@ -335,7 +346,7 @@ function pay() {
 }
 
 function cancel() {
-    if (!state.cancelConfirm || state.paying || state.cancelling || state.loading || !state.paymentReady || state.paymentSuccess || state.paymentUncertain)
+    if (!state.cancelConfirm || state.paying || state.cancelling || state.loading || !state.paymentReady || state.paymentSuccess || state.paymentUncertain || state.order == null || state.order!.status != '待支付')
         return;
     state.cancelling = true;
     state.errorText = '';
@@ -355,6 +366,7 @@ onLoad((options: OnLoadOptions) => {
 })
 
 onPageShow(() => {
+    stopOrderUpdates();
     pickupPageVisible = true; deadlineChecked = false;
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     const user = currentUser();
@@ -370,9 +382,17 @@ onPageShow(() => {
     state.paymentUncertain = state.paymentUncertain || uni.getStorageSync(paymentPendingKey(state.userUuid, state.orderId)) === true;
     refresh();
     retryCleanup();
+    const liveOwner = user.userUuid;
+    stopLiveOrders = startOrderLiveRefresh((): Promise<void> => {
+        if (!pickupPageVisible || currentUser()?.userUuid != liveOwner) return Promise.resolve();
+        return refresh();
+    }, (): boolean => state.loading || state.paying || state.cancelling || state.refreshing || state.balanceLoading || state.cleanupLoading);
 })
 
 onPageHide(() => {
+    state.cancelConfirm = false;
+    stopOrderUpdates();
+    orderLoadVersion++; state.loading = false; state.balanceLoading = false;
     stopPaymentClock();
     pickupPageVisible = false; pickupVersion++; state.pickupCode = ""; state.pickupLoading = false;
     if (state.paymentExpanded) cancelPaymentPassword();
@@ -381,6 +401,9 @@ onPageHide(() => {
 })
 
 onUnload(() => {
+    state.cancelConfirm = false;
+    stopOrderUpdates();
+    orderLoadVersion++; state.loading = false; state.balanceLoading = false;
     stopPaymentClock();
     pickupPageVisible = false; pickupVersion++; state.pickupCode = ""; state.pickupLoading = false;
     if (state.paymentExpanded) cancelPaymentPassword();

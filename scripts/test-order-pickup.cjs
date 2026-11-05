@@ -6,6 +6,7 @@ global.uni = { getWindowInfo: () => ({ statusBarHeight: 0 }), getStorageSync: ()
 function page(file) {
  const source = fs.readFileSync(file, 'utf8');
  return loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1], path => {
+  if (path.includes('common/order-live')) return {startOrderLiveRefresh:()=>()=>{}};
   if (path.includes('api/comments')) return {fetchOrderReviews: () => Promise.resolve({}), commentPayload: () => null, parseOrderReviews: () => null};
   if (path.includes('api/order')) return {
    fetchOrder: () => Promise.resolve({ ok: true, data: { orderId: 18, status, items: [] } }), parseOrder: data => data,

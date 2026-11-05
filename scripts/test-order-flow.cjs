@@ -16,6 +16,7 @@ for (const method of ['httpGet', 'httpPost', 'httpPatch']) http[method] = (...ar
 const cache = new Map();
 function load(relative) {
     const file = path.resolve(root, relative);
+    if (file === path.resolve(root, 'common/order-live.uts')) return { startOrderLiveRefresh: () => () => {} };
     if (file === path.resolve(root, 'store/notifications.uts')) return { notificationState: { unreadCount: 0 }, startNotificationSession() {}, refreshNotificationCount: () => Promise.resolve() };
     if (file === path.resolve(root, 'common/payment-password.uts')) return { requestPaymentPassword: () => new Promise(() => {}), cancelPaymentPassword() {} };
     if (cache.has(file)) return cache.get(file);
@@ -117,6 +118,21 @@ const orderData = { createdAt: new Date().toISOString(), expiresAt: new Date(Dat
     assert.equal(calls.slice(firstRefreshCalls).filter(c => c.args[0] === '/payments/order/11').length, 0, 'first visit does not query a nonexistent payment');
     assert.equal(state.paymentReady, true, 'no payment yet permits first payment');
     assert.equal(state.balanceReady, true);
+    const beforeCancel = calls.length;
+    state.askCancel();
+    assert.equal(state.cancelConfirm, true);
+    assert.equal(calls.length, beforeCancel, 'opening cancellation dialog never cancels');
+    state.keepOrder();
+    assert.equal(state.cancelConfirm, false);
+    assert.equal(calls.length, beforeCancel, 'keeping the order never submits');
+    state.askCancel();
+    state.cancel(); state.cancel(); await flush();
+    assert.equal(calls.slice(beforeCancel).filter(c => c.args[0] === '/orders/11/cancel').length, 1, 'confirmation cancels once');
+    state.askCancel();
+    state.$hooks.onPageHide();
+    const hiddenCalls = calls.length;
+    state.cancel(); await flush();
+    assert.equal(calls.length, hiddenCalls, 'late confirmation after leaving is ignored');
     assert.equal(state.paymentExpanded, false, 'password form is hidden initially');
     const beforeOpen = calls.length;
     state.openPayment();

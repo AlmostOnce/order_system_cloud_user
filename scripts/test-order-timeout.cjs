@@ -33,7 +33,8 @@ const listFactory=loadSetup(listSource.match(/<script[^>]*>([\s\S]*?)<\/script>/
  if(p.includes('api/order'))return {fetchOrders:async()=>({ok:true,data:{data:[{...pending,serverTime:now}]}}),parseOrder:r=>r};
  if(p.includes('common/json'))return {jsonArray:(r,k)=>r[k]};
  if(p.includes('store/auth'))return {currentUser:()=>({roleCode:'CUSTOMER',userUuid:'test'})};
- if(p.includes('checkout'))return {readCheckout:()=>null};return {};
+ if (p.includes('common/order-live')) return {startOrderLiveRefresh:()=>()=>{}};
+  if(p.includes('checkout'))return {readCheckout:()=>null};return {};
 });
 (async()=>{
  try {

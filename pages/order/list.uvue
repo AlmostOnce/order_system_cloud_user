@@ -34,6 +34,7 @@
     </view>
 </template>
 <script setup lang="uts">
+import { startOrderLiveRefresh } from '../../common/order-live.uts'
 import { reactive, toRefs, computed } from 'vue'
 import { orderPaymentDeadline, orderPaymentTimeLabel } from '../../common/order-countdown.uts'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
@@ -52,6 +53,10 @@ type OrderFilterTab = {
 
 const initialOrders: Array<CustomerOrder> = [];
 const initialFilterTabs: Array<OrderFilterTab> = [{ code: 'all', label: '全部' }, { code: 'pending', label: '待支付' }, { code: 'active', label: '进行中' }, { code: 'completed', label: '已完成' }, { code: 'cancelled', label: '已取消' }];
+let stopLiveOrders: (() => void) | null = null
+function stopOrderUpdates() {
+    if (stopLiveOrders != null) { stopLiveOrders!(); stopLiveOrders = null }
+}
 const state = reactive({ clockNow: Date.now(), receivedAt: Date.now(), refreshing: false, currentRefreshTime: '', selectedStatus: 'all', filterTabs: initialFilterTabs, statusBarHeight: 0, orders: initialOrders, loading: false, errorText: '', pendingWindowId: 0 })
 
 const { refreshing, currentRefreshTime, selectedStatus, filterTabs, statusBarHeight, orders, loading, errorText, pendingWindowId } = toRefs(state)
@@ -182,6 +187,7 @@ onLoad((options: OnLoadOptions) => {
 })
 
 onPageShow(() => {
+    stopOrderUpdates();
     listVisible = true;
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     const user = currentUser();
@@ -196,9 +202,14 @@ onPageShow(() => {
     const draft = readCheckout(user.userUuid);
     state.pendingWindowId = draft == null ? 0 : draft.windowId;
     load();
+    const liveOwner = user.userUuid;
+    stopLiveOrders = startOrderLiveRefresh((): Promise<void> => {
+        if (!listVisible || currentUser()?.userUuid != liveOwner) return Promise.resolve();
+        return load();
+    }, (): boolean => state.loading || state.refreshing);
 })
-onPageHide(() => { listVisible = false; loadVersion++; state.loading = false; stopCountdown() })
-onUnload(() => { listVisible = false; loadVersion++; state.loading = false; stopCountdown() })
+onPageHide(() => { stopOrderUpdates(); listVisible = false; loadVersion++; state.loading = false; stopCountdown() })
+onUnload(() => { stopOrderUpdates(); listVisible = false; loadVersion++; state.loading = false; stopCountdown() })
 </script>
 <style>
     @import '../../styles/account.css';
