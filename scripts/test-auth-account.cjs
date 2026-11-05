@@ -31,11 +31,12 @@ function load(file) {
  await api.login('user@example.com', 'password', 'captcha', '1234');
  assert.equal(calls.at(-1)[1].account, 'user@example.com');
  const auth = load('store/auth.uts');
- const registered = await auth.register('校园用户', ' USER@Example.com ', 'password');
+ const registered = await auth.register('校园用户', ' USER@Example.com ', 'password', 'a'.repeat(64));
  assert.equal(registered.userNo, '1234567890');
- assert.deepEqual(calls.at(-1)[1], { username: '校园用户', email: 'user@example.com', password: 'password' });
+ assert.deepEqual(calls.at(-1)[1], { username: '校园用户', email: 'user@example.com', password: 'password', emailVerificationToken: 'a'.repeat(64) });
  assert.equal(storage.get('auth_remembered_account'), '1234567890');
- const vm = load('pages/register/register.uvue').create();
+ load('common/email-ownership-session.uts').setRegistrationGrant('a'.repeat(64), 'new@example.com', 300);
+ const vm = load('pages/register/register.uvue').create();vm.$hooks.onLoad();
  assert.notEqual(vm.validateEmail('13800138000'), '');
  assert.notEqual(vm.validateEmail('invalid@'), '');
  assert.equal(vm.validateEmail('user@example.com'), '');

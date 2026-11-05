@@ -13,7 +13,7 @@ const vm = loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1], p => 
  if (p.includes('auth.uts')) return { fetchCaptcha: () => Promise.resolve({ ok: true, data: { captchaId: 'captcha-id', imageBase64: 'data:image/png;base64,abc' } }) };
  if (p.includes('email-change-session.uts')) return { getEmailChangeAuthorization: () => 'a'.repeat(64), clearEmailChangeAuthorization: () => { global.authorizationCleared = true; } };
  if (p.includes('json.uts')) return { jsonString: (obj, key) => typeof obj[key] === 'string' ? obj[key] : null };
- if (p.includes('feedback.uts')) return { toastSuccess: () => {} };
+ if (p.includes('feedback.uts')) return { toast: () => {}, toastSuccess: () => {} };
  return {};
 }).create();
 

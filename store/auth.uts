@@ -1,4 +1,5 @@
-import { jsonObject, jsonString } from '../common/json.uts'
+import { clearEmailOwnershipSession, setEnrollmentAuthorization } from '../common/email-ownership-session.uts'
+import { jsonObject, jsonString, jsonNumber, jsonBoolean } from '../common/json.uts'
 import { clearEmailChangeAuthorization } from '../common/email-change-session.uts'
 import { startNotificationSession, stopNotificationSession } from './notifications.uts'
 /**
@@ -7,7 +8,7 @@ import { startNotificationSession, stopNotificationSession } from './notificatio
  * 负责编排「调用接口—解析令牌—落盘凭据」的完整流程，页面只与这里交互，
  * 不直接接触令牌与存储细节。
  *
- * 约定：需要提示错误的函数以 Promise<string> 返回提示文案，空字符串表示成功。
+ * 登录以结构化结果区分成功、邮箱补验与失败；注册返回账号回执。
  */
 
 // 导入认证接口：本层在其之上编排「取令牌—落盘—记住账号」的完整流程。
@@ -29,16 +30,18 @@ import { parseTokenPayload, TokenPayload } from '../common/jwt.uts'
  * @param captchaId 验证码标识，由获取验证码接口下发
  * @param captchaCode 用户输入的验证码字符
  * @param rememberAccount 是否记住登录账号
- * @return 空字符串表示登录成功，否则为需要展示的错误提示
+ * @return 登录结果；需要补验时不保存Access/Refresh Token
  */
-export function login(account: string, password: string, captchaId: string, captchaCode: string, rememberAccount: boolean): Promise<string> {
-	// 用 Promise<string> 收敛结果：空串表示成功，非空串为可直接 toast 的提示。
-	return new Promise<string>((resolve) => {
+export type LoginResult = { ok: boolean, message: string, emailVerificationRequired: boolean }
+export function login(account: string, password: string, captchaId: string, captchaCode: string, rememberAccount: boolean): Promise<LoginResult> {
+	// 区分已登录、需补验邮箱和失败，受限补验凭据不能当作登录成功。
+	return new Promise<LoginResult>((resolve) => {
+		clearEmailOwnershipSession()
 		// 调用认证接口发起登录，验证码与账号密码一并提交。
 		loginApi(account, password, captchaId, captchaCode).then((result: HttpResult) => {
 			// 请求失败：后端 message 已可直接展示，原样返回给页面。
 			if (!result.ok) {
-				resolve(result.message)
+				resolve({ok: false, message: result.message, emailVerificationRequired: false})
 				return
 			}
 
@@ -46,7 +49,7 @@ export function login(account: string, password: string, captchaId: string, capt
 			const envelope = result.data
 			// 成功却没有响应体属于异常响应。
 			if (envelope == null) {
-				resolve('登录响应异常，请稍后重试')
+				resolve({ok: false, message: '登录响应异常，请稍后重试', emailVerificationRequired: false})
 				return
 			}
 
@@ -54,25 +57,37 @@ export function login(account: string, password: string, captchaId: string, capt
 			const rawPayload = jsonObject(envelope, 'data')
 			// 缺 data 时无法落盘凭据，按失败提示。
 			if (rawPayload == null) {
-				resolve('登录响应缺少令牌，请稍后重试')
+				resolve({ok: false, message: '登录响应缺少令牌，请稍后重试', emailVerificationRequired: false})
 				return
 			}
 
 			// data 是 any，断言为对象后按字段读取。
 			const payload = rawPayload as UTSJSONObject
+            if (jsonBoolean(payload, 'emailVerificationRequired') == true) {
+                clearTokens(); stopNotificationSession(true)
+                if (jsonString(payload, 'roleCode') != 'CUSTOMER') {
+                    resolve({ ok: false, message: '请前往管理端完成邮箱验证', emailVerificationRequired: false }); return
+                }
+                const token = jsonString(payload, 'emailVerificationToken') ?? ''
+                const expires = jsonNumber(payload, 'emailVerificationExpiresIn') ?? 0
+                if (!setEnrollmentAuthorization(token, expires)) {
+                    resolve({ ok: false, message: '邮箱补验凭据无效，请重新登录', emailVerificationRequired: false }); return
+                }
+                resolve({ ok: false, message: '', emailVerificationRequired: true }); return
+            }
 			// 取出访问令牌。
 			const accessToken = jsonString(payload, 'accessToken') ?? ''
 			// 取出刷新令牌。
 			const refreshToken = jsonString(payload, 'refreshToken') ?? ''
 			// 任一令牌缺失都说明登录未真正完成，不能落盘。
 			if (accessToken.length == 0 || refreshToken.length == 0) {
-				resolve('登录响应缺少令牌，请稍后重试')
+				resolve({ok: false, message: '登录响应缺少令牌，请稍后重试', emailVerificationRequired: false})
 				return
 			}
 
 			if (parseTokenPayload(accessToken) == null) {
 				clearTokens()
-				resolve('登录凭据格式不兼容，请确认认证服务已更新后重试')
+				resolve({ok: false, message: '登录凭据格式不兼容，请确认认证服务已更新后重试', emailVerificationRequired: false})
 				return
 			}
 
@@ -88,7 +103,7 @@ export function login(account: string, password: string, captchaId: string, capt
 				clearRememberedAccount()
 			}
 			// 返回空串表示登录成功。
-			resolve('')
+			resolve({ok: true, message: '', emailVerificationRequired: false})
 		})
 	})
 }
@@ -105,8 +120,8 @@ export function login(account: string, password: string, captchaId: string, capt
  * @return 注册结果及系统分配的用户号
  */
 export type RegistrationResult = { ok: boolean, message: string, userNo: string }
-export function register(username: string, email: string, password: string): Promise<RegistrationResult> {
-    return registerApi(username, email.trim().toLowerCase(), password).then((result: HttpResult): RegistrationResult => {
+export function register(username: string, email: string, password: string, emailVerificationToken: string): Promise<RegistrationResult> {
+    return registerApi(username, email.trim().toLowerCase(), password, emailVerificationToken).then((result: HttpResult): RegistrationResult => {
         if (!result.ok) return { ok: false, message: result.message, userNo: '' }
         const payload = result.data == null ? null : jsonObject(result.data, 'data')
         const userNo = payload == null ? '' : (jsonString(payload, 'userNo') ?? '')
@@ -131,7 +146,7 @@ export function logout(): Promise<void> {
             if (getRefreshToken().length > 0) logoutApi().catch(() => {})
         } finally {
             clearTokens()
-            clearEmailChangeAuthorization()
+            clearEmailChangeAuthorization(); clearEmailOwnershipSession()
             // 通知 UI 或连接清理失败不能阻止本地退出。
             try { stopNotificationSession(true) } catch (_error) {}
         }

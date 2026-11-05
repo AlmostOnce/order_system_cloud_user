@@ -1,0 +1,211 @@
+<template>
+    <view class="account-page account-secondary recovery-page">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <view class="account-back vapor-account-secondary--account-back" @click="() => { if (!(busy)) back() }" :style="(busy) ? 'opacity:0.5' : ''"><view class="account-back-icon"></view></view>
+            <text class="account-title">{{ mode == 'enrollment' ? '验证并绑定邮箱' : '验证注册邮箱' }}</text>
+        </view>
+        <scroll-view class="account-scroll" direction="vertical">
+            <view class="account-content vapor-account-secondary--account-content">
+                <view class="recovery-intro">
+                    <text class="recovery-eyebrow">账号安全 · {{ done ? '已完成' : '验证邮箱' }}</text>
+                    <text class="recovery-title">{{ done ? '邮箱已验证' : (mode == 'enrollment' ? '为账号绑定常用邮箱' : '先验证，再创建账号') }}</text>
+                    <text class="recovery-note">{{ done ? '请重新登录，使用用户号或刚绑定的邮箱。' : (mode == 'enrollment' ? '登录密码已验证。请输入本人能收信的邮箱，验证成功后才能继续使用账号。' : '验证码通过后，再填写昵称和登录密码。') }}</text>
+                </view>
+                <view v-if="!done" class="account-card vapor-account-secondary--account-card">
+                    <text class="account-label vapor-account-secondary--account-label">邮箱地址</text>
+                    <input class="account-input vapor-account-secondary--account-input" v-model="email" :maxlength="254" :disabled="busy || codeSent" placeholder="请输入可接收验证码的邮箱" aria-label="邮箱地址" />
+                    <view v-if="!codeSent">
+                        <text class="account-label vapor-account-secondary--account-label">图片验证码</text>
+                        <view class="recovery-captcha-row">
+                            <input class="account-input vapor-account-secondary--account-input recovery-captcha-input" v-model="captchaCode" :maxlength="8" :disabled="busy || captchaLoading" placeholder="输入图中字符" aria-label="图片验证码" />
+                            <view class="recovery-captcha-button" @click="() => { if (!(busy || captchaLoading)) loadCaptcha() }" :style="(busy || captchaLoading) ? 'opacity:0.5' : ''">
+                                <image v-if="captchaImage.length > 0" class="recovery-captcha-image" :src="captchaImage" mode="aspectFit"></image>
+                                <text v-else class="account-muted">{{ captchaLoading ? '加载中…' : '点击获取' }}</text>
+                            </view>
+                        </view>
+                        <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="busy || captchaLoading" @click="sendCode">{{ busy ? '正在发送…' : '发送邮箱验证码' }}</button>
+                    </view>
+                    <view v-else>
+                        <text class="recovery-note recovery-sent">验证码已发送，10分钟内有效，请勿向他人透露。</text>
+                        <text class="account-label vapor-account-secondary--account-label">邮箱验证码</text>
+                        <input class="account-input vapor-account-secondary--account-input" v-model="emailCode" type="number" :maxlength="6" :disabled="busy" placeholder="请输入六位数字" aria-label="邮箱验证码" confirm-type="done" @confirm="verifyCode" />
+                        <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="busy" @click="verifyCode">{{ busy ? '正在验证…' : (mode == 'enrollment' ? '验证并绑定' : '验证并继续注册') }}</button>
+                        <button class="account-link account-link-text button-text button-text-44" :disabled="busy || countdown > 0" @click="prepareResend">{{ countdown > 0 ? countdown + '秒后可重新发送' : '重新发送或更换邮箱' }}</button>
+                    </view>
+                </view>
+                <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
+                <button v-if="done || mode == 'enrollment'" class="account-link account-link-text button-text button-text-44" :disabled="busy" @click="back">返回登录</button>
+            </view>
+        </scroll-view>
+    </view>
+</template>
+<script setup lang="uts">
+import { toast } from '../../common/feedback.uts'
+import { reactive, toRefs } from 'vue'
+import { fetchCaptcha, sendRegistrationEmailCode, verifyRegistrationEmail, sendEnrollmentEmailCode, confirmEmailEnrollment } from '../../api/auth.uts'
+import { jsonObject, jsonString, jsonNumber } from '../../common/json.uts'
+import { takeEnrollmentAuthorization, setRegistrationGrant } from '../../common/email-ownership-session.uts'
+import { clearTokens } from '../../common/storage.uts'
+import { stopNotificationSession } from '../../store/notifications.uts'
+const state = reactive({ statusBarHeight: 0, mode: 'registration', authorizationToken: '', authorizationExpiresAt: 0, email: '', captchaId: '', captchaImage: '', captchaCode: '', captchaLoading: false, emailCode: '', codeSent: false, countdown: 0, busy: false, done: false, errorText: '' })
+const { statusBarHeight, mode, email, captchaImage, captchaCode, captchaLoading, emailCode, codeSent, countdown, busy, done, errorText } = toRefs(state)
+let pageVersion = 0
+let timer = 0
+function stopTimer() { if (timer > 0) { clearInterval(timer); timer = 0 } }
+let resendAvailableAt = 0
+function updateCountdown() { state.countdown = Math.max(0, Math.ceil((resendAvailableAt - Date.now()) / 1000)); if (state.countdown == 0) stopTimer() }
+function startCountdown() { stopTimer(); resendAvailableAt = Date.now() + 60000; updateCountdown(); timer = setInterval(updateCountdown, 1000) }
+function authorizationValid(): boolean {
+    if (state.mode != 'enrollment') return true
+    if (state.authorizationToken.length > 0 && Date.now() < state.authorizationExpiresAt) return true
+    state.errorText = '登录验证已过期，请返回登录重新验证密码'; return false
+}
+async function loadCaptcha(): Promise<void> {
+    if (state.busy || state.captchaLoading || state.codeSent || state.done || !authorizationValid()) return
+    const version = pageVersion; state.captchaLoading = true; state.captchaId = ''; state.captchaImage = ''; state.captchaCode = ''
+    try {
+        const result = await fetchCaptcha(); if (version != pageVersion) return
+        const data = result.ok && result.data != null ? jsonObject(result.data, 'data') : null
+        state.captchaId = data == null ? '' : (jsonString(data, 'captchaId') ?? ''); state.captchaImage = data == null ? '' : (jsonString(data, 'imageBase64') ?? '')
+        if (state.captchaId.length == 0 || state.captchaImage.length == 0) state.errorText = result.message.length > 0 ? result.message : '图片验证码加载失败，请点击重试'
+    } catch (_error) { if (version == pageVersion) state.errorText = '图片验证码加载失败，请点击重试' }
+    finally { if (version == pageVersion) state.captchaLoading = false }
+}
+async function sendCode(): Promise<void> {
+    if (state.busy || state.captchaLoading || state.codeSent || state.done || !authorizationValid()) return
+    state.errorText = ''
+    const email = state.email.trim().toLowerCase()
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('请输入有效的邮箱地址'); return }
+    if (state.captchaId.length == 0 || state.captchaCode.trim().length == 0) { toast('请输入图片验证码'); return }
+    const version = pageVersion; state.busy = true
+    try {
+        const result = state.mode == 'enrollment'
+            ? await sendEnrollmentEmailCode(state.authorizationToken, email, state.captchaId, state.captchaCode.trim())
+            : await sendRegistrationEmailCode(email, state.captchaId, state.captchaCode.trim())
+        if (version != pageVersion) return
+        if (!result.ok) { toast(result.message); return }
+        state.email = email; state.codeSent = true; state.captchaId = ''; state.captchaCode = ''; state.captchaImage = ''; startCountdown()
+    } catch (_error) { if (version == pageVersion) toast('发送失败，请稍后重试') }
+    finally { if (version == pageVersion) { state.busy = false; if (!state.codeSent) loadCaptcha() } }
+}
+async function verifyCode(): Promise<void> {
+    if (state.busy || !state.codeSent || state.done || !authorizationValid()) return
+    state.errorText = ''
+    if (!/^[0-9]{6}$/.test(state.emailCode)) { toast('请输入六位邮箱验证码'); return }
+    const version = pageVersion; state.busy = true
+    try {
+        if (state.mode == 'enrollment') {
+            const result = await confirmEmailEnrollment(state.authorizationToken, state.email, state.emailCode); if (version != pageVersion) return
+            if (!result.ok) { toast(result.message); return }
+            state.done = true; state.authorizationToken = ''; state.emailCode = ''; stopTimer(); clearTokens(); stopNotificationSession(true)
+        } else {
+            const result = await verifyRegistrationEmail(state.email, state.emailCode); if (version != pageVersion) return
+            const data = result.ok && result.data != null ? jsonObject(result.data, 'data') : null
+            const token = data == null ? '' : (jsonString(data, 'verificationToken') ?? ''); const expires = data == null ? 0 : (jsonNumber(data, 'expiresIn') ?? 0)
+            if (!setRegistrationGrant(token, state.email, expires)) { toast(result.message.length > 0 ? result.message : '邮箱验证失败，请重新验证'); return }
+            state.emailCode = ''; state.done = true; stopTimer(); uni.redirectTo({ url: '/pages/register/register' })
+        }
+    } catch (_error) { if (version == pageVersion) toast('验证结果暂未确认，请重新验证或返回登录') }
+    finally { if (version == pageVersion) state.busy = false }
+}
+function prepareResend() { if (state.busy || state.countdown > 0) return; state.codeSent = false; state.emailCode = ''; state.errorText = ''; loadCaptcha() }
+function back() { if (!state.busy) uni.reLaunch({ url: '/pages/login/login' }) }
+function clearPage() { pageVersion++; stopTimer(); state.authorizationToken = ''; state.emailCode = ''; state.captchaId = ''; state.captchaCode = ''; state.captchaImage = ''; state.busy = false; state.captchaLoading = false; state.codeSent = false; state.countdown = 0 }
+onLoad((options: OnLoadOptions) => {
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+    state.mode = options['mode'] == 'enrollment' ? 'enrollment' : 'registration'
+    if (state.mode == 'enrollment') {
+        const grant = takeEnrollmentAuthorization()
+        if (grant == null) { state.errorText = '验证已失效，请返回登录重新验证密码'; return }
+        state.authorizationToken = grant.token; state.authorizationExpiresAt = grant.expiresAt
+    }
+    loadCaptcha()
+})
+// 切到邮箱查看验证码时保留内存中的验证进度，仅在页面销毁时清理。
+onUnload(() => { clearPage() })
+onPageShow(() => { updateCountdown(); if (state.captchaId.length == 0 && !state.done && !state.busy && !state.captchaLoading) loadCaptcha() })
+</script>
+<style>
+    @import '../../styles/account.css';
+
+    .recovery-intro {
+        padding: 4px 2px 12px;
+    }
+
+    .recovery-eyebrow {
+        font-size: 12px;
+        line-height: 20px;
+        color: #C2410C;
+    }
+
+    .recovery-title {
+        margin-top: 4px;
+        font-size: 20px;
+        line-height: 28px;
+        color: #211C18;
+        font-weight: bold;
+    }
+
+    .recovery-note {
+        margin-top: 6px;
+        font-size: 12px;
+        line-height: 18px;
+        color: #7A6C60;
+    }
+
+    .recovery-sent {
+        padding: 12px;
+        border-radius: 10px;
+        background-color: #FDF6F0;
+    }
+
+    .recovery-captcha-row {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+    }
+
+    .recovery-captcha-input {
+        flex: 1;
+        width: 0;
+        min-width: 0;
+        margin-right: 12px;
+    }
+
+    .recovery-captcha-button {
+        display: flex;
+        flex-shrink: 0;
+        width: 112px;
+        height: 50px;
+        padding: 0;
+        margin: 0;
+        align-items: center;
+        justify-content: center;
+        border-width: 1px;
+        border-style: solid;
+        border-color: #E8DED4;
+        border-radius: 12px;
+        background-color: #FDF6F0;
+    }
+
+    .recovery-captcha-image {
+        width: 108px;
+        height: 44px;
+    }
+
+    /* #ifdef WEB */
+    .account-page .recovery-captcha-row {
+        flex-direction: row;
+    }
+
+    .recovery-captcha-input {
+        box-sizing: border-box;
+    }
+
+    .recovery-captcha-button::after {
+        border: none;
+    }
+
+    /* #endif */
+</style>

@@ -1,3 +1,4 @@
+const toastMessages=[];
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {loadSetup}=require('./setup-harness.cjs');
 const root=path.resolve(__dirname,'..'),calls=[];
@@ -11,6 +12,7 @@ const json={jsonObject:(r,k)=>r[k]??null,jsonString:(r,k)=>typeof r[k]==='string
 global.uni={getWindowInfo:()=>({statusBarHeight:0}),reLaunch(){},switchTab(){},setStorageSync(){throw Error('secrets must not be persisted')}};
 const source=fs.readFileSync(path.join(root,'pages/account/pay-password-recovery.uvue'),'utf8');
 const factory=loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1],p=>{
+ if(p.includes('common/feedback'))return{toast:message=>toastMessages.push(message)};
  if(p.includes('api/wallet'))return api;if(p.includes('api/auth'))return {fetchCaptcha:async()=>ok({captchaId:'image-1',imageBase64:'data:image/png;base64,abc'})};
  if(p.includes('common/json'))return json;if(p.includes('store/auth'))return {isLoggedIn:()=>true,currentUser:()=>({roleCode:'CUSTOMER'})};return {};
 });
@@ -19,14 +21,14 @@ const tick=()=>new Promise(r=>setImmediate(r));
  const vm=factory.create();vm.$hooks.onLoad();vm.$hooks.onPageShow();
  await vm.sendCode();assert.equal(calls.length,0);await vm.authorize();assert.equal(calls.length,0);
  vm.loginPassword='login-pass';await vm.authorize();await tick();assert.equal(vm.step,1);assert.equal(vm.loginPassword,'');assert.equal(vm.email,'u***@example.com');
- vm.captchaCode='abcd';await vm.sendCode();assert.deepEqual(calls.at(-1),['send','a'.repeat(64),'image-1','abcd']);assert.equal(vm.codeSent,true);
+ vm.captchaCode='abcd';await vm.sendCode();assert.deepEqual(calls.at(-1),['send','a'.repeat(64),'image-1','abcd']);assert.equal(vm.codeSent,true);vm.emailCode='012345';vm.$hooks.onPageHide();vm.$hooks.onPageShow();assert.equal(vm.step,1);assert.equal(vm.codeSent,true);assert.equal(vm.emailCode,'012345');
  vm.emailCode='123';await vm.verifyCode();assert.equal(calls.at(-1)[0],'send');
  vm.emailCode='012345';await vm.verifyCode();assert.deepEqual(calls.at(-1),['verify','a'.repeat(64),'012345']);assert.equal(vm.step,2);
  vm.password='new-password';vm.confirmation='different';await vm.resetPassword();assert.equal(calls.at(-1)[0],'verify');
- confirmResult={ok:false,statusCode:400,message:'新支付密码不得与原支付密码相同',data:null};vm.confirmation=vm.password;await vm.resetPassword();assert.equal(vm.step,2);assert.match(vm.errorText,/原支付密码/);assert.equal(vm.password,'');
+ confirmResult={ok:false,statusCode:400,message:'新支付密码不得与原支付密码相同',data:null};vm.confirmation=vm.password;await vm.resetPassword();assert.equal(vm.step,2);assert.match(toastMessages.at(-1),/原支付密码/);assert.equal(vm.password,'');
  confirmResult=ok(null);vm.password='different-password';vm.confirmation=vm.password;await vm.resetPassword();assert.equal(vm.step,3);assert.equal(vm.password,'');assert.deepEqual(calls.at(-1),['confirm','b'.repeat(64),'different-password']);
  const count=calls.length;await vm.resetPassword();assert.equal(calls.length,count);
- let finish;authorizeResult=new Promise(r=>finish=r);const late=factory.create();late.$hooks.onLoad();late.loginPassword='login-pass';const pending=late.authorize();late.$hooks.onPageHide();finish(ok({authorizationToken:'c'.repeat(64),maskedEmail:'u***@example.com'}));await pending;assert.equal(late.step,0);assert.equal(late.loginPassword,'');
+ let finish;authorizeResult=new Promise(r=>finish=r);const late=factory.create();late.$hooks.onLoad();late.loginPassword='login-pass';const pending=late.authorize();late.$hooks.onUnload();finish(ok({authorizationToken:'c'.repeat(64),maskedEmail:'u***@example.com'}));await pending;assert.equal(late.step,0);assert.equal(late.loginPassword,'');
  vm.$hooks.onUnload();late.$hooks.onUnload();
  const ts=require('D:/HBuilderX/plugins/compile-typescript/node_modules/typescript/lib/typescript.js');
  const mod={exports:{}},requests=[];

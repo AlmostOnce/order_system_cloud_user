@@ -2,7 +2,6 @@
 	<view class="page">
 		<!-- 状态栏底色与顶部栏同色，让头部整块连贯 -->
 		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
-
 		<!-- 顶部返回与标题 -->
 		<view class="topbar">
 			<view class="back" :class="entered ? '' : 'back-pre'" @click="goBack">
@@ -11,19 +10,17 @@
 			<text class="topbar-title" :class="entered ? '' : 'topbar-title-pre'">创建账号</text>
 			<view class="topbar-holder"></view>
 		</view>
-
 		<view class="intro">
 			<text class="intro-title" :class="entered ? '' : 'intro-title-pre'">加入校园食堂</text>
 			<text class="intro-desc" :class="entered ? '' : 'intro-desc-pre'">注册后即可浏览档口菜单、下单并查看订单进度</text>
 		</view>
-
         <view v-if="registered" class="panel">
             <text class="success-title">注册成功</text>
             <text class="success-note">你的用户号</text>
             <text class="success-account">{{ registeredUserNo.length > 0 ? registeredUserNo : '可使用邮箱登录' }}</text>
             <text class="success-note">请保存用户号，也可以使用注册邮箱和密码登录。</text>
-            <button v-if="registeredUserNo.length > 0" class="account-copy" @click="copyUserNo">复制用户号</button>
-            <button class="success-login" @click="goBack">前往登录</button>
+            <button v-if="registeredUserNo.length > 0" class="account-copy button-text button-text-44" @click="copyUserNo">复制用户号</button>
+            <button class="success-login button-text button-text-44" @click="goBack">前往登录</button>
         </view>
 		<view v-if="!registered" class="panel" :class="entered ? '' : 'panel-pre'">
 			<view class="panel-rule" :class="entered ? '' : 'panel-rule-pre'"></view>
@@ -43,13 +40,13 @@
 				<view class="field-rule" :class="focusedField == 'username' ? 'field-rule-on' : ''"></view>
 			</view>
 			<text v-if="usernameError.length > 0" class="field-error">{{ usernameError }}</text>
-
 			<view class="field" :class="focusedField == 'email' ? 'field-focused' : ''">
 				<text class="field-label">邮箱</text>
 				<input
 					class="field-input"
 					type="text"
 					v-model="email"
+                    :disabled="true"
 					placeholder="用于登录的邮箱地址"
 					placeholder-class="field-placeholder"
 					:maxlength="254"
@@ -60,7 +57,7 @@
 				<view class="field-rule" :class="focusedField == 'email' ? 'field-rule-on' : ''"></view>
 			</view>
 			<text v-if="emailError.length > 0" class="field-error">{{ emailError }}</text>
-
+            <button class="email-reverify button-text button-text-44" :disabled="submitting" @click="verifyAgain">重新验证邮箱</button>
 			<view class="field" :class="focusedField == 'password' ? 'field-focused' : ''">
 				<text class="field-label">登录密码</text>
 				<input
@@ -79,7 +76,6 @@
 				<view class="field-rule" :class="focusedField == 'password' ? 'field-rule-on' : ''"></view>
 			</view>
 			<text v-if="passwordError.length > 0" class="field-error">{{ passwordError }}</text>
-
 			<view class="field" :class="focusedField == 'confirm' ? 'field-focused' : ''">
 				<text class="field-label">确认密码</text>
 				<input
@@ -98,7 +94,6 @@
 				<view class="field-rule" :class="focusedField == 'confirm' ? 'field-rule-on' : ''"></view>
 			</view>
 			<text v-if="confirmError.length > 0" class="field-error">{{ confirmError }}</text>
-
 			<!-- 按钮不单独做入场：卡片整体淡入时已带着它一起出现，此处只负责按压反馈 -->
 			<view
 				class="submit"
@@ -108,13 +103,11 @@
 			>
 				<text class="submit-text">{{ submitting ? '提交中…' : '注 册' }}</text>
 			</view>
-
 			<view class="login-row" @click="goBack">
 				<text class="login-hint">已有账号？</text>
 				<text class="login-link">返回登录</text>
 			</view>
 		</view>
-
 		<view class="footer">
 			<text class="footer-text">湖北经济学院 · 食堂管理中心</text>
 		</view>
@@ -123,6 +116,7 @@
 
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
+import { takeRegistrationGrant } from '../../common/email-ownership-session.uts'
 // 导入轻量提示：普通提示与成功提示。
 import { toast, toastSuccess } from '../../common/feedback.uts';
 // 导入注册动作：注册成功后引导用户回登录页手动登录。
@@ -130,12 +124,12 @@ import { register as doRegister, RegistrationResult } from '../../store/auth.uts
 /**
  * 校验邮箱。
  *
- * 与后端 RegisterRequest 的约束保持一致（^1[3-9]\d{9}$），
- * 这里手写逐位判断而非正则，避免不同平台正则实现差异。
+ * 与服务端邮箱长度、格式约束保持一致。
  *
  * @param email 邮箱
  * @return 合法返回空字符串，否则为错误提示
  */
+let pageVersion = 0
 function validateEmail(email: string): string {
     if (email.length == 0) return '请输入邮箱地址';
     if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return '请输入有效的邮箱地址';
@@ -149,6 +143,9 @@ const state = reactive({
     username: '',
     // 邮箱输入框绑定值。
     email: '',
+    emailVerificationToken: '',
+    verificationExpiresAt: 0,
+    redirectingVerification: false,
     // 登录密码输入框绑定值。
     password: '',
     // 确认密码输入框绑定值，用于与密码比对。
@@ -173,7 +170,7 @@ const state = reactive({
     entered: false
 })
 
-const { statusBarHeight, username, email, password, confirmPassword, showPassword, focusedField, usernameError, emailError, passwordError, confirmError, submitting, registered, registeredUserNo, entered } = toRefs(state)
+const { emailVerificationToken, verificationExpiresAt, statusBarHeight, username, email, password, confirmPassword, showPassword, focusedField, usernameError, emailError, passwordError, confirmError, submitting, registered, registeredUserNo, entered } = toRefs(state)
 
 function onFieldFocus(field: string) {
     // 记录当前聚焦字段，驱动对应输入框的聚焦样式。
@@ -245,6 +242,10 @@ function submit() {
     if (state.submitting) {
         return;
     }
+    if (state.emailVerificationToken.length == 0 || Date.now() >= state.verificationExpiresAt) {
+        state.password = ''; state.confirmPassword = '';
+        toast('请先验证注册邮箱'); verifyAgain(); return;
+    }
     // 表单校验不通过时直接返回，由各错误字段驱动页面提示。
     if (!validateForm()) {
         return;
@@ -252,7 +253,9 @@ function submit() {
     // 置为提交中，按钮进入忙碌态并拦截重复点击。
     state.submitting = true;
     // 调用注册流程，成功时展示系统分配的用户号。
-    doRegister(state.username.trim(), state.email.trim(), state.password).then((result: RegistrationResult) => {
+    const version = pageVersion;
+    doRegister(state.username.trim(), state.email.trim(), state.password, state.emailVerificationToken).then((result: RegistrationResult) => {
+        if (version != pageVersion) return;
         // 请求结束，无论成败都先解除忙碌态。
         state.submitting = false;
         // 有错误提示说明注册失败（如昵称或邮箱已占用），toast 后结束。
@@ -266,8 +269,13 @@ function submit() {
         state.confirmPassword = '';
         // 展示注册回执。
         state.registeredUserNo = result.userNo;
-        state.registered = true;
+        state.registered = true; state.emailVerificationToken = '';
     });
+}
+
+function verifyAgain() {
+    if (state.submitting || state.redirectingVerification) return;
+    state.redirectingVerification = true; uni.redirectTo({ url: '/pages/account/email-verification?mode=registration' });
 }
 
 function copyUserNo() {
@@ -280,6 +288,9 @@ function goBack() {
 }
 
 onLoad(() => {
+    const grant = takeRegistrationGrant();
+    if (grant == null) { verifyAgain(); return; }
+    state.email = grant.email; state.emailVerificationToken = grant.token; state.verificationExpiresAt = grant.expiresAt;
     // 状态栏高度取不到时用 24px 兜底，避免顶部内容被系统栏遮挡。
     const info = uni.getWindowInfo();
     state.statusBarHeight = info.statusBarHeight > 0 ? info.statusBarHeight : 24;
@@ -294,9 +305,16 @@ onReady(() => {
         state.entered = true;
     }, 60);
 })
+onPageHide(() => { pageVersion++; state.password = ''; state.confirmPassword = ''; state.emailVerificationToken = ''; state.submitting = false })
+onUnload(() => { pageVersion++; state.password = ''; state.confirmPassword = ''; state.emailVerificationToken = '' })
+onPageShow(() => {
+    if (!state.registered && (state.emailVerificationToken.length == 0 || Date.now() >= state.verificationExpiresAt))
+        verifyAgain();
+})
 </script>
 
 <style>
+.email-reverify { margin-top: 8px; padding: 8px 0; background-color: transparent; border-width: 0; color: #C2410C; font-size: 13px; line-height: 20px; }
 .success-title { font-size: 24px; line-height: 34px; font-weight: bold; color: #211C18; }
 .success-note { margin-top: 14px; font-size: 13px; line-height: 22px; color: #7A6C60; }
 .success-account { margin-top: 10px; font-size: 30px; line-height: 42px; font-weight: bold; color: #C2410C; }

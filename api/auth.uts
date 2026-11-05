@@ -47,11 +47,12 @@ export function login(account: string, password: string, captchaId: string, capt
  * @param username 用户名，2-64 个字符
  * @param email 邮箱，合法邮箱地址
  * @param password 登录密码，6-64 个字符
+ * @param emailVerificationToken 前置邮箱验证获得的一次性授权
  * @return 请求结果，成功时 data 内含 userUuid、userNo、username、roleCode
  */
-export function register(username: string, email: string, password: string): Promise<HttpResult> {
+export function register(username: string, email: string, password: string, emailVerificationToken: string): Promise<HttpResult> {
 	// 按后端 RegisterRequest 契约组装请求体：用户名、邮箱、登录密码。
-	const body: UTSJSONObject = { username: username, email: email, password: password }
+	const body: UTSJSONObject = { username: username, email: email, password: password, emailVerificationToken: emailVerificationToken }
 	// 注册同为免鉴权入口，不携带旧令牌。
 	return httpPost('/auth/register', body, false)
 }
@@ -77,4 +78,22 @@ export function verifyPasswordResetCode(email: string, code: string): Promise<Ht
 export function confirmPasswordReset(resetToken: string, newPassword: string): Promise<HttpResult> {
     const body: UTSJSONObject = { resetToken: resetToken, newPassword: newPassword }
     return httpPost('/auth/password-reset/confirm', body, false)
+}
+
+/** 注册与旧账号补验均为匿名接口，不携带旧Token或触发续期。 */
+export function sendRegistrationEmailCode(email: string, captchaId: string, captchaCode: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { email: email, captchaId: captchaId, captchaCode: captchaCode }
+    return httpPost('/auth/registration/code', body, false)
+}
+export function verifyRegistrationEmail(email: string, code: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { email: email, code: code }
+    return httpPost('/auth/registration/verify', body, false)
+}
+export function sendEnrollmentEmailCode(authorizationToken: string, email: string, captchaId: string, captchaCode: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { authorizationToken: authorizationToken, email: email, captchaId: captchaId, captchaCode: captchaCode }
+    return httpPost('/auth/email-enrollment/code', body, false)
+}
+export function confirmEmailEnrollment(authorizationToken: string, email: string, code: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { authorizationToken: authorizationToken, email: email, code: code }
+    return httpPost('/auth/email-enrollment/confirm', body, false)
 }

@@ -2,38 +2,34 @@
 	<view class="account-page account-secondary email-change-page">
 		<view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
 		<view class="account-nav vapor-account-secondary--account-nav">
-			<button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="cancel"><view class="account-back-icon"></view></button>
+            <view class="account-back vapor-account-secondary--account-back" @click="cancel"><view class="account-back-icon"></view></view>
 			<text class="account-title">更换邮箱</text>
 		</view>
-		<scroll-view class="account-scroll" scroll-y="true">
+        <scroll-view class="account-scroll" direction="vertical">
 			<view class="account-content vapor-account-secondary--account-content">
 				<view class="email-intro"><text class="email-step-kicker">账号安全</text><text class="email-intro-title">绑定新的邮箱</text><text class="email-intro-note">完成图片验证后，我们会向新邮箱发送六位验证码。</text></view>
 				<view class="account-card vapor-account-secondary--account-card email-form-card">
 					<text class="account-label vapor-account-secondary--account-label">新邮箱</text>
 					<input class="account-input vapor-account-secondary--account-input" v-model="email" type="text" :maxlength="254" :disabled="sending || changing || captchaVerified || codeSent" placeholder="请输入常用邮箱" aria-label="新邮箱" />
-
 					<view class="email-step-heading"><view class="email-step-number"><text class="email-step-number-text">1</text></view><view class="email-step-copy"><text class="email-step-title">验证图片验证码</text><text class="email-step-note">点击图片可换一张</text></view></view>
 					<view class="email-captcha-row">
 						<input class="account-input vapor-account-secondary--account-input email-captcha-input" v-model="captchaCode" :maxlength="8" :disabled="captchaLoading || verifyingCaptcha || captchaVerified" placeholder="输入图片中的字符" aria-label="图片验证码" />
-						<button class="email-captcha-image-button" :disabled="captchaLoading || verifyingCaptcha || captchaVerified" aria-label="刷新图片验证码" @click="loadCaptcha"><image v-if="captchaImage.length > 0" class="email-captcha-image" :src="captchaImage" mode="aspectFit"></image><text v-else class="email-captcha-placeholder">{{ captchaLoading ? '加载中' : '点击获取' }}</text></button>
+                        <view class="email-captcha-image-button" @click="() => { if (!(captchaLoading || verifyingCaptcha || captchaVerified)) loadCaptcha() }" :style="(captchaLoading || verifyingCaptcha || captchaVerified) ? 'opacity:0.5' : ''"><image v-if="captchaImage.length > 0" class="email-captcha-image" :src="captchaImage" mode="aspectFit"></image><text v-else class="email-captcha-placeholder">{{ captchaLoading ? '加载中' : '点击获取' }}</text></view>
 					</view>
-					<button v-if="!captchaVerified" class="account-primary vapor-account-secondary--account-primary" :disabled="verifyingCaptcha || captchaLoading || changing" @click="verifyCaptcha"><text class="account-primary-text">{{ verifyingCaptcha ? '验证中…' : '验证图片验证码' }}</text></button>
+                    <button v-if="!captchaVerified" class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="verifyingCaptcha || captchaLoading || changing" @click="verifyCaptcha">{{ verifyingCaptcha ? '验证中…' : '验证图片验证码' }}</button>
 					<view v-else class="email-verified-state"><view class="email-check-mark"></view><text class="email-verified-text">图片验证码已通过</text></view>
-
-					<text v-if="captchaError.length > 0" class="account-error" role="alert">{{ captchaError }}</text>
-
+                    <text v-if="captchaError.length > 0" class="account-error">{{ captchaError }}</text>
 					<view v-if="captchaVerified" class="email-step-heading email-step-two"><view class="email-step-number email-step-number-current"><text class="email-step-number-text email-step-number-current-text">2</text></view><view class="email-step-copy"><text class="email-step-title">发送邮箱验证码</text><text class="email-step-note">验证通过后才能向新邮箱发送</text></view></view>
-					<button v-if="captchaVerified && !codeSent" class="email-send-action" :disabled="sending || changing" @click="sendCode"><text class="email-send-action-text">{{ sending ? '正在发送…' : '发送邮箱验证码' }}</text></button>
+                    <button v-if="captchaVerified && !codeSent" class="email-send-action email-send-action-text button-text button-text-50" :disabled="sending || changing" @click="sendCode">{{ sending ? '正在发送…' : '发送邮箱验证码' }}</button>
 					<view v-if="codeSent" class="email-sent-state"><text class="email-sent-title">验证码已发送</text><text class="email-sent-note">请查看 {{ normalizedEmail }}，验证码 10 分钟内有效。</text></view>
-
 					<view v-if="codeSent" class="email-code-section">
 						<text class="account-label vapor-account-secondary--account-label">邮箱验证码</text>
 						<input class="account-input vapor-account-secondary--account-input" v-model="emailCode" type="number" :maxlength="6" :disabled="changing" placeholder="输入六位数字" aria-label="邮箱验证码" />
-						<button v-if="countdown > 0" class="email-resend-action" disabled><text class="email-resend-action-text">{{ countdown }} 秒后可重新验证发送</text></button>
-						<button v-else class="email-resend-action" :disabled="sending || changing" @click="prepareResend"><text class="email-resend-action-text">重新验证并发送</text></button>
+                        <button v-if="countdown > 0" class="email-resend-action email-resend-action-text button-text button-text-42" disabled>{{ countdown }} 秒后可重新验证发送</button>
+                        <button v-else class="email-resend-action email-resend-action-text button-text button-text-42" :disabled="sending || changing" @click="prepareResend">重新验证并发送</button>
 					</view>
-					<text v-if="formError.length > 0" class="account-error" role="alert">{{ formError }}</text>
-					<button v-if="codeSent" class="account-primary vapor-account-secondary--account-primary email-confirm-action" :disabled="changing || sending" @click="confirmChange"><text class="account-primary-text">{{ changing ? '正在保存…' : '确认更换邮箱' }}</text></button>
+                    <text v-if="formError.length > 0" class="account-error">{{ formError }}</text>
+                    <button v-if="codeSent" class="account-primary vapor-account-secondary--account-primary email-confirm-action account-primary-text button-text button-text-50" :disabled="changing || sending" @click="confirmChange">{{ changing ? '正在保存…' : '确认更换邮箱' }}</button>
 				</view>
 			</view>
 		</scroll-view>
@@ -47,7 +43,7 @@ import { fetchCaptcha } from '../../api/auth.uts'
 import { HttpResult } from '../../common/http.uts'
 import { jsonString } from '../../common/json.uts'
 import { clearEmailChangeAuthorization, getEmailChangeAuthorization } from '../../common/email-change-session.uts'
-import { toastSuccess } from '../../common/feedback.uts'
+import { toast, toastSuccess } from '../../common/feedback.uts'
 
 const state = reactive({ statusBarHeight: 0, email: '', captchaId: '', captchaImage: '', captchaCode: '', captchaLoading: false, verifyingCaptcha: false, captchaVerified: false, captchaVerificationToken: '', captchaError: '', sending: false, codeSent: false, emailCode: '', countdown: 0, changing: false, formError: '', timer: 0 })
 const { statusBarHeight, email, captchaId, captchaImage, captchaCode, captchaLoading, verifyingCaptcha, captchaVerified, captchaError, sending, codeSent, emailCode, countdown, changing, formError } = toRefs(state)
@@ -96,8 +92,8 @@ function loadCaptcha(preserveError: boolean = false): void {
 function verifyCaptcha(): void {
 	if (state.verifyingCaptcha || state.captchaVerified) return
 	const emailValue = state.email.trim().toLowerCase()
-	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue) || emailValue.length > 254) { state.captchaError = '请先输入正确的新邮箱'; return }
-	if (state.captchaId.length == 0 || state.captchaCode.trim().length == 0) { state.captchaError = '请加载并填写图片验证码'; return }
+	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue) || emailValue.length > 254) { toast('请先输入正确的新邮箱'); return }
+	if (state.captchaId.length == 0 || state.captchaCode.trim().length == 0) { toast('请加载并填写图片验证码'); return }
 	state.captchaError = ''
 	state.verifyingCaptcha = true
 	let refreshAfterVerification = false
@@ -105,7 +101,7 @@ function verifyCaptcha(): void {
 		const data = walletPayload(result)
 		const ticket = data == null ? null : jsonString(data, 'captchaVerificationToken')
 		if (!result.ok || ticket == null || ticket.length != 64) {
-			state.captchaError = result.message.length > 0 ? result.message : '图片验证码校验失败，请重新输入'
+			toast(result.message.length > 0 ? result.message : '图片验证码校验失败，请重新输入')
 			state.captchaCode = ''
 			state.captchaId = ''
 			state.captchaImage = ''
@@ -126,13 +122,13 @@ function verifyCaptcha(): void {
 function sendCode(): void {
 	if (!state.captchaVerified || state.sending || state.codeSent) return
 	const emailValue = state.email.trim().toLowerCase()
-	if (emailValue.length == 0) { state.formError = '请输入新邮箱'; return }
+	if (emailValue.length == 0) { toast('请输入新邮箱'); return }
 	state.formError = ''
 	state.sending = true
 	let refreshAfterSendFailure = false
 	sendEmailCode(emailValue, getEmailChangeAuthorization(), state.captchaVerificationToken).then((result: HttpResult) => {
 		if (!result.ok) {
-			state.formError = result.message.length > 0 ? result.message : '验证码发送失败'
+			toast(result.message.length > 0 ? result.message : '验证码发送失败')
 			state.captchaVerified = false
 			state.captchaVerificationToken = ''
 			refreshAfterSendFailure = true
@@ -165,11 +161,11 @@ function prepareResend(): void {
 
 function confirmChange(): void {
 	if (!state.codeSent || state.changing) return
-	if (!/^[0-9]{6}$/.test(state.emailCode)) { state.formError = '请输入六位邮箱验证码'; return }
+	if (!/^[0-9]{6}$/.test(state.emailCode)) { toast('请输入六位邮箱验证码'); return }
 	state.formError = ''
 	state.changing = true
 	changeMyEmail(state.email.trim().toLowerCase(), getEmailChangeAuthorization(), state.emailCode).then((result: HttpResult) => {
-		if (!result.ok) { state.formError = result.message.length > 0 ? result.message : '邮箱更换失败，请重试'; return }
+		if (!result.ok) { toast(result.message.length > 0 ? result.message : '邮箱更换失败，请重试'); return }
 		clearEmailChangeAuthorization()
 		toastSuccess('邮箱已更新')
 		uni.navigateBack({ delta: 1 })
@@ -180,12 +176,12 @@ function confirmChange(): void {
 <style>
 	@import '../../styles/account.css';
 	.email-change-page { background-color: #FDF6F0; }
-	.email-intro { margin: 6px 2px 18px 2px; }
+	.email-intro { margin: 4px 2px 12px 2px; }
 	.email-step-kicker { color: #C2410C; font-size: 11px; line-height: 18px; font-weight: bold; letter-spacing: 1px; }
-	.email-intro-title { margin-top: 6px; color: #211C18; font-size: 24px; line-height: 32px; font-weight: bold; }
+	.email-intro-title { margin-top: 4px; color: #211C18; font-size: 20px; line-height: 28px; font-weight: bold; }
 	.email-intro-note { margin-top: 7px; color: #7A6C60; font-size: 13px; line-height: 21px; }
-	.email-form-card { padding: 22px; }
-	.email-step-heading { display: flex; flex-direction: row; align-items: center; margin-top: 26px; margin-bottom: 13px; }
+	.email-form-card { padding: 14px; }
+	.email-step-heading { display: flex; flex-direction: row; align-items: center; margin-top: 16px; margin-bottom: 8px; }
 	.email-step-number { display: flex; flex-shrink: 0; width: 30px; height: 30px; align-items: center; justify-content: center; border-radius: 10px; background-color: #FBE3D5; }
 	.email-step-number-text { color: #C2410C; font-size: 13px; line-height: 18px; font-weight: bold; }
 	.email-step-number-current { background-color: #E4572E; }
@@ -193,8 +189,8 @@ function confirmChange(): void {
 	.email-step-copy { flex: 1; min-width: 0; margin-left: 10px; }
 	.email-step-title { color: #211C18; font-size: 14px; line-height: 20px; font-weight: bold; }
 	.email-step-note { margin-top: 2px; color: #8B7B6F; font-size: 11px; line-height: 17px; }
-	.email-captcha-row { display: flex; flex-direction: row; align-items: center; gap: 10px; }
-	.email-captcha-input { flex: 1; min-width: 0; }
+	.email-captcha-row { display: flex; flex-direction: row; align-items: center; }
+	.email-captcha-input { margin-right: 10px; flex: 1; min-width: 0; }
 	.email-captcha-image-button { display: flex; flex-shrink: 0; width: 116px; height: 50px; margin: 0; padding: 3px; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #EADDD1; border-radius: 12px; background-color: #FFFFFF; }
 	.email-captcha-image { width: 108px; height: 42px; }
 	.email-captcha-placeholder { color: #C2410C; font-size: 11px; line-height: 16px; }
@@ -206,7 +202,7 @@ function confirmChange(): void {
 	.email-send-action-text { color: #C2410C; font-size: 14px; line-height: 20px; font-weight: bold; }
 	.email-sent-state { margin-top: 16px; padding: 15px; border-radius: 13px; background-color: #EDF5EB; }
 	.email-sent-title { color: #386341; font-size: 14px; line-height: 20px; font-weight: bold; }
-	.email-sent-note { margin-top: 4px; color: #526B51; font-size: 12px; line-height: 19px; overflow-wrap: anywhere; }
+	.email-sent-note { margin-top: 4px; color: #526B51; font-size: 12px; line-height: 19px; }
 	.email-code-section { margin-top: 2px; }
 	.email-resend-action { display: flex; min-height: 42px; margin: 6px 0 0 0; padding: 8px 0; align-items: center; justify-content: center; border: 0; background-color: transparent; }
 	.email-resend-action-text { color: #C2410C; font-size: 12px; line-height: 18px; }

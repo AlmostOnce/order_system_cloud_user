@@ -6,6 +6,7 @@ global.uni = { getStorageSync: k => storage.get(k) ?? '', setStorageSync: (k,v) 
 function load(file) {
  file = path.resolve(root, file);
  if (file.endsWith(path.normalize('api/auth.uts'))) return { login: async () => ({ok:true,data:{data:{accessToken:responseToken,refreshToken:'refresh'}}}) };
+ if (file.endsWith(path.normalize('store/notifications.uts'))) return {startNotificationSession(){},stopNotificationSession(){}};
  if (cache.has(file)) return cache.get(file);
  const mod={exports:{}}; cache.set(file,mod.exports);
  const code=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText;
@@ -28,9 +29,9 @@ const token=sub=>'header.'+Buffer.from(JSON.stringify({sub,exp:1900000000})).toS
  storage.set('auth_access_token',token(uuid));
  assert.equal(auth.isLoggedIn(),true); assert.equal(auth.currentUser().userUuid,uuid);
  storage.clear(); responseToken=token('7');
- assert.notEqual(await auth.login('u','p','c','v',false),'','incompatible login response must not enter home');
+ assert.equal((await auth.login('u','p','c','v',false)).ok,false,'incompatible login response must not enter home');
  assert.equal(storage.has('auth_access_token'),false);
  responseToken=token(uuid);
- assert.equal(await auth.login('u','p','c','v',false),''); assert.equal(auth.isLoggedIn(),true);
+ assert.equal((await auth.login('u','p','c','v',false)).ok,true); assert.equal(auth.isLoggedIn(),true);
  console.log('Session navigation checks passed: legacy/malformed session cleared, login remains stable, incompatible login rejected, UUID login accepted.');
 })().catch(e=>{console.error(e);process.exitCode=1});

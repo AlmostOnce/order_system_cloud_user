@@ -1,0 +1,21 @@
+/** 未登录验证凭据只在页面跳转期间保存在内存；读取后即移除。 */
+export type EmailOwnershipGrant = { token: string, email: string, expiresAt: number }
+let enrollment: EmailOwnershipGrant | null = null
+let registration: EmailOwnershipGrant | null = null
+export function setEnrollmentAuthorization(token: string, expiresIn: number): boolean {
+    if (!/^[a-f0-9]{64}$/.test(token) || expiresIn <= 0 || expiresIn > 600) return false
+    enrollment = { token: token, email: '', expiresAt: Date.now() + expiresIn * 1000 }; return true
+}
+export function takeEnrollmentAuthorization(): EmailOwnershipGrant | null {
+    const grant = enrollment; enrollment = null
+    return grant != null && grant.expiresAt > Date.now() ? grant : null
+}
+export function setRegistrationGrant(token: string, email: string, expiresIn: number): boolean {
+    if (!/^[a-f0-9]{64}$/.test(token) || expiresIn <= 0 || expiresIn > 300) return false
+    registration = { token: token, email: email, expiresAt: Date.now() + expiresIn * 1000 }; return true
+}
+export function takeRegistrationGrant(): EmailOwnershipGrant | null {
+    const grant = registration; registration = null
+    return grant != null && grant.expiresAt > Date.now() ? grant : null
+}
+export function clearEmailOwnershipSession() { enrollment = null; registration = null }

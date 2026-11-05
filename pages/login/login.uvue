@@ -2,7 +2,6 @@
 	<view class="page">
 		<!-- 状态栏底色与品牌区同色，避免顶部出现米色缝隙 -->
 		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
-
 		<!-- 品牌区：柿子橙实色块 + 半透明几何圆，几何圆在入场时逐个缩放出场 -->
 		<view class="brand">
 			<view class="shape shape-1" :class="entered ? '' : 'shape-1-pre'"></view>
@@ -25,13 +24,11 @@
 				<text class="brand-tagline" :class="entered ? '' : 'brand-tagline-pre'">让每一餐都吃得从容</text>
 			</view>
 		</view>
-
 		<!-- 表单卡：上移与品牌区重叠；顶部琥珀短线在入场时由中间向两侧展开 -->
 		<view class="panel" :class="entered ? '' : 'panel-pre'">
 			<view class="panel-rule" :class="entered ? '' : 'panel-rule-pre'"></view>
 			<text class="panel-title">欢迎回来</text>
 			<text class="panel-desc">登录后浏览档口菜单、下单并查询订单</text>
-
 			<view class="field" :class="focusedField == 'account' ? 'field-focused' : ''">
 				<text class="field-label">账号</text>
 				<input
@@ -47,7 +44,6 @@
 				/>
 				<view class="field-rule" :class="focusedField == 'account' ? 'field-rule-on' : ''"></view>
 			</view>
-
 			<view class="field" :class="focusedField == 'password' ? 'field-focused' : ''">
 				<text class="field-label">密码</text>
 				<view class="password-row">
@@ -64,9 +60,8 @@
 						@blur="onFieldBlur"
 						@confirm="onPasswordConfirm"
 					/>
-					<button
+                    <view
 						class="field-action"
-						:aria-label="showPassword ? '隐藏密码' : '显示密码'"
 						@click="togglePassword"
 					>
 						<view class="password-icon">
@@ -74,11 +69,10 @@
 							<view class="password-eye-pupil"></view>
 							<view v-if="!showPassword" class="password-eye-slash"></view>
 						</view>
-					</button>
+                    </view>
 				</view>
 				<view class="field-rule" :class="focusedField == 'password' ? 'field-rule-on' : ''"></view>
 			</view>
-
 			<!-- 验证码：图片由后端绘制并以 Base64 下发，点击图片即可换一张 -->
 			<view class="field" :class="focusedField == 'captcha' ? 'field-focused' : ''">
 				<text class="field-label">验证码</text>
@@ -108,7 +102,6 @@
 				</view>
 				<view class="field-rule" :class="focusedField == 'captcha' ? 'field-rule-on' : ''"></view>
 			</view>
-
 			<view class="options">
 				<view class="remember" @click="toggleRemember">
 					<view class="remember-box" :class="rememberAccount ? 'remember-box-on' : ''">
@@ -118,9 +111,7 @@
 				</view>
 				<text class="options-hint">登录即表示同意校园食堂服务条款</text>
 			</view>
-
-            <button class="forgot-password-action" :disabled="submitting" @click="openPasswordRecovery"><text class="forgot-password-label">忘记密码？</text></button>
-
+            <button class="forgot-password-action forgot-password-label button-text button-text-44" :disabled="submitting" @click="openPasswordRecovery">忘记密码？</button>
 			<!-- 按钮不单独做入场：卡片整体淡入时已带着它一起出现，此处只负责按压反馈 -->
 			<view
 				class="submit"
@@ -130,13 +121,11 @@
 			>
 				<text class="submit-text">{{ submitting ? '登录中…' : '登 录' }}</text>
 			</view>
-
 			<view class="register-row" @click="toRegister">
 				<text class="register-hint">还没有账号？</text>
 				<text class="register-link">立即注册</text>
 			</view>
 		</view>
-
 		<view class="footer">
 			<text class="footer-text">湖北经济学院 · 食堂管理中心</text>
 		</view>
@@ -151,7 +140,7 @@ import { getRememberedAccount } from '../../common/storage.uts';
 // 导入轻量提示：普通提示与成功提示。
 import { toastSuccess, toast } from '../../common/feedback.uts';
 // 导入登录态：登录动作与是否已登录判断。
-import { login as doLogin, isLoggedIn } from '../../store/auth.uts';
+import { login as doLogin, LoginResult, isLoggedIn } from '../../store/auth.uts';
 // 导入验证码接口：登录前必须先取到一次有效的图片验证码。
 import { fetchCaptcha } from '../../api/auth.uts';
 // 导入统一请求结果类型，用于标注验证码接口返回值。
@@ -303,13 +292,17 @@ function submit() {
     }
     // 置为提交中，按钮进入忙碌态并拦截重复点击。
     state.submitting = true;
-    // 调用登录流程，返回空串表示成功，否则为错误提示。
-    doLogin(account, state.password, state.captchaId, captchaCode, state.rememberAccount).then((message: string) => {
+    // 登录结果区分正常会话、受限邮箱补验和失败。
+    doLogin(account, state.password, state.captchaId, captchaCode, state.rememberAccount).then((result: LoginResult) => {
         // 请求结束，无论成败都先解除忙碌态。
         state.submitting = false;
-        // 有错误提示说明登录失败，直接 toast 后结束。
-        if (message.length > 0) {
-            toast(message);
+        // 未验证账号先进入邮箱补验，不携带或保存普通登录Token。
+        if (result.emailVerificationRequired) {
+            state.password = ''; state.captchaCode = ''; state.captchaId = ''; state.captchaImage = '';
+            uni.navigateTo({ url: '/pages/account/email-verification?mode=enrollment' }); return;
+        }
+        if (!result.ok) {
+            toast(result.message);
             // 验证码提交一次即失效，失败后必须换新图，否则再次提交只会提示过期。
             loadCaptcha();
             return;
@@ -329,7 +322,7 @@ function openPasswordRecovery(): void {
 
 function toRegister() {
     // 跳转到注册页；用 navigateTo 保留返回栈以便返回登录。
-    uni.navigateTo({ url: '/pages/register/register' });
+    uni.navigateTo({ url: '/pages/account/email-verification?mode=registration' });
 }
 
 onLoad(() => {

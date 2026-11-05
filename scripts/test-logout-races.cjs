@@ -31,10 +31,11 @@ function respond(request, status, data = null) { request.success({ statusCode: s
  assert.equal(h.requests[2].data.refreshToken, 'new-refresh'); assert.equal(h.requests[2].header.Authorization, 'Bearer new-access');
  respond(h.requests[2], 200); await pending;
  // Network failure must still finish the local logout exactly once.
- const moduleData = { exports: {} }; let cleared = 0, stopped = 0, emailCleared = 0, rejectLogout;
+ const moduleData = { exports: {} }; let cleared = 0, stopped = 0, emailCleared = 0, ownershipCleared = 0, rejectLogout;
  new Function('require', 'module', 'exports', ts.transpileModule(fs.readFileSync('store/auth.uts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)(path => {
   if (path.includes('api/auth')) return { logout: () => new Promise((_resolve, reject) => { rejectLogout = reject; }) };
   if (path.includes('notifications')) return { stopNotificationSession: () => stopped++ };
+  if (path.includes('email-ownership-session')) return { clearEmailOwnershipSession: () => ownershipCleared++ };
   if (path.includes('email-change-session')) return { clearEmailChangeAuthorization: () => emailCleared++ };
   if (path.includes('storage')) return { getSessionVersion: () => 0, beginSessionClose() {}, getRefreshToken: () => 'refresh', clearTokens: () => cleared++ };
   return {};
@@ -42,7 +43,7 @@ function respond(request, status, data = null) { request.success({ statusCode: s
  const first = moduleData.exports.logout(), second = moduleData.exports.logout();
  assert.equal(first, second); await first;
  // Local logout resolves even while the network request has not settled.
- assert.equal(cleared, 1); assert.equal(stopped, 1); assert.equal(emailCleared, 1);
+ assert.equal(cleared, 1); assert.equal(stopped, 1); assert.equal(emailCleared, 1); assert.equal(ownershipCleared, 1);
  rejectLogout(new Error('offline')); await tick(); assert.equal(cleared, 1);
  console.log('Logout race checks passed: late refresh cannot restore cleared tokens; logout retries revoke the rotated refresh token.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
