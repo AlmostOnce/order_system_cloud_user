@@ -1,13 +1,21 @@
 <template>
-    <view class="account-page account-secondary">
-        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-        <view class="account-nav vapor-account-secondary--account-nav conversation-nav"><text class="conversation-page-title">消息</text></view>
-        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
+    <view class="account-page conversation-page">
+        <view class="account-status conversation-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav conversation-nav"><text class="conversation-page-title">消息</text></view>
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#F5F5F5" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
             <view class="conversation-list">
-                <view class="conversation-entry" @click="openOrders">
-                    <view class="conversation-avatar-wrap"><image class="conversation-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image><view v-if="unreadCount > 0" class="conversation-badge"><text class="conversation-badge-text">{{ unreadCount > 99 ? '99+' : unreadCount }}</text></view></view>
-                    <view class="conversation-copy"><view class="conversation-title-row"><text class="conversation-name">订单中心</text><text v-if="latest != null" class="conversation-time">{{ latestTime }}</text></view><text class="conversation-preview">{{ preview }}</text></view>
+                <view class="conversation-entry" hover-class="conversation-entry-pressed" @click="openOrders">
+                    <image class="conversation-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image>
+                    <view class="conversation-copy">
+                        <text class="conversation-name" :max-lines="1">订单中心</text>
+                        <text class="conversation-preview" :max-lines="1">{{ preview }}</text>
+                    </view>
+                    <view class="conversation-meta">
+                        <text v-if="latest != null" class="conversation-time">{{ latestTime }}</text>
+                        <view v-if="unreadCount > 0" class="conversation-badge"><text class="conversation-badge-text">{{ unreadCount > 99 ? '99+' : unreadCount }}</text></view>
+                    </view>
                 </view>
+                <view class="conversation-divider"></view>
                 <text v-if="errorText.length >0" class="conversation-error">
 {{ errorText }}</text>
             </view>
@@ -79,22 +87,26 @@ onUnload(() => { visible = false; state.version++; unsubscribeNotifications(chan
 </script>
 <style>
 @import '../../styles/account.css';
-.conversation-nav { padding: 12px 22px 18px; }
-.conversation-page-title { color: #211C18; font-size: 25px; line-height: 34px; font-weight: bold; }
-.conversation-list { padding: 4px 16px 24px; }
-.conversation-entry { display: flex; flex-direction: row; align-items: center; width: 100%; padding: 14px 12px; margin: 0; border: 1px solid #F1E5DA; border-radius: 18px; background-color: #FFFFFF; text-align: left; overflow: visible; }
-.conversation-avatar-wrap { position: relative; width: 54px; height: 54px; flex-shrink: 0; margin-right: 14px; overflow: visible; }
-.conversation-avatar { width: 54px; height: 54px; border-radius: 17px; }
-.conversation-badge { position: absolute; top: -8px; right: -6px; z-index: 1; min-width: 20px; height: 20px; padding: 0 4px; align-items: center; justify-content: center; border: 2px solid #FFFFFF; border-radius: 12px; background-color: #C9442B; }
-.conversation-badge-text { color: #FFFFFF; font-size: 10px; line-height: 14px; }
+.conversation-page { background-color: #FFFFFF; }
+.conversation-status { background-color: #F5F5F5; }
+.conversation-nav { height: 52px; padding: 0 16px; background-color: #F5F5F5; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #EAEAEA; }
+.conversation-page-title { color: #202020; font-size: 20px; line-height: 28px; font-weight: bold; }
+.conversation-list { padding-bottom: 24px; }
+.conversation-entry { flex-direction: row; align-items: center; width: 100%; min-height: 80px; padding: 14px 16px; background-color: #FFFFFF; }
+.conversation-entry-pressed { background-color: #F2F2F2; }
+.conversation-avatar { width: 50px; height: 50px; border-radius: 10px; flex-shrink: 0; margin-right: 12px; }
 .conversation-copy { flex: 1; min-width: 0; }
-.conversation-title-row { flex-direction: row; align-items: center; justify-content: space-between; }
-.conversation-name { color: #211C18; font-size: 17px; line-height: 25px; font-weight: bold; }
-.conversation-time { color: #A2968B; font-size: 10px; line-height: 16px; flex-shrink: 0; margin-left: 8px; }
-.conversation-preview { color: #8B7B6F; font-size: 13px; line-height: 21px; margin-top: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.conversation-error { padding: 16px 8px; color: #B73920; font-size: 12px; line-height: 20px; }
+.conversation-name { color: #202020; font-size: 16px; line-height: 23px; }
+.conversation-preview { color: #888888; font-size: 13px; line-height: 20px; margin-top: 4px; }
+.conversation-meta { width: 72px; height: 47px; flex-shrink: 0; margin-left: 8px; align-items: flex-end; justify-content: space-between; }
+.conversation-time { color: #999999; font-size: 10px; line-height: 16px; }
+.conversation-badge { min-width: 18px; height: 18px; padding: 0 5px; align-items: center; justify-content: center; border-radius: 10px; background-color: #EF4B4B; }
+.conversation-badge-text { color: #FFFFFF; font-size: 10px; line-height: 18px; }
+.conversation-divider { height: 1px; margin-left: 78px; background-color: #EEEEEE; }
+.conversation-error { padding: 14px 16px; color: #B73920; font-size: 12px; line-height: 20px; }
 /* #ifdef WEB */
-.account-page .conversation-title-row { flex-direction: row; }
-.account-page .conversation-preview { display: block; overflow-wrap: normal; }
+.account-page .conversation-nav, .account-page .conversation-entry { flex-direction: row; }
+.account-page .conversation-nav { height: 52px; padding: 0 16px; min-height: 52px; }
+.account-page .conversation-name, .account-page .conversation-preview { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 /* #endif */
 </style>
