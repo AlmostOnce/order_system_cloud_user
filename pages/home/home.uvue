@@ -71,7 +71,7 @@
 					@click="openWindow(item)"
 				>
 					<view class="stall-badge">
-						<business-image :src="item.imageUrl" kind="window"></business-image>
+						<business-image :src="item.imageUrl" kind="window" :preview="false"></business-image>
 					</view>
 					<view class="stall-body">
 						<text class="stall-name">{{ item.windowName }}</text>
@@ -195,6 +195,7 @@ function shortenName(name: string): string {
 const initialEmptyWindows: Array<WindowItem> = [];
 const initialWindowRatings: Array<CardRating> = [];
 let windowRatingVersion = 0;
+let catalogOwner = '';
 // 餐厅列表的初始空数组。
 const initialEmptyRestaurants: Array<RestaurantItem> = [];
 const state = reactive({ refreshing: false, currentRefreshTime: '',
@@ -337,6 +338,15 @@ function loadProfile() {
     state.greeting = buildGreeting();
     // 仅顾客角色需要拉取档口与餐厅数据。
     if (state.roleCode == 'CUSTOMER') {
+        if (catalogOwner == profile.userUuid) return;
+        catalogOwner = profile.userUuid;
+        windowRatingVersion++;
+        state.windows = [];
+        state.visibleWindows = [];
+        state.restaurants = [];
+        state.windowRatings = [];
+        state.selectedRestaurantId = ALL_RESTAURANTS;
+        state.selectedRestaurantName = ALL_RESTAURANTS_NAME;
         loadCatalog();
     }
     else {
