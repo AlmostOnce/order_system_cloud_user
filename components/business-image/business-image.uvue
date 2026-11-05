@@ -1,9 +1,11 @@
-<template><image class="business-image" :src="resolvedSource" mode="aspectFill" @error="onImageError"></image></template>
+<template>
+    <image class="business-image" :src="resolvedSource" mode="aspectFill" @error="onImageError" @click="previewImage"></image>
+</template>
 <script setup lang="uts">
 import { reactive, toRefs, computed, watch } from 'vue'
 import { defaultImage, imageSource } from '../../common/images.uts';
 
-const props = defineProps({ src: { type: String, default: '' }, kind: { type: String, default: 'product' } })
+const props = defineProps({ src: { type: String, default: '' }, kind: { type: String, default: 'product' }, preview: { type: Boolean, default: true } })
 
 const state = reactive({ failed: false })
 
@@ -12,6 +14,15 @@ const { failed } = toRefs(state)
 const resolvedSource = computed((): string => {
     return state.failed ? defaultImage(props.kind) : imageSource(props.src, props.kind);
 })
+
+const previewable = computed((): boolean => props.preview && (props.kind == 'window' || props.kind == 'product'))
+
+function previewImage(event: UniPointerEvent) {
+    if (!previewable.value) return;
+    event.stopPropagation();
+    const source = resolvedSource.value;
+    uni.previewImage({ current: source, urls: [source] });
+}
 
 function onImageError() {
     state.failed = true;

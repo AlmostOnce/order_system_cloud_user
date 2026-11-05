@@ -3,6 +3,7 @@ const ts=require('D:/HBuilderX/plugins/compile-typescript/node_modules/typescrip
 const root=path.resolve(__dirname,'..'),cache=new Map();
 const uuid='12345678-1234-4234-8234-123456789abc';
 let response={ok:true,message:'',data:{data:{items:[{rank:1,productId:7,windowId:1,productName:'鸡肉饭',sales:14}]}}};
+let productMock=true;
 let logged=true,requests=[],navigation=[],windowResolve=null,windowDeferred=false,finishCount=0;
 global.uni={getWindowInfo:()=>({statusBarHeight:24}),reLaunch:o=>navigation.push(o.url),navigateTo:o=>navigation.push(o.url)};
 function load(file){
@@ -10,8 +11,10 @@ function load(file){
  if(file.endsWith(path.normalize('common/http.uts')))return{httpGet:async(url,auth)=>{requests.push({url,auth});return response;}};
  if(file.endsWith(path.normalize('store/auth.uts')))return{isLoggedIn:()=>logged,currentUser:()=>({userUuid:uuid,roleCode:'CUSTOMER'})};
  if(file.endsWith(path.normalize('common/refresh.uts')))return{refreshTimeLabel:()=> '本次时间',finishPullRefresh:(start,ok,done)=>{finishCount++;done(ok?'完成时间':'');}};
- if(file.endsWith(path.normalize('api/product.uts')))return{listActiveWindows:()=>windowDeferred?new Promise(resolve=>{windowResolve=resolve}):Promise.resolve({ok:true,items:[{windowId:1,windowName:'一楼窗口'}]})};
+ if(productMock && file.endsWith(path.normalize('api/product.uts')))return{listProductImages:async ids=>{assert.deepEqual(ids,[7]);return [{productId:7,windowId:1,imageUrl:'/dish.jpg'}]},listActiveWindows:()=>windowDeferred?new Promise(resolve=>{windowResolve=resolve}):Promise.resolve({ok:true,items:[{windowId:1,windowName:'一楼窗口'}]})};
+ if(file.endsWith(path.normalize('components/business-image/business-image.uvue')))return{default:{}};
  if(file.endsWith(path.normalize('components/refresh-header/refresh-header.uvue')))return{default:{}};
+ if(file.endsWith(path.normalize('store/notifications.uts')))return{startNotificationSession(){}};
  if(cache.has(file))return cache.get(file);
  let source=fs.readFileSync(file,'utf8');if(file.endsWith('.uvue')) { const setup=require('./setup-harness.cjs').loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1],p=>load(path.resolve(path.dirname(file),p)));cache.set(file,setup);return setup; }
  assert.equal(ts.createSourceFile(file+'.ts',source,ts.ScriptTarget.Latest,true).parseDiagnostics.length,0,file);
@@ -31,14 +34,22 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  const page=load('pages/ranking/ranking.uvue');
  const vm=page.create();
  vm.$hooks.onPageShow.call(vm);await flush();assert.equal(vm.items.length,1);assert.equal(vm.windowLabel(1),'一楼窗口');
- vm.openWindow(vm.items[0]);assert.equal(navigation.pop(),'/pages/menu/menu?windowId=1');
+ assert.equal(vm.dishImage(vm.items[0]),'/dish.jpg');assert.equal(vm.dishImage({productId:99,windowId:1}),'');
+ vm.openWindow(vm.items[0]);assert.equal(navigation.pop(),'/pages/menu/menu?windowId=1&productId=7');
  windowDeferred=true;vm.refreshPage();vm.refreshPage();await flush();assert.equal(vm.refreshing,true);assert.equal(finishCount,0);
  windowResolve({ok:true,items:[]});await flush();assert.equal(vm.refreshing,false);assert.equal(finishCount,1);
  windowDeferred=false;response={ok:false,message:'连接失败',data:null};await vm.loadRanking();assert.equal(vm.items.length,1,'refresh error keeps previous ranking');assert.equal(vm.errorText,'连接失败');
  logged=false;vm.$hooks.onPageShow.call(vm);assert.equal(navigation.pop(),'/pages/login/login');
+ productMock=false;const products=load('api/product.uts');
+ const count=requests.length;assert.deepEqual(await products.listProductImages([]),[]);assert.equal(requests.length,count);
+ response={ok:true,data:{data:[{productId:7,windowId:1,imageUrl:'/dish.jpg'},null,{productId:0,windowId:1}]}};
+ assert.deepEqual(await products.listProductImages([7]),[{productId:7,windowId:1,imageUrl:'/dish.jpg'}]);
+ assert.equal(requests.at(-1).url,'/products/images?productIds=7');
+ response={ok:false,data:null};assert.deepEqual(await products.listProductImages([7]),[]);
+ assert.ok(fs.readFileSync(path.join(root,'pages/ranking/ranking.uvue'),'utf8').includes(':preview="false"'));
  const config=JSON.parse(fs.readFileSync(path.join(root,'pages.json'),'utf8').replace(/\/\/[^\n]*/g,''));
- assert.deepEqual(config.tabBar.list.map(x=>x.text),['首页','排行榜','我的']);
+ assert.deepEqual(config.tabBar.list.map(x=>x.text),['首页','排行榜','消息','我的']);
  for(const tab of config.tabBar.list)for(const icon of ['iconPath','selectedIconPath'])assert.ok(fs.existsSync(path.join(root,tab[icon])));
  assert.ok(config.pages.some(p=>p.path==='pages/ranking/ranking'));
- console.log('Sales ranking UI checks passed: authenticated API, success/empty/error/malformed states, navigation, refresh waits for all requests, duplicate guard, old data preserved, login guard and three tab icons/routes.');
+ console.log('Sales ranking UI checks passed: authenticated API, success/empty/error/malformed states, navigation, refresh waits for all requests, duplicate guard, old data preserved, login guard and four tab icons/routes.');
 })().catch(e=>{console.error(e);process.exitCode=1});

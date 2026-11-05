@@ -2,7 +2,6 @@
 	<view class="page">
 		<!-- 状态栏底色与头部品牌区同色，避免顶部出现米色缝隙 -->
 		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
-
 		<!-- 头部：返回按钮 + 档口名称 + 位置，沿用首页的柿子橙品牌色 -->
 		<view class="hero">
 			<view class="hero-shape hero-shape-1" :class="entered ? '' : 'hero-shape-1-pre'"></view>
@@ -28,23 +27,21 @@
 			<input class="shop-search-input" v-model="shopKeyword" placeholder="搜索本店菜品" confirm-type="search" :maxlength="80" />
 			<view v-if="shopKeyword.length > 0" class="shop-search-clear" @click="clearShopSearch"><text class="shop-search-clear-text">清除</text></view>
 		</view>
-
-        <scroll-view v-if="(loading && groups.length == 0) || loadError.length > 0" class="menu-state-scroll" scroll-y="true" :refresher-enabled="refreshing || (!loading && !stockLoading && !cartLoading && !mutating)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
-                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
-
+            <scroll-view v-if="(loading && groups.length == 0) || loadError.length > 0" class="menu-state-scroll" direction="vertical" :refresher-enabled="refreshing || (!loading && !stockLoading && !cartLoading && !mutating)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
             <view class="state" :class="entered ? '' : 'state-pre'">
                 <text class="state-text">{{ loading ? '正在加载菜单…' : loadError }}</text>
-
+                </view>
+                <view slot="refresher" class="native-refresh-slot">
+                    <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
             </view>
         </scroll-view>
-
 		<!-- 菜单主体：左侧分类导航与右侧连续菜单联动 -->
-		<scroll-view v-else-if="shopKeyword.trim().length > 0" class="shop-search-results" scroll-y="true">
+            <scroll-view v-else-if="shopKeyword.trim().length > 0" class="shop-search-results" direction="vertical">
 			<view class="shop-results-head"><text class="shop-results-title">本店搜索</text><text class="shop-results-count">{{ shopSearchResults.length }} 道菜品</text></view>
 			<view v-if="shopSearchResults.length == 0" class="shop-search-empty"><text class="shop-search-empty-text">没有找到相关菜品，换个关键词试试</text></view>
 			<view v-for="product in shopSearchResults" :key="product.productId" class="shop-result" hover-class="shop-result-hover" @click="openShopResult(product)">
 				<view class="shop-result-image"><business-image :src="product.imageUrl" kind="product"></business-image></view>
-				<view class="shop-result-body"><text class="shop-result-name">{{ product.productName }}</text><text v-if="product.description.length > 0" class="shop-result-description">{{ product.description }}</text><text class="shop-result-price">¥{{ formatPrice(product.price) }}</text></view>
+				<view class="shop-result-body"><text class="shop-result-name">{{ product.productName }}</text><text v-if="product.description.length > 0" class="shop-result-description" :max-lines="1">{{ product.description }}</text><text class="shop-result-price">¥{{ formatPrice(product.price) }}</text></view>
 				<text class="shop-result-arrow">›</text>
 			</view>
 		</scroll-view>
@@ -63,11 +60,8 @@
 					<text class="rail-text" :class="activeCategoryId == group.categoryId ? 'rail-text-on' : ''">{{ group.categoryName }}</text>
 				</view>
 			</scroll-view>
-
 			<!-- 右侧菜品区 -->
 			<scroll-view class="dishes" direction="vertical" :scroll-into-view="dishesAnchor" :scroll-with-animation="false" @scroll="onDishesScroll" :refresher-enabled="!mutating && (refreshing || (!loading && !stockLoading && !cartLoading))" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
-                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
-
 				<view v-if="stockLoading || stockLoadError.length > 0" class="stock-status">
 					<text class="stock-status-text">{{ stockLoading ? '正在查询库存…' : stockLoadError }}</text>
 				</view>
@@ -79,7 +73,6 @@
 					<text class="state-text">该档口暂无在售菜品</text>
 					<text class="state-hint">稍后再来看看</text>
 				</view>
-
 				<!-- 菜品列表：按分类分组展示，组内菜品依次浮入 -->
 				<view v-else class="menu">
 					<view class="group" :id="categorySectionId(group.categoryId)" v-for="group in groups" :key="group.categoryId">
@@ -87,7 +80,6 @@
 							<text class="group-title">{{ group.categoryName }}</text>
 							<text class="group-count">{{ group.products.length }} 款</text>
 						</view>
-
 						<view
 							class="dish"
 							:class="(listReady ? '' : 'dish-pre ') + (highlightedProductId == product.productId ? 'dish-target' : '')"
@@ -99,18 +91,15 @@
 							<view class="dish-thumb">
 								<business-image :src="product.imageUrl" kind="product"></business-image>
 							</view>
-
 							<view class="dish-body">
 								<text class="dish-name">{{ product.productName }}</text>
 								<text class="dish-rating">{{ cardRatingText(productRatings, product.productId) }}</text>
 								<text v-if="product.description.length > 0" class="dish-desc">{{ product.description }}</text>
 								<text class="dish-stock">{{ stockHint(product.productId) }}</text>
-                                <button class="review-menu-action" @click="openProductReviews(product)"><text class="review-menu-label">查看评价</text></button>
-
+                                    <button class="review-menu-action review-menu-label button-text button-text-44" @click="openProductReviews(product)">查看评价</button>
 							</view>
 								<view class="dish-foot">
 									<text class="dish-price">¥{{ formatPrice(product.price) }}</text>
-
 									<!-- 数量步进器：数量为 0 时只显示加号，避免出现无意义的 0 -->
 									<view class="stepper">
 										<view
@@ -129,17 +118,20 @@
 								</view>
 						</view>
 					</view>
-                    <view class="menu-tail" :style="'height:' + categoryTailHeight + 'px'" aria-hidden="true"></view>
+                        <view class="menu-tail" :style="'height:' + categoryTailHeight + 'px'">
+                        </view>
+                    </view>
+                    <view slot="refresher" class="native-refresh-slot">
+                        <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
 				</view>
 			</scroll-view>
 		</view>
 		</view>
-		<scroll-view v-else class="shop-review-list" scroll-y="true" :lower-threshold="120" @scrolltolower="loadMoreShopReviews" :refresher-enabled="!shopReviewsLoading" :refresher-triggered="shopReviewsRefreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshShopReviews">
-			<refresh-header slot="refresher" :refreshing="shopReviewsRefreshing" :current-refresh-time="shopReviewsRefreshTime"></refresh-header>
+        <scroll-view v-else class="shop-review-list" direction="vertical" :lower-threshold="120" @scrolltolower="loadMoreShopReviews" :refresher-enabled="!shopReviewsLoading" :refresher-triggered="shopReviewsRefreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshShopReviews">
 			<view class="shop-review-content">
 				<view class="shop-rating-card"><text class="shop-rating-value">{{ shopRatingReady && shopAverageScore != null ? shopAverageScore!.toFixed(1) : '--' }}</text><view class="shop-rating-info"><text class="shop-rating-title">店铺评分</text><text class="shop-rating-meta">{{ shopRatingReady ? shopReviewCount + ' 条评价' : '评分暂不可用' }}</text></view></view>
 				<view v-for="review in shopReviews" :key="review.commentId" class="shop-review-card">
-					<view class="shop-review-head"><text class="shop-review-author">{{ review.authorName }}</text><text class="shop-review-score">{{ review.score }} 分</text></view>
+					<view class="shop-review-head"><view class="shop-review-avatar"><business-image :src="review.authorAvatarUrl" kind="avatar"></business-image></view><text class="shop-review-author">{{ review.authorName }}</text><text class="shop-review-score">{{ review.score }} 分</text></view>
 					<text class="shop-review-date">{{ review.createdAt.replace('T', ' ').substring(0, 16) }}</text><text class="shop-review-body">{{ review.content }}</text>
 					<view v-if="review.tags.length > 0" class="shop-review-tags"><text v-for="tag in review.tags" :key="tag" class="shop-review-tag">{{ tag }}</text></view>
 					<view v-if="review.images.length > 0" class="shop-review-images"><image v-for="(url, index) in review.images" :key="url" class="shop-review-image" :src="shopReviewImage(url)" mode="aspectFill" @click="previewShopReview(review, index)"></image></view>
@@ -149,8 +141,10 @@
 				<text v-else-if="shopReviewsLoaded && shopReviews.length == 0" class="shop-review-status">还没有店铺评价，完成订单后可以分享用餐体验</text>
 				<text v-else-if="shopReviewsLoaded && !shopReviewsHasMore" class="shop-review-status">已经看到全部评价</text>
 			</view>
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="shopReviewsRefreshing" :current-refresh-time="shopReviewsRefreshTime"></refresh-header>
+            </view>
 		</scroll-view>
-
 		<!-- 底部购物车栏：菜单就绪后随页面出现；点击左侧信息区展开购物车清单 -->
 		<view v-if="shopTab == 'menu' && !loading && loadError.length == 0" class="cartbar">
 			<view class="cartbar-info" hover-class="cartbar-info-hover" @click="toggleCartPanel">
@@ -174,7 +168,6 @@
 				<text class="cartbar-btn-text">去结算</text>
 			</view>
 		</view>
-
 		<!-- 购物车清单：遮罩淡入、面板自底部上滑，交互与首页餐厅选择面板一致 -->
 		<view
 			v-if="cartPanelVisible"
@@ -190,14 +183,10 @@
 					<text class="sheet-clear-text">清空</text>
 				</view>
 			</view>
-
-			<scroll-view class="sheet-list" scroll-y="true" :refresher-enabled="!mutating && (refreshing || (!loading && !stockLoading && !cartLoading))" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" :style="sheetListStyle()" refresher-default-style="none" :refresher-threshold="72">
-                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
-
+            <scroll-view class="sheet-list" direction="vertical" :refresher-enabled="!mutating && (refreshing || (!loading && !stockLoading && !cartLoading))" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" :style="sheetListStyle()" refresher-default-style="none" :refresher-threshold="72">
 				<view v-if="cartItems.length == 0" class="sheet-empty">
 					<text class="sheet-empty-text">还没有选择菜品</text>
 				</view>
-
 				<view class="sheet-item" v-for="item in cartItems" :key="item.productId">
 					<view class="sheet-item-body">
 						<text class="sheet-item-name">{{ item.productName }}</text>
@@ -205,7 +194,6 @@
 						<text v-if="item.available" class="sheet-item-price">¥{{ formatPrice(item.unitPrice) }}</text>
 						<text v-else class="sheet-item-warn">{{ unavailableHint(item) }}</text>
 					</view>
-
 					<view v-if="item.available" class="stepper">
 						<view class="step step-minus" hover-class="step-hover" @click="decreaseItem(item)">
 							<view class="step-line"></view>
@@ -215,6 +203,9 @@
 							<view class="step-line step-line-light"></view><view class="step-line step-line-light step-line-vertical"></view>
 						</view>
 					</view>
+                </view>
+                <view slot="refresher" class="native-refresh-slot">
+                    <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
 				</view>
 			</scroll-view>
 		</view>
@@ -1210,7 +1201,8 @@ onReady(() => {
 	.shop-rating-meta { margin-top: 4px; font-size: 12px; color: #8C7C6F; }
 	.shop-review-card { padding: 16px; margin-bottom: 10px; border-radius: 14px; background-color: #FFFFFF; }
 	.shop-review-head { flex-direction: row; justify-content: space-between; align-items: center; }
-	.shop-review-author { font-size: 14px; font-weight: bold; color: #211C18; }
+	.shop-review-avatar { width: 32px; height: 32px; border-radius: 16px; overflow: hidden; flex-shrink: 0; margin-right: 8px; }
+	.shop-review-author { flex: 1; font-size: 14px; font-weight: bold; color: #211C18; }
 	.shop-review-score { font-size: 13px; font-weight: bold; color: #E4572E; }
 	.shop-review-date { margin-top: 4px; font-size: 11px; color: #A2968B; }
 	.shop-review-body { margin-top: 10px; font-size: 14px; line-height: 21px; color: #40352D; }
@@ -1234,7 +1226,7 @@ onReady(() => {
 	.shop-result-image { width: 62px; height: 62px; border-radius: 12px; overflow: hidden; flex-shrink: 0; }
 	.shop-result-body { flex: 1; min-width: 0; margin-left: 12px; }
 	.shop-result-name { font-size: 15px; font-weight: bold; color: #211C18; }
-	.shop-result-description { margin-top: 3px; font-size: 12px; color: #7A6C60; lines: 1; text-overflow: ellipsis; }
+	.shop-result-description { margin-top: 3px; font-size: 12px; color: #7A6C60; text-overflow: ellipsis; }
 	.shop-result-price { margin-top: 4px; font-size: 14px; font-weight: bold; color: #E4572E; }
 	.shop-result-arrow { margin-left: 8px; font-size: 22px; color: #B7A79B; }
 

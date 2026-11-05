@@ -204,3 +204,23 @@ export function listActiveRestaurants(): Promise<RestaurantListResult> {
 		})
 	})
 }
+
+export type ProductImage = { productId: number, windowId: number, imageUrl: string }
+
+export function listProductImages(productIds: number[]): Promise<ProductImage[]> {
+    if (productIds.length == 0) return Promise.resolve([]);
+    return httpGet('/products/images?productIds=' + productIds.join(','), true).then((result: HttpResult): ProductImage[] => {
+        const items: ProductImage[] = [];
+        if (!result.ok || result.data == null) return items;
+        const data = jsonArray(result.data!, 'data');
+        if (data == null) return items;
+        for (let i = 0; i < data.length; i++) {
+            if (data[i] == null) continue;
+            const row = data[i] as UTSJSONObject;
+            const id = jsonNumber(row, 'productId') ?? 0;
+            const windowId = jsonNumber(row, 'windowId') ?? 0;
+            if (id > 0 && windowId > 0) items.push({ productId: id, windowId: windowId, imageUrl: jsonString(row, 'imageUrl') ?? '' });
+        }
+        return items;
+    }).catch((): ProductImage[] => []);
+}

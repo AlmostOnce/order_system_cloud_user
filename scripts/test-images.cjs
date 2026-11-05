@@ -2,10 +2,10 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
 const ts = require(process.env.ORDER_TEST_TYPESCRIPT || 'D:/HBuilderX/plugins/compile-typescript/node_modules/typescript/lib/typescript.js');
 const root = path.resolve(__dirname, '..'), cache = new Map(), calls = [];
 let token = 'old-token', uploadMode = 'success', saveMode = 'success', chooseMode = 'success';
-const storage = { getAccessToken: () => token, getRefreshToken: () => 'refresh-token', saveTokens: a => { token = a; }, clearTokens() {} };
+const storage = { getSessionVersion: () => 0, isSessionClosing: () => false, getAccessToken: () => token, getRefreshToken: () => 'refresh-token', saveTokens: a => { token = a; }, clearTokens() {} };
 const envelope = data => JSON.stringify({ code: 'COMMON_000', data, message: '' });
 const KEY = '0123456789abcdef0123456789abcdef';
-global.uni = {
+global.uni = { showToast() {}, previewImage: options => calls.push({ type: 'preview', options }),
     uploadFile(options) {
         calls.push({ type: 'upload', options });
         assert.equal(options.name, 'file');
@@ -49,8 +49,15 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     assert.equal(images.imageSource('javascript:alert(1)', 'product'), '/static/images/defaults/product.jpg');
     const component = load('components/business-image/business-image.uvue');
     const vm = component.create({ src: 'https://invalid/photo', kind: 'product' });
+    let stopped=0;const click={stopPropagation:()=>stopped++};
+    assert.equal(vm.previewable,true);vm.previewImage(click);assert.deepEqual(calls.at(-1),{type:'preview',options:{current:'https://invalid/photo',urls:['https://invalid/photo']}});
     vm.onImageError();
     assert.equal(vm.resolvedSource, images.defaultImage('product'));
+    vm.previewImage(click);assert.equal(calls.at(-1).options.current,images.defaultImage('product'),'failed images preview the displayed fallback');
+    const thumbnail=component.create({src:'https://example.com/dish.jpg',kind:'product',preview:false});const previewCount=calls.length;thumbnail.previewImage(click);assert.equal(calls.length,previewCount,'ranking thumbnail does not preview');
+    const avatar=component.create({src:'https://example.com/avatar.jpg',kind:'avatar'});const beforePreview=calls.length;avatar.previewImage(click);assert.equal(calls.length,beforePreview,'avatar retains the existing parent preview flow');
+    const window=component.create({src:'/api/files/'+KEY+'/content',kind:'window'});window.previewImage(click);assert.equal(calls.at(-1).options.current,'https://gateway.example/api/files/'+KEY+'/content');
+    assert.ok(fs.readFileSync(path.join(root,'components/business-image/business-image.uvue'),'utf8').includes('event.stopPropagation()'),'preview click must not also navigate the card');assert.equal(stopped,3,'only shop and product images stop card navigation');
     vm.src = 'new-photo'; await flush(); assert.equal(vm.failed, false);
 
     uploadMode = 'expired'; const uploaded = await files.uploadImage('blob:local-photo', 'USER_AVATAR', 0);

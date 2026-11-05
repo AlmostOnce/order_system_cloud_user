@@ -6,21 +6,24 @@
             <text class="ranking-title">排行榜</text>
             <view class="ranking-heading-row"><text class="ranking-selected">销量榜</text><text class="ranking-scope">累计已支付 · TOP 50</text></view>
         </view>
-        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-default-style="none" :refresher-threshold="72" refresher-background="#FDF6F0" @refresherrefresh="refreshPage">
-            <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-default-style="none" :refresher-threshold="72" refresher-background="#FDF6F0" @refresherrefresh="refreshPage">
             <view class="ranking-content">
                 <text class="ranking-intro">按菜品售出份数排名，看看大家都在吃什么</text>
                 <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
                 <view v-if="loading && !refreshing && items.length == 0" class="ranking-state"><text class="account-muted">正在加载销量榜…</text></view>
                 <view v-if="!loading && errorText.length == 0 && items.length == 0" class="ranking-state"><text class="account-heading">好味道，等你发现</text><text class="account-note">有菜品售出后，就会出现在这里。</text></view>
                 <view v-if="items.length > 0" class="ranking-list">
-                    <button v-for="item in items" :key="item.productId + ':' + item.windowId" class="ranking-row" :class="item.rank <= 3 ? 'ranking-row-leading' : ''" hover-class="ranking-row-pressed" :disabled="!canOrder" @click="openWindow(item)">
+                    <view v-for="item in items" :key="item.productId + ':' + item.windowId" class="ranking-row" :class="item.rank <= 3 ? 'ranking-row-leading' : ''" hover-class="ranking-row-pressed" @click="() => { if (!(!canOrder)) openWindow(item) }" :style="(!canOrder) ? 'opacity:0.5' : ''">
                         <view class="ranking-number" :class="item.rank <= 3 ? 'ranking-number-leading' : ''"><text :class="(item.rank <= 3 ? 'vapor-ranking-number-leading--ranking-number-text' : '')" class="ranking-number-text">{{ item.rank < 10 ? '0' + item.rank : '' + item.rank }}</text></view>
-                        <view class="ranking-dish"><text class="ranking-dish-name">{{ item.productName }}</text><text class="ranking-window">{{ windowLabel(item.windowId) }}</text></view>
+                        <view class="ranking-image"><business-image :src="dishImage(item)" kind="product" :preview="false"></business-image></view>
+                        <view class="ranking-dish"><text class="ranking-dish-name" :max-lines="1">{{ item.productName }}</text><text class="ranking-window">{{ windowLabel(item.windowId) }}</text></view>
                         <view class="ranking-sales"><view class="ranking-sales-value"><text class="ranking-count">{{ item.sales }}</text><text class="ranking-unit">份</text></view><text class="ranking-sales-label">累计售出</text></view>
-                    </button>
+                    </view>
                 </view>
                 <text v-if="items.length > 0" class="ranking-note">待支付、已取消订单不计入</text>
+            </view>
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
             </view>
         </scroll-view>
     </view>
@@ -29,15 +32,17 @@
 <script setup lang="uts">
 import { startNotificationSession } from '../../store/notifications.uts'
 import { reactive, toRefs } from 'vue'
+import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { isLoggedIn, currentUser } from '../../store/auth.uts';
 import { fetchSalesRanking, SalesRankItem, SalesRankResult } from '../../api/ranking.uts';
-import { listActiveWindows, WindowItem, WindowListResult } from '../../api/product.uts';
+import { listActiveWindows, listProductImages, ProductImage, WindowItem, WindowListResult } from '../../api/product.uts';
 
+const initialImages: ProductImage[] = [];
 const initialItems: SalesRankItem[] = [];
 const initialWindows: WindowItem[] = [];
-const state = reactive({ statusBarHeight: 0, loading: false, refreshing: false, currentRefreshTime: '', errorText: '', items: initialItems, windows: initialWindows, canOrder: false })
+const state = reactive({ statusBarHeight: 0, loading: false, refreshing: false, currentRefreshTime: '', errorText: '', items: initialItems, images: initialImages, windows: initialWindows, canOrder: false })
 
 const { statusBarHeight, loading, refreshing, currentRefreshTime, errorText, items, windows, canOrder } = toRefs(state)
 
@@ -52,6 +57,7 @@ function loadRanking(): Promise<void> {
             return;
         }
         state.items = result.items;
+        return listProductImages(result.items.map((item: SalesRankItem): number => item.productId)).then((images: ProductImage[]) => { state.images = images; });
     });
     const windows = state.canOrder ? listActiveWindows().then((result: WindowListResult) => {
         if (result.ok)
@@ -86,10 +92,18 @@ function windowLabel(windowId: number): string {
     return '食堂窗口';
 }
 
+function dishImage(item: SalesRankItem): string {
+    for (let i = 0; i < state.images.length; i++) {
+        const image = state.images[i];
+        if (image.productId == item.productId && image.windowId == item.windowId) return image.imageUrl;
+    }
+    return '';
+}
+
 function openWindow(item: SalesRankItem) {
     if (!state.canOrder)
         return;
-    uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId });
+    uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId + '&productId=' + item.productId });
 }
 
 onPageShow(() => {
@@ -110,32 +124,33 @@ onPageShow(() => {
     .ranking-status, .ranking-header { background-color: #E4572E; }
     .ranking-header { padding: 20px 24px 0 24px; }
     .ranking-kicker { font-size: 12px; line-height: 18px; color: #FFE3D6; }
-    .ranking-title { margin-top: 8px; font-size: 28px; line-height: 36px; font-weight: bold; color: #FFFFFF; }
+    .ranking-title { margin-top: 4px; font-size: 24px; line-height: 32px; font-weight: bold; color: #FFFFFF; }
     .ranking-heading-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding-top: 22px; padding-bottom: 14px; }
     .ranking-selected { font-size: 17px; line-height: 24px; font-weight: bold; color: #FFFFFF; }
     .ranking-scope { font-size: 11px; line-height: 18px; color: #FFE3D6; }
-    .ranking-content { padding: 20px; }
+    .ranking-content { padding: 12px 16px; }
     .ranking-intro { margin-bottom: 16px; font-size: 12px; line-height: 20px; color: #7A6C60; }
     .ranking-state { padding: 36px 20px; border-radius: 18px; background-color: #FFFFFF; }
     .ranking-list { border-radius: 18px; overflow: hidden; background-color: #FFFFFF; }
-    .ranking-row { display: flex; flex-direction: row; align-items: center; width: 100%; min-height: 94px; margin: 0; padding: 18px 14px; border-width: 0; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #F4EBE4; border-radius: 0; background-color: #FFFFFF; text-align: left; }
+    .ranking-row { display: flex; flex-direction: row; align-items: center; width: 100%; min-height: 76px; margin: 0; padding: 12px; border-width: 0; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #F4EBE4; border-radius: 0; background-color: #FFFFFF; text-align: left; }
     .ranking-row-leading { background-color: #FFFAF6; }
     .ranking-row-pressed { background-color: #FDF0E8; }
-    .ranking-number { flex-shrink: 0; width: 34px; margin-right: 12px; }
+    .ranking-number { flex-shrink: 0; width: 24px; margin-right: 8px; }
     .ranking-number-text { font-size: 20px; line-height: 28px; font-weight: bold; color: #7A6C60; }
     .vapor-ranking-number-leading--ranking-number-text { color: #C2410C; }
+    .ranking-image { width: 48px; height: 48px; border-radius: 10px; overflow: hidden; flex-shrink: 0; margin-right: 10px; }
     .ranking-dish { flex: 1; min-width: 0; }
     .ranking-dish-name { font-size: 15px; line-height: 22px; font-weight: bold; color: #211C18; }
     .ranking-window { margin-top: 5px; font-size: 11px; line-height: 18px; color: #7A6C60; }
     .ranking-sales { flex-shrink: 0; margin-left: 10px; align-items: flex-end; }
-    .ranking-sales-value { display: flex; flex-direction: row; align-items: baseline; }
+    .ranking-sales-value { display: flex; flex-direction: row; align-items: flex-end; }
     .ranking-count { font-size: 21px; line-height: 28px; font-weight: bold; color: #C2410C; }
     .ranking-unit { margin-left: 3px; font-size: 11px; line-height: 18px; color: #7A6C60; }
     .ranking-sales-label { font-size: 10px; line-height: 18px; color: #7A6C60; }
     .ranking-note { margin-top: 18px; text-align: center; font-size: 11px; line-height: 18px; color: #7A6C60; }
     /* #ifdef WEB */
     .account-page .ranking-heading-row, .account-page .ranking-sales-value { flex-direction: row; }
-    .ranking-row { cursor: pointer; }
+    .ranking-row { cursor: pointer;  min-height: 76px;  padding: 12px; }
     .ranking-row[disabled] { opacity: 1; cursor: default; }
     .ranking-row:focus-visible { outline: 2px solid #C2410C; outline-offset: -3px; }
     /* #endif */
