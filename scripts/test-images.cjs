@@ -5,7 +5,7 @@ let token = 'old-token', uploadMode = 'success', saveMode = 'success', chooseMod
 const storage = { getSessionVersion: () => 0, isSessionClosing: () => false, getAccessToken: () => token, getRefreshToken: () => 'refresh-token', saveTokens: a => { token = a; }, clearTokens() {} };
 const envelope = data => JSON.stringify({ code: 'COMMON_000', data, message: '' });
 const KEY = '0123456789abcdef0123456789abcdef';
-global.uni = { showToast() {}, previewImage: options => calls.push({ type: 'preview', options }),
+global.uni = { getWindowInfo: () => ({statusBarHeight:24}), showToast() {}, previewImage: options => calls.push({ type: 'preview', options }), closePreviewImage: options => { calls.push({type:'closePreview'}); options.success?.({}); }, navigateTo: options => calls.push({type:'navigate',options}),
     uploadFile(options) {
         calls.push({ type: 'upload', options });
         assert.equal(options.name, 'file');
@@ -21,6 +21,7 @@ global.uni = { showToast() {}, previewImage: options => calls.push({ type: 'prev
         options.success({ statusCode: 200, data: envelope('/api/files/' + KEY + '/content') });
     },
     chooseImage(options) {
+        assert.equal(options.albumMode,'system','use the phone system image picker');
         calls.push({ type: 'choose' });
         if (chooseMode === 'cancel') options.fail({ errMsg: 'chooseImage:fail cancel' });
         else options.success({ tempFilePaths: ['blob:local-photo'], tempFiles: [{ size: chooseMode === 'large' ? 6 * 1024 * 1024 : 1024 }] });
@@ -28,7 +29,9 @@ global.uni = { showToast() {}, previewImage: options => calls.push({ type: 'prev
 };
 function load(file) {
     file = path.resolve(root, file);
+    if (file.endsWith(path.normalize('common/save-image.uts'))) return {saveImageToAlbum:source=>{calls.push({type:'save-to-album',source});return Promise.resolve()}};
     if (file.endsWith(path.normalize('common/storage.uts'))) return storage;
+    if (file.endsWith(path.normalize('store/notifications.uts'))) return { notificationState: { unreadCount: 0 }, startNotificationSession() {}, refreshNotificationCount: () => Promise.resolve() };
     if (file.endsWith(path.normalize('store/auth.uts'))) return { isLoggedIn: () => true };
     if (file.endsWith(path.normalize('common/config.uts'))) return { API_BASE_URL: 'https://gateway.example/api', API_TIMEOUT: 10000, SUCCESS_CODE: 'COMMON_000' };
     if (cache.has(file)) return cache.get(file);
@@ -55,6 +58,8 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     assert.equal(vm.resolvedSource, images.defaultImage('product'));
     vm.previewImage(click);assert.equal(calls.at(-1).options.current,images.defaultImage('product'),'failed images preview the displayed fallback');
     const thumbnail=component.create({src:'https://example.com/dish.jpg',kind:'product',preview:false});const previewCount=calls.length;thumbnail.previewImage(click);assert.equal(calls.length,previewCount,'ranking thumbnail does not preview');
+    const homeImage=component.create({src:'https://example.com/shop.jpg',kind:'window',preview:false});const homePreviewCount=calls.length;const homeStopped=stopped;homeImage.previewImage(click);assert.equal(calls.length,homePreviewCount,'home shop image must not preview');assert.equal(stopped,homeStopped,'home image click bubbles to shop navigation');
+    assert.ok(fs.readFileSync(path.join(root,'pages/home/home.uvue'),'utf8').includes('kind="window" :preview="false"'),'home disables image preview');
     const avatar=component.create({src:'https://example.com/avatar.jpg',kind:'avatar'});const beforePreview=calls.length;avatar.previewImage(click);assert.equal(calls.length,beforePreview,'avatar retains the existing parent preview flow');
     const window=component.create({src:'/api/files/'+KEY+'/content',kind:'window'});window.previewImage(click);assert.equal(calls.at(-1).options.current,'https://gateway.example/api/files/'+KEY+'/content');
     assert.ok(fs.readFileSync(path.join(root,'components/business-image/business-image.uvue'),'utf8').includes('event.stopPropagation()'),'preview click must not also navigate the card');assert.equal(stopped,3,'only shop and product images stop card navigation');
@@ -76,19 +81,22 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 
     uploadMode = 'success'; saveMode = 'fail'; chooseMode = 'success'; calls.length = 0;
     user.openAvatarPreview();
-    assert.equal(user.avatarPreviewVisible, true); assert.equal(calls.length, 0, 'preview never opens picker or starts upload');
-    user.changeAvatar();
+    assert.equal(calls.length, 1, 'tap only opens native preview');
+    assert.equal(calls[0].type,'preview');assert.equal(calls[0].options.current,0);
+    assert.deepEqual(calls[0].options.longPressActions.itemList,['保存图片','更换头像']);
+    calls[0].options.longPressActions.success({tapIndex:1,index:0});
+    assert.equal(calls[1].type,'closePreview','close preview before opening picker');
     assert.equal(user.avatarChoosing, true, 'opening picker is distinct from uploading');
     assert.equal(user.avatarUploading, false, 'no saving state before image chosen');
     await flush();
     assert.equal(user.avatarUrl, 'old-avatar', 'failed binding never displays an unsaved avatar');
     assert.equal(user.pendingAvatarKey, KEY); assert.equal(user.avatarUploading, false);
     const uploads = calls.filter(c => c.type === 'upload').length;
-    saveMode = 'success'; user.retryAvatar(); await flush();
+    saveMode = 'success'; user.openAvatarPreview();const retryPreview=calls.at(-1).options;
+    assert.deepEqual(retryPreview.longPressActions.itemList,['保存图片','更换头像','重试保存']);
+    user.loading=true;retryPreview.longPressActions.success({tapIndex:2,index:0});assert.equal(user.avatarUploading,false,'wait for profile reload after preview closes');user.loading=false;user.resumeAvatarEntry();await flush();
     assert.equal(user.avatarUrl, '/api/files/' + KEY + '/content'); assert.equal(user.pendingAvatarKey, '');
     assert.equal(calls.filter(c => c.type === 'upload').length, uploads, 'binding retries reuse uploaded file');
-    user.closeAvatarPreview(); assert.equal(user.avatarPreviewVisible, false);
-    user.$hooks.onLoad.call(user, { avatar: 'preview' }); assert.equal(user.avatarPreviewVisible, true, 'mine avatar deep link opens preview');
     chooseMode = 'cancel'; calls.length = 0; user.changeAvatar(); await flush();
     assert.equal(user.avatarChoosing, false); assert.equal(user.avatarUploading, false);
     assert.equal(calls.filter(c => c.type === 'upload').length, 0, 'cancelled picker does not upload');
@@ -96,7 +104,14 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     const source = fs.readFileSync(path.join(root, 'pages/account/profile.uvue'), 'utf8');
     const template = source.split('<template>')[1].split('</template>')[0];
     assert.ok(!template.includes('class="avatar-change"') && !template.includes('正在保存头像'));
-    assert.ok(template.indexOf('@click="changeAvatar"') > template.indexOf('v-if="avatarPreviewVisible"'), 'change option belongs to preview only');
+    assert.ok(!template.includes('avatar-preview-mask')&&!template.includes('@click="changeAvatar"'),'no custom preview panel or persistent change button');
+    const mine=load('pages/mine/mine.uvue').create();mine.profileLoading=false;mine.avatarUrl='/api/files/'+KEY+'/content';calls.length=0;mine.openAvatarPreview();
+    assert.equal(calls.length,1,'mine avatar opens preview without navigating');const minePreview=calls[0].options;
+    assert.deepEqual(minePreview.urls,['https://gateway.example/api/files/'+KEY+'/content']);
+    minePreview.longPressActions.success({tapIndex:1,index:0});assert.equal(calls.at(-1).options.url,'/pages/account/profile?avatar=change');
+    user.$hooks.onLoad({avatar:'change'});let chooseCount=0;user.changeAvatar=()=>chooseCount++;user.loadProfile=()=>Promise.resolve();user.$hooks.onPageShow();await flush();assert.equal(chooseCount,1,'change entry opens picker after profile data');user.$hooks.onPageShow();await flush();assert.equal(chooseCount,1,'picker is not reopened on resume');
+    calls.length=0;mine.openAvatarPreview();const savePreview=calls[0].options;savePreview.longPressActions.success({tapIndex:0,index:0});assert.equal(calls.at(-1).type,'save-to-album');assert.equal(calls.filter(c=>c.type==='navigate'||c.type==='choose').length,0,'save never changes avatar');
+    user.openAvatarPreview();calls.at(-1).options.longPressActions.success({tapIndex:0,index:0});assert.equal(calls.at(-1).type,'save-to-album','profile also retains album save');
     await files.saveCatalogImage('window', 2, KEY); assert.ok(calls.at(-1).options.url.endsWith('/products/admin/windows/2/image'));
     await files.saveCatalogImage('product', 3, KEY); assert.ok(calls.at(-1).options.url.endsWith('/products/admin/products/3/image'));
     const management = load('pages/manage/images.uvue').create();

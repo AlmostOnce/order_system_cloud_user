@@ -1,0 +1,33 @@
+import { toast, toastSuccess } from './feedback.uts'
+
+let saving = false
+
+export function saveImageToAlbum(source: string): Promise<void> {
+    // #ifdef WEB
+    toast('请在手机端保存图片')
+    return Promise.resolve()
+    // #endif
+    // #ifndef WEB
+    if (saving) return Promise.resolve()
+    saving = true
+    return new Promise<void>((resolve) => {
+        const failed = () => { saving = false; toast('图片保存失败，请检查相册权限后重试'); resolve() }
+        const save = (path: string) => {
+            uni.saveImageToPhotosAlbum({
+                filePath: path,
+                success: () => { saving = false; toastSuccess('已保存到相册'); resolve() },
+                fail: () => { failed() }
+            })
+        }
+        if (!source.startsWith('http://') && !source.startsWith('https://')) { save(source); return }
+        uni.downloadFile({
+            url: source, timeout: 15000,
+            success: (result: DownloadFileSuccess) => {
+                if (result.statusCode != 200 || result.tempFilePath.length == 0) { failed(); return }
+                save(result.tempFilePath)
+            },
+            fail: () => { failed() }
+        })
+    })
+    // #endif
+}

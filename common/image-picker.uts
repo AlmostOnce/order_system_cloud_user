@@ -3,7 +3,7 @@ export type ImageChoice = { path: string, error: string }
 export function chooseLocalImage(): Promise<ImageChoice> {
     return new Promise<ImageChoice>((resolve) => {
         uni.chooseImage({
-            count: 1, sizeType: ['compressed'], sourceType: ['album', 'camera'],
+            count: 1, albumMode: 'system', sizeType: ['compressed'], sourceType: ['album', 'camera'],
             success: (res) => {
                 if (res.tempFilePaths.length == 0) { resolve({ path: '', error: '' }); return }
                 if (res.tempFiles.length > 0 && res.tempFiles[0].size > 5 * 1024 * 1024) {

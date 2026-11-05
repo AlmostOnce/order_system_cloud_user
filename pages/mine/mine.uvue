@@ -42,10 +42,6 @@
                     </view>
                 </view>
                 <view v-if="roleCode == 'CUSTOMER'" class="entry-group">
-                    <view class="account-entry" @click="openNotifications">
-                        <view class="account-entry-icon"><view class="center-receipt"></view></view><view class="account-entry-body"><text class="account-entry-title">消息通知</text><text class="account-entry-note">查看订单状态消息</text></view><text v-if="unreadCount > 0" class="notification-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</text><view class="account-arrow"></view>
-                    </view>
-                    <view class="entry-divider"></view>
                     <view class="account-entry" @click="openReviews">
                         <view class="account-entry-icon"><image class="review-entry-icon" src="/static/review/star-outline.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的评价</text><text class="account-entry-note">回顾用餐感受，查看已发布评价</text></view><view class="account-arrow"></view>
                     </view>
@@ -76,12 +72,8 @@
                         <view class="account-entry-icon"><view class="account-icon-line"></view><view class="account-icon-line"></view></view><view class="account-entry-body"><text class="account-entry-title">窗口与菜品图片</text><text class="account-entry-note">上传封面，维护菜品展示图片</text></view><view class="account-arrow"></view>
                     </view>
                 </view>
-                <text class="account-section-label">账号与安全</text>
-				<view class="entry-group">
-                    <view class="account-entry" @click="openProfile">
-                        <view class="account-entry-icon"><view class="person-head"></view><view class="person-body"></view></view><view class="account-entry-body"><text class="account-entry-title">个人资料</text><text class="account-entry-note">用户名、联系方式与账号信息</text></view><view class="account-arrow"></view>
-                    </view>
-					<view v-if="roleCode == 'CUSTOMER'" class="entry-divider"></view>
+                <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">账号与安全</text>
+				<view v-if="roleCode == 'CUSTOMER'" class="entry-group">
                     <view v-if="roleCode == 'CUSTOMER'" class="account-entry" @click="openPayPassword">
                         <view class="account-entry-icon"><view class="lock-hoop"></view><view class="lock-body"></view></view><view class="account-entry-body"><text class="account-entry-title">支付密码</text><text class="account-entry-note">{{ payPasswordSet ? '修改独立支付密码' : '设置后可充值和使用余额' }}</text></view><view class="account-arrow"></view>
 				</view>
@@ -95,22 +87,15 @@
                 <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
 			</view>
 		</scroll-view>
-        <view v-if="signOutConfirm" class="signout-modal-mask" @click="cancelSignOut">
-            <view class="signout-modal" @click.stop>
-                <view class="signout-modal-symbol"><view class="signout-icon"><view class="signout-door"></view><view class="signout-shaft"></view><view class="signout-tip"></view></view></view>
-                <text class="signout-modal-title">确认退出登录？</text>
-                <text class="signout-modal-note">退出后需要重新登录才能查看账户。</text>
-                <view class="signout-modal-actions">
-                    <button class="signout-modal-cancel signout-modal-cancel-text button-text button-text-46" :disabled="signingOut" @click="cancelSignOut">继续使用</button>
-                    <button class="signout-modal-confirm signout-modal-confirm-text button-text button-text-46" :disabled="signingOut" @click="signOut">{{ signingOut ? '退出中…' : '确认退出' }}</button>
-                </view>
-            </view>
-        </view>
+        <confirm-dialog v-if="signOutConfirm" title="退出登录？" message="退出后需要重新登录才能查看账户。" cancel-text="继续使用" confirm-text="确认退出" :busy="signingOut" busy-text="退出中…" @cancel="cancelSignOut" @confirm="signOut" />
 	</view>
 </template>
 
 <script setup lang="uts">
-import { reactive, toRefs, computed } from 'vue'
+import ConfirmDialog from '../../components/confirm-dialog/confirm-dialog.uvue';
+import { reactive, toRefs } from 'vue'
+import { saveImageToAlbum } from '../../common/save-image.uts';
+import { imageSource } from '../../common/images.uts';
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
@@ -120,14 +105,13 @@ import { HttpResult } from '../../common/http.uts';
 import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts';
 import { accountRoleLabel } from '../../common/account.uts';
 import { openOrderList } from '../../common/order-navigation.uts';
-import { notificationState, startNotificationSession, refreshNotificationCount } from '../../store/notifications.uts';
+import { startNotificationSession, refreshNotificationCount } from '../../store/notifications.uts';
 
 const state = reactive({ refreshing: false, currentRefreshTime: '', profileLoading: false, statusBarHeight: 0, username: '校园用户', roleName: '', roleCode: '', userUuid: '',
     email: '', avatarUrl: '', profileError: '', balanceLoading: false, balanceReady: false,
     balanceText: '--', balanceError: '', payPasswordSet: false, signOutConfirm: false, signingOut: false })
 
 const { refreshing, currentRefreshTime, profileLoading, statusBarHeight, username, roleName, roleCode, userUuid, email, avatarUrl, profileError, balanceLoading, balanceReady, balanceText, balanceError, payPasswordSet, signOutConfirm, signingOut } = toRefs(state)
-const unreadCount = computed((): number => notificationState.unreadCount)
 
 function refreshPage() {
     if (state.refreshing || state.profileLoading || state.balanceLoading || state.signingOut)
@@ -190,7 +174,6 @@ function loadUnreadCount(): Promise<void> {
     startNotificationSession();
     return refreshNotificationCount();
 }
-function openNotifications() { uni.switchTab({ url: '/pages/notifications/list' }); }
 
 function openOrders() {
     openOrderList('all');
@@ -219,7 +202,21 @@ function openImageManagement() {
 }
 
 function openAvatarPreview() {
-    uni.navigateTo({ url: '/pages/account/profile?avatar=preview' });
+    if (state.profileLoading || state.signingOut) return;
+    const source = imageSource(state.avatarUrl, 'avatar');
+    uni.previewImage({
+        current: 0, urls: [source],
+        longPressActions: {
+            itemList: ['保存图片', '更换头像'],
+            success: (result: LongPressActionsSuccessResult) => {
+                if (result.tapIndex == 0) { saveImageToAlbum(source); return; }
+                if (result.tapIndex != 1) return;
+                uni.closePreviewImage({ success: () => {
+                    uni.navigateTo({ url: '/pages/account/profile?avatar=change' });
+                } });
+            }
+        }
+    });
 }
 
 function openProfile() {
@@ -293,7 +290,6 @@ onPageShow(() => {
 @import '../../styles/review.css';
 	@import '../../styles/account.css';
 	.mine-status { background-color: #E4572E; }
-	.notification-badge { min-width: 20px; padding: 2px 5px; border-radius: 10px; background-color: #E4572E; color: #FFFFFF; font-size: 11px; text-align: center; margin-right: 8px; }
 	.mine-hero { background-color: #E4572E; padding: 12px 20px 14px 20px; }
 	.mine-eyebrow { font-size: 12px; line-height: 18px; color: #FFE3D6; }
 	.mine-title { margin-top: 4px; font-size: 24px; line-height: 32px; font-weight: bold; color: #FFFFFF; }
@@ -311,20 +307,8 @@ onPageShow(() => {
 	.flow-stem { position: absolute; left: 15px; top: 8px; width: 2px; height: 15px; background-color: #C2410C; }
 	.flow-tip { position: absolute; left: 12px; top: 15px; width: 6px; height: 6px; border-right-width: 2px; border-right-style: solid; border-right-color: #C2410C; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #C2410C; transform: rotate(45deg); }
 	.flow-tip-out { top: 9px; transform: rotate(225deg); }
-	.person-head { position: absolute; top: 6px; left: 12px; width: 8px; height: 8px; border-radius: 4px; background-color: #C2410C; }
-	.person-body { position: absolute; top: 17px; left: 8px; width: 16px; height: 9px; border-radius: 6px; border-width: 2px; border-style: solid; border-color: #C2410C; }
 	.lock-hoop { position: absolute; top: 6px; left: 11px; width: 10px; height: 10px; border-radius: 5px; border-width: 2px; border-style: solid; border-color: #C2410C; }
 	.lock-body { position: absolute; top: 14px; left: 8px; width: 16px; height: 12px; border-radius: 3px; background-color: #C2410C; }
-    .signout-modal-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; background-color: rgba(33, 28, 24, 0.58); }
-    .signout-modal { width: 100%; max-width: 340px; padding: 28px 24px 24px; border-radius: 20px; background-color: #FFFFFF; align-items: center; }
-    .signout-modal-symbol { display: flex; width: 52px; height: 52px; border-radius: 26px; background-color: #FDF0E8; align-items: center; justify-content: center; }
-    .signout-modal-title { margin-top: 18px; font-size: 19px; line-height: 28px; font-weight: bold; color: #211C18; text-align: center; }
-    .signout-modal-note { margin-top: 8px; font-size: 13px; line-height: 21px; color: #7A6C60; text-align: center; }
-    .signout-modal-actions { display: flex; flex-direction: row; width: 100%; margin-top: 24px; }
-    .signout-modal-cancel { display: flex; flex: 1; height: 46px; margin: 0 8px 0 0; padding: 0; border-width: 1px; border-style: solid; border-color: #E8DCD2; border-radius: 12px; background-color: #FFFFFF; align-items: center; justify-content: center; }
-    .signout-modal-confirm { display: flex; flex: 1; height: 46px; margin: 0; padding: 0; border-width: 0; border-radius: 12px; background-color: #E4572E; align-items: center; justify-content: center; }
-    .signout-modal-cancel-text { font-size: 14px; color: #7A6C60; }
-    .signout-modal-confirm-text { font-size: 14px; font-weight: bold; color: #FFFFFF; }
 	.signout-button { display: flex; flex-direction: row; width: 100%; min-height: 48px; margin: 4px 0 0 0; padding: 10px 16px; border-width: 1px; border-style: solid; border-color: #E8DCD2; border-radius: 16px; background-color: #FFFFFF; align-items: center; justify-content: center; }
 	.signout-button-pressed { background-color: #FDF0E8; border-color: #C2410C; }
 	.signout-label { margin-left: 10px; font-size: 15px; line-height: 22px; font-weight: 500; color: #7A6C60; }
@@ -335,9 +319,6 @@ onPageShow(() => {
 	.mine-footer { margin-top: 14px; font-size: 11px; line-height: 18px; text-align: center; color: #A2968B; }
 
 	/* #ifdef WEB */
-	.account-page .signout-modal-mask { flex-direction: row; align-items: center; justify-content: center; }
-    .account-page .signout-modal { align-items: center; }
-    .account-page .signout-modal-symbol, .account-page .signout-modal-actions { flex-direction: row; }
 	.account-page .signout-button { flex-direction: row; cursor: pointer;  min-height: 48px;  padding: 10px 16px; }
 	.signout-button:focus-visible { outline: 2px solid #C2410C; outline-offset: 3px; }
 	.account-page .profile-card { flex-direction: row;  padding: 14px 12px;  margin: 0 0 12px 0; }

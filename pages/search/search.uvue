@@ -123,20 +123,12 @@
 				</view>
 			</view>
 		</scroll-view>
-		<view v-if="historyClearConfirm" class="history-modal-mask" @click="cancelClearHistory">
-            <view class="history-modal" @click.stop>
-				<text class="history-modal-title">清空搜索记录？</text>
-				<text class="history-modal-note">清空后将无法恢复。</text>
-				<view class="history-modal-actions">
-                    <button class="history-modal-cancel history-modal-cancel-text button-text button-text-46" @click="cancelClearHistory">取消</button>
-                    <button class="history-modal-confirm history-modal-confirm-text button-text button-text-46" @click="confirmClearHistory">确认清空</button>
-				</view>
-			</view>
-		</view>
+		<confirm-dialog v-if="historyClearConfirm" title="清空搜索记录？" message="清空后无法恢复，你可以保留这些记录。" confirm-text="确认清空" @cancel="cancelClearHistory" @confirm="confirmClearHistory" />
 	</view>
 </template>
 
 <script setup lang="uts">
+import ConfirmDialog from '../../components/confirm-dialog/confirm-dialog.uvue';
 import { reactive, toRefs } from 'vue'
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import { isLoggedIn, currentUser } from '../../store/auth.uts';
@@ -767,18 +759,8 @@ onReady(() => {
 		justify-content: center;
 	}
 	.history-remove-text { color: #FFFFFF; font-size: 6px; line-height: 8px; }
-	.history-modal-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 100; flex-direction: row; align-items: center; justify-content: center; padding: 24px; background-color: rgba(33, 28, 24, 0.58); }
-	.history-modal { width: 100%; max-width: 340px; padding: 28px 24px 24px; border-radius: 20px; background-color: #FFFFFF; align-items: center; }
-	.history-modal-title { font-size: 19px; line-height: 28px; font-weight: bold; color: #211C18; text-align: center; }
-	.history-modal-note { margin-top: 8px; font-size: 13px; line-height: 21px; color: #7A6C60; text-align: center; }
-	.history-modal-actions { flex-direction: row; width: 100%; margin-top: 24px; }
-	.history-modal-cancel { display: flex; flex: 1; height: 46px; margin: 0 8px 0 0; padding: 0; border-width: 1px; border-style: solid; border-color: #E8DCD2; border-radius: 12px; background-color: #FFFFFF; align-items: center; justify-content: center; }
-	.history-modal-confirm { display: flex; flex: 1; height: 46px; margin: 0; padding: 0; border-width: 0; border-radius: 12px; background-color: #E4572E; align-items: center; justify-content: center; }
-	.history-modal-cancel-text { font-size: 14px; color: #7A6C60; }
-	.history-modal-confirm-text { font-size: 14px; font-weight: bold; color: #FFFFFF; }
 
 	/* #ifdef WEB */
-	.history-modal-cancel::after, .history-modal-confirm::after { border: none; }
 	/* #endif */
 
 	/* 加载中 / 失败 / 空态的公共容器 */

@@ -6,7 +6,7 @@
                 <view class="account-back-icon"></view>
             </view>
             <text class="account-title">个人资料</text></view>
-        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!editing && !emailAuthorizationVisible && !profileSaving && !avatarPreviewVisible && !avatarChoosing && !avatarUploading && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!editing && !emailAuthorizationVisible && !profileSaving && !avatarChoosing && !avatarUploading && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
 <view class="account-content vapor-account-secondary--account-content">
 			<view v-if="loading" class="account-card vapor-account-secondary--account-card"><text class="account-muted">正在获取资料…</text></view>
 			<view v-else-if="errorText.length > 0" class="account-card vapor-account-secondary--account-card"><text class="account-error">{{ errorText }}</text></view>
@@ -47,20 +47,6 @@
                 <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
             </view>
         </scroll-view>
-        <view v-if="avatarPreviewVisible" class="avatar-preview-mask" @click="closeAvatarPreview">
-            <view class="avatar-preview-panel" @click.stop>
-                <view class="avatar-preview-top"><text class="account-heading">头像预览</text>
-                    <view class="avatar-preview-close" @click="closeAvatarPreview">
-                        <view class="avatar-close-line"></view><view class="avatar-close-line avatar-close-other"></view>
-                    </view>
-                </view>
-                <view class="avatar-preview-picture"><image class="avatar-preview-image" :src="avatarPreviewSource" mode="aspectFit" @error="previewImageError"></image></view>
-                <text v-if="avatarChoosing || avatarUploading" class="account-note">{{ avatarChoosing ? '正在打开相册…' : '正在上传并保存头像…' }}</text>
-
-                <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="avatarChoosing || avatarUploading || refreshing || loading" @click="changeAvatar">更换头像</button>
-                <button v-if="pendingAvatarKey.length > 0 && !avatarChoosing && !avatarUploading" class="account-link account-link-text button-text button-text-44" @click="retryAvatar">重试保存</button>
-            </view>
-        </view>
         <view v-if="emailAuthorizationVisible" class="email-authorize-mask" @click="closeEmailAuthorization">
             <view class="email-authorize-dialog" @click.stop>
                 <text class="email-authorize-title">验证登录密码</text>
@@ -79,7 +65,7 @@
 </template>
 
 <script setup lang="uts">
-import { reactive, toRefs, computed } from 'vue'
+import { reactive, toRefs } from 'vue'
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
@@ -89,17 +75,18 @@ import { toast, toastSuccess } from '../../common/feedback.uts';
 import { HttpResult } from '../../common/http.uts';
 import { jsonString, jsonNumber } from '../../common/json.uts';
 import { uploadImage, saveAvatar } from '../../api/files.uts';
-import { imageSource, defaultImage } from '../../common/images.uts';
+import { saveImageToAlbum } from '../../common/save-image.uts';
+import { imageSource } from '../../common/images.uts';
 import { chooseLocalImage, ImageChoice } from '../../common/image-picker.uts';
 import { isLoggedIn } from '../../store/auth.uts';
 import { accountRoleLabel, accountDate, backToAccount } from '../../common/account.uts';
 
-const state = reactive({ editing: false, profileSaving: false, emailAuthorizationVisible: false, emailAuthorizationLoading: false, emailAuthorizationPassword: '', emailAuthorizationError: '', draftUsername: '', profileError: '', refreshing: false, currentRefreshTime: '', statusBarHeight: 0, loading: true, avatarUrl: '', avatarPreviewVisible: false, avatarPreviewFailed: false, avatarChoosing: false, avatarUploading: false, avatarError: '', pendingAvatarKey: '', errorText: '', username: '', userUuid: '', roleName: '', email: '', userNo: '', createdAt: '' })
+const state = reactive({ editing: false, profileSaving: false, emailAuthorizationVisible: false, emailAuthorizationLoading: false, emailAuthorizationPassword: '', emailAuthorizationError: '', draftUsername: '', profileError: '', refreshing: false, currentRefreshTime: '', statusBarHeight: 0, loading: true, avatarUrl: '', avatarChoosing: false, avatarUploading: false, avatarError: '', pendingAvatarKey: '', errorText: '', username: '', userUuid: '', roleName: '', email: '', userNo: '', createdAt: '' })
 
-const { editing, profileSaving, emailAuthorizationVisible, emailAuthorizationLoading, emailAuthorizationPassword, emailAuthorizationError, draftUsername, profileError, refreshing, currentRefreshTime, statusBarHeight, loading, avatarUrl, avatarPreviewVisible, avatarPreviewFailed, avatarChoosing, avatarUploading, avatarError, pendingAvatarKey, errorText, username, userUuid, roleName, email, userNo, createdAt } = toRefs(state)
+const { editing, profileSaving, emailAuthorizationVisible, emailAuthorizationLoading, emailAuthorizationPassword, emailAuthorizationError, draftUsername, profileError, refreshing, currentRefreshTime, statusBarHeight, loading, avatarUrl, avatarChoosing, avatarUploading, avatarError, pendingAvatarKey, errorText, username, userUuid, roleName, email, userNo, createdAt } = toRefs(state)
 
 function startEdit() {
-    if (state.loading || state.refreshing || state.emailAuthorizationVisible || state.avatarChoosing || state.avatarUploading || state.avatarPreviewVisible) return;
+    if (state.loading || state.refreshing || state.emailAuthorizationVisible || state.avatarChoosing || state.avatarUploading) return;
     state.draftUsername = state.username;
     state.profileError = '';
     state.editing = true;
@@ -137,7 +124,7 @@ function saveProfile(): Promise<void> {
 
 function openEmailAuthorization() {
     if (state.loading || state.refreshing || state.editing || state.profileSaving
-        || state.avatarChoosing || state.avatarUploading || state.avatarPreviewVisible) return;
+        || state.avatarChoosing || state.avatarUploading) return;
     clearEmailChangeAuthorization();
     state.emailAuthorizationPassword = '';
     state.emailAuthorizationError = '';
@@ -179,26 +166,33 @@ function authorizeAndEditEmail(): Promise<void> {
 onPageHide(() => { state.emailAuthorizationPassword = ''; });
 onUnload(() => { state.emailAuthorizationPassword = ''; });
 
-const avatarPreviewSource = computed((): string => {
-    return state.avatarPreviewFailed ? defaultImage('avatar') : imageSource(state.avatarUrl, 'avatar');
-})
-
+let avatarEntry = '';
+function resumeAvatarEntry() {
+    if (state.loading) return;
+    const entry = avatarEntry; avatarEntry = '';
+    if (entry == 'change') changeAvatar();
+    else if (entry == 'retry') retryAvatar();
+    else if (entry == 'preview') openAvatarPreview();
+}
 function openAvatarPreview() {
-    if (state.editing || state.profileSaving || state.refreshing || state.emailAuthorizationVisible) return;
-    state.avatarPreviewFailed = false;
-    state.avatarPreviewVisible = true;
-}
-
-function closeAvatarPreview() {
-    state.avatarPreviewVisible = false;
-}
-
-function previewImageError() {
-    state.avatarPreviewFailed = true;
+    if (state.loading || state.editing || state.profileSaving || state.refreshing || state.emailAuthorizationVisible || state.avatarChoosing || state.avatarUploading) return;
+    const source = imageSource(state.avatarUrl, 'avatar');
+    uni.previewImage({
+        current: 0, urls: [source],
+        longPressActions: {
+            itemList: state.pendingAvatarKey.length > 0 ? ['保存图片', '更换头像', '重试保存'] : ['保存图片', '更换头像'],
+            success: (result: LongPressActionsSuccessResult) => {
+                if (result.tapIndex == 0) { saveImageToAlbum(source); return; }
+                if (result.tapIndex != 1 && result.tapIndex != 2) return;
+                avatarEntry = result.tapIndex == 1 ? 'change' : 'retry';
+                uni.closePreviewImage({ success: () => { resumeAvatarEntry(); }, fail: () => { avatarEntry = ''; } });
+            }
+        }
+    });
 }
 
 function refreshPage() {
-    if (state.editing || state.profileSaving || state.refreshing || state.loading || state.avatarPreviewVisible || state.avatarChoosing || state.avatarUploading || state.emailAuthorizationVisible)
+    if (state.editing || state.profileSaving || state.refreshing || state.loading || state.avatarChoosing || state.avatarUploading || state.emailAuthorizationVisible)
         return;
     state.refreshing = true;
     const refreshStartedAt = Date.now();
@@ -271,7 +265,6 @@ function bindAvatar() {
             return;
         }
         state.avatarUrl = url;
-        state.avatarPreviewFailed = false;
         state.pendingAvatarKey = '';
     });
 }
@@ -304,8 +297,7 @@ function loadProfile(): Promise<void> {
 }
 
 onLoad((options: OnLoadOptions) => {
-    if (options['avatar'] == 'preview')
-        state.avatarPreviewVisible = true;
+    avatarEntry = (options['avatar'] ?? '') as string;
 })
 
 onPageShow(() => {
@@ -315,7 +307,7 @@ onPageShow(() => {
         return;
     }
     if (!state.editing && !state.emailAuthorizationVisible && !state.profileSaving && !state.avatarChoosing && !state.avatarUploading)
-        loadProfile();
+        loadProfile().then(() => { resumeAvatarEntry(); });
 })
 </script>
 
@@ -340,17 +332,8 @@ onPageShow(() => {
     .email-authorize-cancel-text { color: #6B5F56; font-size: 14px; line-height: 20px; }
     .email-authorize-confirm { flex: 1.35; margin: 0; }
     .profile-initial { overflow: hidden; }
-    .avatar-preview-trigger { margin: 0; padding: 0; border-width: 0; line-height: 20px; }
-    .avatar-preview-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; background-color: rgba(33, 28, 24, 0.72); }
-    .avatar-preview-panel { width: 100%; max-width: 380px; padding: 20px; border-radius: 22px; background-color: #FFFFFF; }
-    .avatar-preview-top { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
-    .avatar-preview-close { position: relative; flex-shrink: 0; width: 44px; height: 44px; margin: 0; padding: 0; border-width: 0; border-radius: 12px; background-color: #FDF6F0; }
-    .avatar-close-line { position: absolute; left: 14px; top: 21px; width: 16px; height: 2px; background-color: #7A6C60; transform: rotate(45deg); }
-    .avatar-close-other { transform: rotate(-45deg); }
-    .avatar-preview-picture { height: 240px; margin-top: 16px; border-radius: 16px; overflow: hidden; background-color: #F7F2EE; }
-    .avatar-preview-image { width: 100%; height: 100%; }
     /* #ifdef WEB */
-    .account-page .avatar-preview-top, .account-page .profile-card-header, .account-page .profile-email-line, .account-page .email-authorize-actions { flex-direction: row; }
+    .account-page .profile-card-header, .account-page .profile-email-line, .account-page .email-authorize-actions { flex-direction: row; }
     .account-page .profile-email-value { overflow-wrap: anywhere; }
     /* #endif */
 </style>
