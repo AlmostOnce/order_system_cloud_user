@@ -1,43 +1,42 @@
 <template>
 	<view class="account-page account-secondary">
 		<view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-		<view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">余额充值</text></view>
-		<scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!submitting && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
-                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
-
-			<view class="account-content vapor-account-secondary--account-content">
-            <view class="account-banner">
-                <view class="banner-copy">
-                    <text class="banner-kicker">校园钱包</text>
-                    <text class="banner-title">为下一餐，充点余额</text>
-                    <text class="banner-note">选择充值金额，输入支付密码即可到账。</text>
-                </view>
-                <view class="banner-symbol symbol-wallet" aria-hidden="true"><view class="symbol-part-one vapor-symbol-wallet--symbol-part-one"></view><view class="symbol-part-two vapor-symbol-wallet--symbol-part-two"></view><view class="symbol-part-three vapor-symbol-wallet--symbol-part-three"></view></view>
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <view class="account-back vapor-account-secondary--account-back" @click="goBack">
+                <view class="account-back-icon"></view>
             </view>
-				<view v-if="successText.length > 0" class="account-success"><text class="account-success-text">充值成功</text><text class="account-note">{{ successText }}</text><button class="account-link" @click="openRecords"><text class="account-link-text">查看充值记录</text></button></view>
+            <text class="account-title">余额充值</text></view>
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!submitting && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+			<view class="account-content vapor-account-secondary--account-content">
+                <view v-if="successText.length > 0" class="account-success"><text class="account-success-text">充值成功</text><text class="account-note">{{ successText }}</text>
+                    <button class="account-link account-link-text button-text button-text-44" @click="openRecords">查看充值记录</button>
+                </view>
 				<view class="account-card recharge-summary vapor-account-secondary--account-card vapor-account-secondary--recharge-summary">
 					<text class="account-muted vapor-account-secondary--recharge-summary--account-muted">当前余额（元）</text><text class="recharge-balance vapor-account-secondary--recharge-summary--recharge-balance">{{ loading ? '加载中…' : balanceText }}</text>
-					<text class="recharge-label vapor-account-secondary--recharge-summary--recharge-label">充值至账户余额</text>
-					<text class="account-note vapor-account-secondary--recharge-summary--account-note">选择金额并验证支付密码，即可充值到账。</text>
                     <text v-if="loadError.length > 0" class="account-error">{{ loadError }}</text>
-
 				</view>
 				<view class="account-card vapor-account-secondary--account-card">
 					<text class="account-heading">充值金额</text>
-					<view class="amount-grid"><button v-for="amount in amounts" :key="amount" class="amount-choice vapor-account-secondary--amount-choice" :class="amountText == amount ? 'amount-choice-on vapor-account-secondary--amount-choice-on' : ''" :disabled="submitting || pending" @click="chooseAmount(amount)"><text class="amount-choice-text">{{ amount }} 元</text></button></view>
+                    <view class="amount-grid">
+                        <button v-for="amount in amounts" :key="amount" class="amount-choice vapor-account-secondary--amount-choice amount-choice-text button-text button-text-44" :class="amountText == amount ? 'amount-choice-on vapor-account-secondary--amount-choice-on' : ''" :disabled="submitting || pending" @click="chooseAmount(amount)">{{ amount }} 元</button>
+                    </view>
 					<text class="account-label vapor-account-secondary--account-label">自定义金额（元）</text><input class="account-input vapor-account-secondary--account-input" type="digit" v-model="amountText" :disabled="submitting || pending" :maxlength="8" placeholder="0.01～10000，最多两位小数" />
-					<text class="account-label vapor-account-secondary--account-label">支付密码</text><input class="account-input vapor-account-secondary--account-input" type="text" :password="true" v-model="payPassword" :maxlength="20" :disabled="submitting" placeholder="请输入支付密码" confirm-type="done" @confirm="submit" />
 					<text v-if="pending" class="account-note">上次充值结果尚未确认，请保持金额不变并重新确认。</text>
 					<text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
-					<button class="account-primary vapor-account-secondary--account-primary" :disabled="loading || submitting || !balanceReady" :class="loading || submitting || !balanceReady ? 'account-disabled' : ''" @click="submit"><text class="account-primary-text">{{ submitting ? '正在确认…' : '确认充值' }}</text></button>
-					<button class="account-link" :disabled="submitting" @click="openPassword"><text class="account-link-text">设置或修改支付密码</text></button>
+                    <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="passwordPromptVisible || loading || submitting || !balanceReady" :class="loading || submitting || !balanceReady ? 'account-disabled' : ''" @click="openRechargeConfirmation">{{ submitting ? '正在确认…' : '确认充值' }}</button>
+                    <button class="account-link account-link-text button-text button-text-44" :disabled="submitting" @click="openPassword">设置或修改支付密码</button>
 				</view>
+            </view>
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
 			</view>
 		</scroll-view>
 	</view>
 </template>
 
 <script setup lang="uts">
+import { requestPaymentPassword, cancelPaymentPassword } from '../../common/payment-password.uts'
+import { toast } from '../../common/feedback.uts'
 import { reactive, toRefs } from 'vue'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
@@ -48,11 +47,11 @@ import { isLoggedIn, currentUser } from '../../store/auth.uts';
 import { newRechargeKey, pendingRechargeKey, backToAccount } from '../../common/account.uts';
 
 const initialAmounts: string[] = ['20', '50', '100', '200'];
-const state = reactive({ refreshing: false, currentRefreshTime: '', statusBarHeight: 0, userUuid: '', amounts: initialAmounts, amountText: '50', payPassword: '',
+const state = reactive({ passwordPromptVisible: false, refreshing: false, currentRefreshTime: '', statusBarHeight: 0, userUuid: '', amounts: initialAmounts, amountText: '50', payPassword: '',
     balanceText: '--', balanceReady: false, loading: false, loadError: '', submitting: false,
     errorText: '', successText: '', requestKey: '', pending: false, pageVisible: false })
 
-const { refreshing, currentRefreshTime, statusBarHeight, userUuid, amounts, amountText, payPassword, balanceText, balanceReady, loading, loadError, submitting, errorText, successText, requestKey, pending, pageVisible } = toRefs(state)
+const { passwordPromptVisible, refreshing, currentRefreshTime, statusBarHeight, userUuid, amounts, amountText, payPassword, balanceText, balanceReady, loading, loadError, submitting, errorText, successText, requestKey, pending, pageVisible } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.loading || state.submitting)
@@ -113,23 +112,45 @@ function loadBalance(): Promise<void> {
     });
 }
 
+function validAmount(): number {
+    const text = state.amountText.trim();
+    if (!/^\d{1,5}(\.\d{1,2})?$/.test(text)) {
+        toast('请输入正确金额，最多两位小数');
+        return 0;
+    }
+    const amount = Number(text);
+    if (amount < 0.01 || amount > 10000) {
+        toast('单次充值金额为 0.01 至 10000 元');
+        return 0;
+    }
+    return amount;
+}
+
+function openRechargeConfirmation() {
+    if (state.passwordPromptVisible || state.submitting || state.loading || !state.balanceReady) return;
+    const amount = validAmount();
+    if (amount <= 0) return;
+    state.passwordPromptVisible = true;
+    requestPaymentPassword('确认充值', '¥' + amount.toFixed(2)).then((password: string | null) => {
+        if (!state.passwordPromptVisible) return;
+        state.passwordPromptVisible = false;
+        if (password == null || !state.pageVisible) return;
+        state.payPassword = password;
+        submit();
+        state.payPassword = '';
+    });
+}
+
 function submit() {
     if (state.submitting || state.loading || !state.balanceReady)
         return;
     state.errorText = '';
     state.successText = '';
+    const amount = validAmount();
+    if (amount <= 0) return;
     const text = state.amountText.trim();
-    if (!/^\d{1,5}(\.\d{1,2})?$/.test(text)) {
-        state.errorText = '请输入正确金额，最多两位小数';
-        return;
-    }
-    const amount = Number(text);
-    if (amount < 0.01 || amount > 10000) {
-        state.errorText = '单次充值金额为 0.01 至 10000 元';
-        return;
-    }
     if (state.payPassword.length < 6 || state.payPassword.length > 20) {
-        state.errorText = '请输入 6 至 20 位支付密码';
+        toast('请输入 6 至 20 位支付密码');
         return;
     }
     if (state.requestKey.length == 0)
@@ -144,8 +165,10 @@ function submit() {
         const data = walletPayload(result);
         if (data == null || jsonNumber(data, 'balanceAfter') == null) {
             state.errorText = result.message.length > 0 ? result.message : '充值结果暂未确认，请重试';
+            toast(state.errorText);
             // 已明确拒绝的请求没有入账，允许用户修改金额后重新提交。
             if (result.statusCode >= 400 && result.statusCode < 500 && result.statusCode != 408) {
+                state.errorText = '';
                 state.pending = false;
                 state.requestKey = '';
                 uni.removeStorageSync(pendingRechargeKey(state.userUuid));
@@ -189,25 +212,29 @@ onPageShow(() => {
 
 onPageHide(() => {
     state.pageVisible = false;
+    if (state.passwordPromptVisible) cancelPaymentPassword();
+    state.passwordPromptVisible = false;
     state.payPassword = '';
 })
 
 onUnload(() => {
     state.pageVisible = false;
+    if (state.passwordPromptVisible) cancelPaymentPassword();
+    state.passwordPromptVisible = false;
     state.payPassword = '';
 })
 </script>
 
 <style>
 	@import '../../styles/account.css';
-	.recharge-balance { margin-top: 8px; font-size: 32px; line-height: 42px; font-weight: bold; color: #211C18; }
+	.recharge-balance { margin-top: 4px; font-size: 32px; line-height: 40px; font-weight: bold; color: #211C18; }
 	.recharge-label { margin-top: 12px; font-size: 12px; line-height: 20px; color: #C2410C; }
-	.amount-grid { justify-content: space-between; flex-direction: row; flex-wrap: wrap; margin-top: 16px; }
-	.amount-choice { display: flex; width: 48%; height: 48px; margin: 0 0 12px 0; padding: 0; border-width: 1px; border-style: solid; border-color: #EFE1D6; border-radius: 10px; background-color: #FFFFFF; align-items: center; justify-content: center; }
+	.amount-grid { justify-content: space-between; flex-direction: row; flex-wrap: wrap; margin-top: 10px; }
+	.amount-choice { display: flex; width: 23%; height: 44px; margin: 0 0 6px 0; padding: 0; border-width: 1px; border-style: solid; border-color: #EFE1D6; border-radius: 10px; background-color: #FFFFFF; align-items: center; justify-content: center; }
 	.amount-choice-on { border-color: #E4572E; background-color: #FDF0E8; }
-	.amount-choice-text { font-size: 16px; font-weight: bold; color: #C2410C; }
+	.amount-choice-text { font-size: 14px; font-weight: bold; color: #C2410C; }
 
 	/* #ifdef WEB */
-	.account-page .amount-grid { flex-direction: row; }
+	.account-page .amount-grid { flex-direction: row;  margin-top: 10px; }
 	/* #endif */
 </style>

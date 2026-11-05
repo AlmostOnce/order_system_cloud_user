@@ -10,7 +10,7 @@ const vm = loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1], p => 
   fetchMyProfile: () => Promise.resolve({ ok: true, data: {} }), walletPayload: r => r.ok ? r.data : null
  };
  if (p.includes('email-change-session.uts')) return { setEmailChangeAuthorization: token => { global.savedAuthorization = token; }, clearEmailChangeAuthorization: () => { global.savedAuthorization = ''; } };
- if (p.includes('feedback.uts')) return { toastSuccess: () => notices++ };
+ if (p.includes('feedback.uts')) return { toast: () => {}, toastSuccess: () => notices++ };
  if (p.includes('http.uts')) return {};
  if (p.includes('json.uts')) return { jsonString: (obj, key) => typeof obj[key] === 'string' ? obj[key] : null, jsonNumber: () => null };
  if (p.includes('files.uts')) return { uploadImage: () => Promise.resolve({}), saveAvatar: () => Promise.resolve({}) };
@@ -35,8 +35,8 @@ const vm = loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1], p => 
  assert.equal(global.savedAuthorization, 'a'.repeat(64));
  assert.deepEqual(navigation, [{ url: '/pages/account/email-change' }]);
  assert.equal(vm.emailAuthorizationPassword, '');
- assert.ok(source.includes('class="email-edit-trigger"'));
- assert.ok(source.includes('role="dialog" aria-modal="true" aria-label="验证登录密码"'));
+ assert.ok(/class="email-edit-trigger(?: |")/.test(source));
+ assert.ok(source.includes('class="email-authorize-dialog"'));
  assert.ok(!source.includes('startEmailChange'));
 
  const api = fs.readFileSync('api/wallet.uts', 'utf8');

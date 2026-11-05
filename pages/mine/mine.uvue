@@ -1,17 +1,15 @@
 <template>
 	<view class="account-page">
 		<view class="mine-status" :style="'height:' + statusBarHeight + 'px'"></view>
-		<scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!signingOut && (refreshing || (!profileLoading && !balanceLoading))" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
-                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
-
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!signingOut && (refreshing || (!profileLoading && !balanceLoading))" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
 			<view class="mine-hero">
 				<text class="mine-eyebrow">校园食堂 · 账户中心</text>
 				<text class="mine-title">我的</text>
 				<text class="mine-subtitle">用餐、账单与账号信息，都在这里</text>
 			</view>
 			<view class="mine-content">
-				<button class="profile-card" aria-label="查看个人资料" @click="openProfile">
-					<view class="mine-avatar" aria-label="预览头像" @click.stop="openAvatarPreview">
+                <view class="profile-card" @click="openProfile">
+                    <view class="mine-avatar" @click.stop="openAvatarPreview">
 						<business-image class="mine-avatar-image" :src="avatarUrl" kind="avatar"></business-image>
 					</view>
 					<view class="account-entry-body">
@@ -20,52 +18,91 @@
 						<text class="profile-note">{{ email.length > 0 ? email : '查看个人资料' }}</text>
 					</view>
 					<view class="account-arrow"></view>
-				</button>
+                </view>
 				<text v-if="profileError.length > 0" class="account-error">{{ profileError }}</text>
-
 				<view v-if="roleCode == 'CUSTOMER'" class="order-center">
-                    <view class="order-center-heading"><text class="account-heading">订单中心</text><button class="order-center-all" @click="openOrders"><text class="order-center-all-text">全部订单</text><view class="account-arrow"></view></button></view>
-                    <view class="order-center-shortcuts">
-                        <button class="order-center-shortcut" @click="openPendingOrders"><view class="order-center-symbol"><view class="center-clock"></view><view class="center-clock-hand"></view></view><text class="order-center-label">待支付</text></button>
-                        <button class="order-center-shortcut" @click="openActiveOrders"><view class="order-center-symbol"><view class="center-receipt"></view><view class="center-receipt-line"></view><view class="center-receipt-line center-receipt-line-two"></view></view><text class="order-center-label">进行中</text></button>
-                        <button class="order-center-shortcut" @click="openCompletedOrders"><view class="order-center-symbol"><view class="center-clock"></view><view class="center-check"></view></view><text class="order-center-label">已完成</text></button>
-                        <button class="order-center-shortcut" @click="openCancelledOrders"><view class="order-center-symbol"><view class="center-clock"></view><view class="center-cross"></view><view class="center-cross center-cross-other"></view></view><text class="order-center-label">已取消</text></button>
+                    <view class="order-center-heading"><text class="account-heading">订单中心</text>
+                        <view class="order-center-all" @click="openOrders">
+                            <text class="order-center-all-text">全部订单</text><view class="account-arrow"></view>
                     </view>
                 </view>
-                <view v-if="roleCode == 'CUSTOMER'" class="entry-group"><button class="account-entry" @click="openNotifications"><view class="account-entry-icon"><view class="center-receipt"></view></view><view class="account-entry-body"><text class="account-entry-title">消息通知</text><text class="account-entry-note">查看订单状态消息</text></view><text v-if="unreadCount > 0" class="notification-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</text><view class="account-arrow"></view></button><view class="entry-divider"></view><button class="account-entry" @click="openReviews"><view class="account-entry-icon"><image class="review-entry-icon" src="/static/review/star-outline.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的评价</text><text class="account-entry-note">回顾用餐感受，查看已发布评价</text></view><view class="account-arrow"></view></button></view>
+                    <view class="order-center-shortcuts">
+                        <view class="order-center-shortcut" @click="openPendingOrders">
+                            <view class="order-center-symbol"><view class="center-clock"></view><view class="center-clock-hand"></view></view><text class="order-center-label">待支付</text>
+                        </view>
+                        <view class="order-center-shortcut" @click="openActiveOrders">
+                            <view class="order-center-symbol"><view class="center-receipt"></view><view class="center-receipt-line"></view><view class="center-receipt-line center-receipt-line-two"></view></view><text class="order-center-label">进行中</text>
+                        </view>
+                        <view class="order-center-shortcut" @click="openCompletedOrders">
+                            <view class="order-center-symbol"><view class="center-clock"></view><view class="center-check"></view></view><text class="order-center-label">已完成</text>
+                        </view>
+                        <view class="order-center-shortcut" @click="openCancelledOrders">
+                            <view class="order-center-symbol"><view class="center-clock"></view><view class="center-cross"></view><view class="center-cross center-cross-other"></view></view><text class="order-center-label">已取消</text>
+                        </view>
+                    </view>
+                </view>
+                <view v-if="roleCode == 'CUSTOMER'" class="entry-group">
+                    <view class="account-entry" @click="openNotifications">
+                        <view class="account-entry-icon"><view class="center-receipt"></view></view><view class="account-entry-body"><text class="account-entry-title">消息通知</text><text class="account-entry-note">查看订单状态消息</text></view><text v-if="unreadCount > 0" class="notification-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</text><view class="account-arrow"></view>
+                    </view>
+                    <view class="entry-divider"></view>
+                    <view class="account-entry" @click="openReviews">
+                        <view class="account-entry-icon"><image class="review-entry-icon" src="/static/review/star-outline.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的评价</text><text class="account-entry-note">回顾用餐感受，查看已发布评价</text></view><view class="account-arrow"></view>
+                    </view>
+                </view>
                 <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">我的钱包</text>
 				<view v-if="roleCode == 'CUSTOMER'" class="entry-group">
-                    <button class="account-entry" @click="openWallet">
+                    <view class="account-entry" @click="openWallet">
                         <view class="account-entry-icon"><view class="wallet-icon-outline"></view><view class="wallet-icon-pocket"></view></view>
                         <view class="account-entry-body"><text class="account-entry-title">余额与充值</text><text class="account-entry-note">查看账户余额，进入钱包充值</text></view>
                         <view class="account-arrow"></view>
-                    </button>
+                    </view>
                     <view class="entry-divider"></view>
-					<button class="account-entry" @click="openRechargeRecords"><view class="account-entry-icon"><view class="flow-stem"></view><view class="flow-tip"></view></view><view class="account-entry-body"><text class="account-entry-title">充值记录</text><text class="account-entry-note">查看每一笔到账与余额</text></view><view class="account-arrow"></view></button>
+                    <view class="account-entry" @click="openRechargeRecords">
+                        <view class="account-entry-icon"><view class="flow-stem"></view><view class="flow-tip"></view></view><view class="account-entry-body"><text class="account-entry-title">充值记录</text><text class="account-entry-note">查看每一笔到账与余额</text></view><view class="account-arrow"></view>
+                    </view>
 					<view class="entry-divider"></view>
-					<button class="account-entry" @click="openPayRecords"><view class="account-entry-icon"><view class="flow-stem"></view><view class="flow-tip flow-tip-out"></view></view><view class="account-entry-body"><text class="account-entry-title">消费记录</text><text class="account-entry-note">查看余额支付支出</text></view><view class="account-arrow"></view></button>
+                    <view class="account-entry" @click="openPayRecords">
+                        <view class="account-entry-icon"><view class="flow-stem"></view><view class="flow-tip flow-tip-out"></view></view><view class="account-entry-body"><text class="account-entry-title">消费记录</text><text class="account-entry-note">查看余额支付支出</text></view><view class="account-arrow"></view>
 				</view>
-
+                </view>
 				<text v-if="roleCode == 'STALL_MANAGER' || roleCode == 'RESTAURANT_MANAGER'" class="account-section-label">窗口管理</text>
-                <view v-if="roleCode == 'STALL_MANAGER' || roleCode == 'RESTAURANT_MANAGER'" class="entry-group"><button class="account-entry" @click="openPickupVerification"><view class="account-entry-icon"><view class="center-receipt"></view></view><view class="account-entry-body"><text class="account-entry-title">取餐核销</text><text class="account-entry-note">输入顾客取餐码，确认餐品交付</text></view><view class="account-arrow"></view></button><view class="entry-divider"></view><button class="account-entry" @click="openImageManagement"><view class="account-entry-icon"><view class="account-icon-line"></view><view class="account-icon-line"></view></view><view class="account-entry-body"><text class="account-entry-title">窗口与菜品图片</text><text class="account-entry-note">上传封面，维护菜品展示图片</text></view><view class="account-arrow"></view></button></view>
+                <view v-if="roleCode == 'STALL_MANAGER' || roleCode == 'RESTAURANT_MANAGER'" class="entry-group">
+                    <view class="account-entry" @click="openPickupVerification">
+                        <view class="account-entry-icon"><view class="center-receipt"></view></view><view class="account-entry-body"><text class="account-entry-title">取餐核销</text><text class="account-entry-note">输入顾客取餐码，确认餐品交付</text></view><view class="account-arrow"></view>
+                    </view>
+                    <view class="entry-divider"></view>
+                    <view class="account-entry" @click="openImageManagement">
+                        <view class="account-entry-icon"><view class="account-icon-line"></view><view class="account-icon-line"></view></view><view class="account-entry-body"><text class="account-entry-title">窗口与菜品图片</text><text class="account-entry-note">上传封面，维护菜品展示图片</text></view><view class="account-arrow"></view>
+                    </view>
+                </view>
                 <text class="account-section-label">账号与安全</text>
 				<view class="entry-group">
-					<button class="account-entry" @click="openProfile"><view class="account-entry-icon"><view class="person-head"></view><view class="person-body"></view></view><view class="account-entry-body"><text class="account-entry-title">个人资料</text><text class="account-entry-note">用户名、联系方式与账号信息</text></view><view class="account-arrow"></view></button>
+                    <view class="account-entry" @click="openProfile">
+                        <view class="account-entry-icon"><view class="person-head"></view><view class="person-body"></view></view><view class="account-entry-body"><text class="account-entry-title">个人资料</text><text class="account-entry-note">用户名、联系方式与账号信息</text></view><view class="account-arrow"></view>
+                    </view>
 					<view v-if="roleCode == 'CUSTOMER'" class="entry-divider"></view>
-					<button v-if="roleCode == 'CUSTOMER'" class="account-entry" @click="openPayPassword"><view class="account-entry-icon"><view class="lock-hoop"></view><view class="lock-body"></view></view><view class="account-entry-body"><text class="account-entry-title">支付密码</text><text class="account-entry-note">{{ payPasswordSet ? '修改独立支付密码' : '设置后可充值和使用余额' }}</text></view><view class="account-arrow"></view></button>
+                    <view v-if="roleCode == 'CUSTOMER'" class="account-entry" @click="openPayPassword">
+                        <view class="account-entry-icon"><view class="lock-hoop"></view><view class="lock-body"></view></view><view class="account-entry-body"><text class="account-entry-title">支付密码</text><text class="account-entry-note">{{ payPasswordSet ? '修改独立支付密码' : '设置后可充值和使用余额' }}</text></view><view class="account-arrow"></view>
 				</view>
-				<button class="signout-button" hover-class="signout-button-pressed" @click="confirmSignOut"><view class="signout-icon"><view class="signout-door"></view><view class="signout-shaft"></view><view class="signout-tip"></view></view><text class="signout-label">退出登录</text></button>
+                </view>
+                <view class="signout-button" hover-class="signout-button-pressed" @click="confirmSignOut">
+                    <view class="signout-icon"><view class="signout-door"></view><view class="signout-shaft"></view><view class="signout-tip"></view></view><text class="signout-label">退出登录</text>
+                </view>
 				<text class="mine-footer">湖北经济学院 · 食堂管理中心</text>
+            </view>
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
 			</view>
 		</scroll-view>
         <view v-if="signOutConfirm" class="signout-modal-mask" @click="cancelSignOut">
-            <view class="signout-modal" role="dialog" aria-label="确认退出登录" aria-modal="true" @click.stop>
+            <view class="signout-modal" @click.stop>
                 <view class="signout-modal-symbol"><view class="signout-icon"><view class="signout-door"></view><view class="signout-shaft"></view><view class="signout-tip"></view></view></view>
                 <text class="signout-modal-title">确认退出登录？</text>
                 <text class="signout-modal-note">退出后需要重新登录才能查看账户。</text>
                 <view class="signout-modal-actions">
-                    <button class="signout-modal-cancel" :disabled="signingOut" @click="cancelSignOut"><text class="signout-modal-cancel-text">继续使用</text></button>
-                    <button class="signout-modal-confirm" :disabled="signingOut" @click="signOut"><text class="signout-modal-confirm-text">{{ signingOut ? '退出中…' : '确认退出' }}</text></button>
+                    <button class="signout-modal-cancel signout-modal-cancel-text button-text button-text-46" :disabled="signingOut" @click="cancelSignOut">继续使用</button>
+                    <button class="signout-modal-confirm signout-modal-confirm-text button-text button-text-46" :disabled="signingOut" @click="signOut">{{ signingOut ? '退出中…' : '确认退出' }}</button>
                 </view>
             </view>
         </view>
@@ -257,19 +294,19 @@ onPageShow(() => {
 	@import '../../styles/account.css';
 	.mine-status { background-color: #E4572E; }
 	.notification-badge { min-width: 20px; padding: 2px 5px; border-radius: 10px; background-color: #E4572E; color: #FFFFFF; font-size: 11px; text-align: center; margin-right: 8px; }
-	.mine-hero { background-color: #E4572E; padding: 20px 24px 24px 24px; }
+	.mine-hero { background-color: #E4572E; padding: 12px 20px 14px 20px; }
 	.mine-eyebrow { font-size: 12px; line-height: 18px; color: #FFE3D6; }
-	.mine-title { margin-top: 8px; font-size: 28px; line-height: 36px; font-weight: bold; color: #FFFFFF; }
-	.mine-subtitle { margin-top: 6px; font-size: 12px; line-height: 20px; color: #FFE3D6; }
-	.mine-content { padding: 20px 20px 32px 20px; }
-	.profile-card { display: flex; width: 100%; text-align: left; line-height: 22px; flex-direction: row; align-items: center; margin: 0 0 18px 0; padding: 20px 16px; border-width: 0; border-radius: 18px; background-color: #FFFFFF; }
+	.mine-title { margin-top: 4px; font-size: 24px; line-height: 32px; font-weight: bold; color: #FFFFFF; }
+	.mine-subtitle { margin-top: 4px; font-size: 12px; line-height: 18px; color: #FFE3D6; }
+	.mine-content { padding: 12px 16px 20px 16px; }
+	.profile-card { display: flex; width: 100%; text-align: left; line-height: 22px; flex-direction: row; align-items: center; margin: 0 0 12px 0; padding: 14px 12px; border-width: 0; border-radius: 18px; background-color: #FFFFFF; }
 	.mine-avatar { flex-shrink: 0; width: 52px; height: 52px; border-radius: 18px; background-color: #FDF0E8; align-items: center; justify-content: center; overflow: hidden; }
 	.mine-avatar-image { width: 52px; height: 52px; }
 	.mine-avatar-text { font-size: 23px; font-weight: bold; color: #C2410C; }
-	.profile-name { font-size: 19px; line-height: 27px; font-weight: bold; color: #211C18; }
+	.profile-name { font-size: 17px; line-height: 24px; font-weight: bold; color: #211C18; }
 	.profile-meta { margin-top: 3px; font-size: 11px; line-height: 18px; color: #7A6C60; }
 	.profile-note { margin-top: 4px; font-size: 12px; line-height: 18px; color: #C2410C; }
-	.entry-group { margin-bottom: 24px; border-radius: 16px; overflow: hidden; }
+	.entry-group { margin-bottom: 14px; border-radius: 16px; overflow: hidden; }
 	.entry-divider { height: 1px; margin-left: 60px; margin-right: 16px; background-color: #F4EBE4; }
 	.flow-stem { position: absolute; left: 15px; top: 8px; width: 2px; height: 15px; background-color: #C2410C; }
 	.flow-tip { position: absolute; left: 12px; top: 15px; width: 6px; height: 6px; border-right-width: 2px; border-right-style: solid; border-right-color: #C2410C; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #C2410C; transform: rotate(45deg); }
@@ -288,35 +325,35 @@ onPageShow(() => {
     .signout-modal-confirm { display: flex; flex: 1; height: 46px; margin: 0; padding: 0; border-width: 0; border-radius: 12px; background-color: #E4572E; align-items: center; justify-content: center; }
     .signout-modal-cancel-text { font-size: 14px; color: #7A6C60; }
     .signout-modal-confirm-text { font-size: 14px; font-weight: bold; color: #FFFFFF; }
-	.signout-button { display: flex; flex-direction: row; width: 100%; min-height: 52px; margin: 4px 0 0 0; padding: 14px 20px; border-width: 1px; border-style: solid; border-color: #E8DCD2; border-radius: 16px; background-color: #FFFFFF; align-items: center; justify-content: center; }
+	.signout-button { display: flex; flex-direction: row; width: 100%; min-height: 48px; margin: 4px 0 0 0; padding: 10px 16px; border-width: 1px; border-style: solid; border-color: #E8DCD2; border-radius: 16px; background-color: #FFFFFF; align-items: center; justify-content: center; }
 	.signout-button-pressed { background-color: #FDF0E8; border-color: #C2410C; }
 	.signout-label { margin-left: 10px; font-size: 15px; line-height: 22px; font-weight: 500; color: #7A6C60; }
 	.signout-icon { position: relative; flex-shrink: 0; width: 20px; height: 20px; }
 	.signout-door { position: absolute; left: 2px; top: 3px; width: 9px; height: 14px; border-width: 2px; border-style: solid; border-color: #7A6C60; border-right-width: 0; border-radius: 2px; }
 	.signout-shaft { position: absolute; left: 8px; top: 9px; width: 10px; height: 2px; background-color: #7A6C60; }
 	.signout-tip { position: absolute; left: 13px; top: 6px; width: 7px; height: 7px; border-top-width: 2px; border-top-style: solid; border-top-color: #7A6C60; border-right-width: 2px; border-right-style: solid; border-right-color: #7A6C60; transform: rotate(45deg); }
-	.mine-footer { margin-top: 22px; font-size: 11px; line-height: 18px; text-align: center; color: #A2968B; }
+	.mine-footer { margin-top: 14px; font-size: 11px; line-height: 18px; text-align: center; color: #A2968B; }
 
 	/* #ifdef WEB */
 	.account-page .signout-modal-mask { flex-direction: row; align-items: center; justify-content: center; }
     .account-page .signout-modal { align-items: center; }
     .account-page .signout-modal-symbol, .account-page .signout-modal-actions { flex-direction: row; }
-	.account-page .signout-button { flex-direction: row; cursor: pointer; }
+	.account-page .signout-button { flex-direction: row; cursor: pointer;  min-height: 48px;  padding: 10px 16px; }
 	.signout-button:focus-visible { outline: 2px solid #C2410C; outline-offset: 3px; }
-	.account-page .profile-card { flex-direction: row; }
+	.account-page .profile-card { flex-direction: row;  padding: 14px 12px;  margin: 0 0 12px 0; }
 	/* #endif */
 
     .wallet-icon-outline { position: absolute; left: 6px; top: 9px; width: 20px; height: 15px; border-width: 2px; border-style: solid; border-color: #C2410C; border-radius: 4px; }
     .wallet-icon-pocket { position: absolute; left: 19px; top: 14px; width: 7px; height: 5px; border-radius: 2px; background-color: #C2410C; }
 
-    .order-center { margin-bottom: 24px; padding: 16px; border-radius: 18px; background-color: #FFFFFF; }
+    .order-center { margin-bottom: 14px; padding: 12px; border-radius: 18px; background-color: #FFFFFF; }
     .order-center-heading { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
     .order-center-all { display: flex; flex-direction: row; align-items: center; justify-content: flex-end; min-height: 44px; margin: 0; padding: 0 0 0 12px; border-width: 0; background-color: transparent; line-height: 20px; }
     .order-center-all-text { font-size: 12px; line-height: 20px; color: #7A6C60; }
-    .order-center-shortcuts { display: flex; flex-direction: row; padding-top: 14px; }
+    .order-center-shortcuts { display: flex; flex-direction: row; padding-top: 4px; }
     .order-center-shortcut { display: flex; flex-direction: column; flex: 1; min-width: 0; align-items: center; margin: 0; padding: 8px 0; border-width: 0; border-radius: 12px; background-color: transparent; line-height: 20px; }
     .order-center-symbol { position: relative; width: 44px; height: 44px; border-radius: 14px; background-color: #FDF0E8; }
-    .order-center-label { margin-top: 9px; font-size: 13px; line-height: 20px; color: #211C18; }
+    .order-center-label { margin-top: 6px; font-size: 12px; line-height: 20px; color: #211C18; }
     .center-clock { position: absolute; left: 11px; top: 11px; width: 22px; height: 22px; border-width: 2px; border-style: solid; border-color: #C2410C; border-radius: 11px; }
     .center-clock-hand { position: absolute; left: 21px; top: 16px; width: 6px; height: 8px; border-left-width: 2px; border-left-style: solid; border-left-color: #C2410C; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #C2410C; }
     .center-receipt { position: absolute; left: 13px; top: 9px; width: 18px; height: 26px; border-width: 2px; border-style: solid; border-color: #C2410C; border-radius: 4px; }
@@ -324,7 +361,7 @@ onPageShow(() => {
     .center-receipt-line-two { top: 24px; }
     .center-check { position: absolute; left: 17px; top: 17px; width: 10px; height: 6px; border-left-width: 2px; border-left-style: solid; border-left-color: #C2410C; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #C2410C; transform: rotate(-45deg); }
     /* #ifdef WEB */
-    .account-page .order-center-heading, .account-page .order-center-shortcuts { flex-direction: row; }
+    .account-page .order-center-heading, .account-page .order-center-shortcuts { flex-direction: row;  padding-top: 4px; }
     .order-center-all::after, .order-center-shortcut::after { border: none; }
     /* #endif */
     .center-cross { position: absolute; left: 16px; top: 21px; width: 12px; height: 2px; border-radius: 1px; background-color: #C2410C; transform: rotate(45deg); }

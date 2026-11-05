@@ -1,9 +1,12 @@
 <template>
     <view class="account-page account-secondary">
         <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">确认订单</text></view>
-        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!pending && !submitting && createdOrderId == 0 && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
-                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <view class="account-back vapor-account-secondary--account-back" @click="goBack">
+                <view class="account-back-icon"></view>
+            </view>
+            <text class="account-title">确认订单</text></view>
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!pending && !submitting && createdOrderId == 0 && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
 <view class="account-content vapor-account-secondary--account-content">
             <view class="account-banner"><view class="banner-copy"><text class="banner-kicker">校园食堂 · 到店取餐</text><text class="banner-title">确认这一餐</text><text class="banner-note">核对菜品与数量，提交后前往支付。</text></view></view>
             <view v-if="loading" class="account-card vapor-account-secondary--account-card"><text class="account-muted">正在核对购物车…</text></view>
@@ -20,14 +23,18 @@
             <view v-if="items.length > 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">订单备注</text><textarea class="order-remark" v-model="remark" :maxlength="255" :disabled="submitting || pending" placeholder="口味偏好等，可选填" /><text class="account-muted">{{ remark.length }}/255</text></view>
             <text v-if="pending" class="account-note">上次提交结果待确认，菜品与备注已锁定。再次确认会查询同一笔订单。</text>
             <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
-            <button v-if="createdOrderId > 0" class="account-primary vapor-account-secondary--account-primary" @click="openCreated"><text class="account-primary-text">查看已提交订单</text></button>
-            <button v-else-if="items.length > 0" class="account-primary vapor-account-secondary--account-primary" :disabled="submitting || loading" :class="submitting || loading ? 'account-disabled' : ''" @click="submit"><text class="account-primary-text">{{ submitting ? '正在提交…' : (pending ? '确认提交结果' : '提交订单') }}</text></button>
-
-            <button class="account-link" :disabled="submitting" @click="openOrders"><text class="account-link-text">我的订单</text></button>
-        </view></scroll-view>
+                <button v-if="createdOrderId > 0" class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="openCreated">查看已提交订单</button>
+                <button v-else-if="items.length > 0" class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="submitting || loading" :class="submitting || loading ? 'account-disabled' : ''" @click="submit">{{ submitting ? '正在提交…' : (pending ? '确认提交结果' : '提交订单') }}</button>
+                <button class="account-link account-link-text button-text button-text-44" :disabled="submitting" @click="openOrders">我的订单</button>
+            </view>
+    <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            </view>
+        </scroll-view>
     </view>
 </template>
 <script setup lang="uts">
+import { toast } from '../../common/feedback.uts'
 import { reactive, toRefs } from 'vue'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
@@ -135,7 +142,7 @@ function submit() {
         uni.setStorageSync(checkoutKey(state.userUuid), JSON.stringify(draft));
     }
     catch (error) {
-        state.errorText = '无法保存提交信息，请检查设备存储后重试';
+        toast('无法保存提交信息，请检查设备存储后重试');
         return;
     }
     state.pending = true;
@@ -146,8 +153,10 @@ function submit() {
         const order = data == null ? null : parseOrder(data);
         if (order == null) {
             state.errorText = result.message.length > 0 ? result.message : '订单结果待确认，请重试';
+            toast(state.errorText);
             // 5xx、超时、异常响应与幂等键冲突保留原始请求，避免创建第二笔。
             if (!result.ok && (result.statusCode == 400 || result.statusCode == 403 || result.statusCode == 404 || result.statusCode == 422 || (result.statusCode == 409 && result.message.indexOf('Idempotency-Key') < 0))) {
+                state.errorText = '';
                 state.pending = false;
                 state.requestKey = '';
                 uni.removeStorageSync(checkoutKey(state.userUuid));
@@ -162,7 +171,7 @@ function submit() {
             uni.removeStorageSync(checkoutKey(state.userUuid));
         }
         catch (error) {
-            state.errorText = '订单已提交，购物车清理信息保存失败。请勿重复下单。';
+            toast('订单已提交，购物车清理信息保存失败。请勿重复下单。');
         }
         cleanupOrderCart(order.orderId, snapshot).then((cleaned: HttpResult) => {
             if (cleaned.ok)

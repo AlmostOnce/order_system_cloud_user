@@ -2,10 +2,7 @@
 	<view class="page">
 		<!-- 状态栏底色与品牌区同色，避免顶部出现米色缝隙 -->
 		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
-
-        <scroll-view class="home-scroll" scroll-y="true" :refresher-enabled="roleCode == 'CUSTOMER' && !pickerVisible && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
-                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
-
+        <scroll-view class="home-scroll" direction="vertical" :refresher-enabled="roleCode == 'CUSTOMER' && !pickerVisible && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
 		<!-- 品牌区：柿子橙实色块 + 半透明几何圆，控件与标题错峰上浮 -->
 		<view class="hero">
 			<view class="hero-shape hero-shape-1" :class="entered ? '' : 'hero-shape-1-pre'"></view>
@@ -41,7 +38,6 @@
 				</view>
 			</view>
 		</view>
-
 		<!-- 档口列表：区头先入场，卡片等数据到位后依次浮入 -->
 		<view class="section">
 			<view class="section-head" :class="entered ? '' : 'section-head-pre'">
@@ -51,25 +47,19 @@
 					class="section-count"
 				>{{ visibleWindows.length }} 个在营业</text>
 			</view>
-
 			<view v-if="loading" class="state" :class="entered ? '' : 'state-pre'">
 				<text class="state-text">正在加载档口列表…</text>
 			</view>
-
 			<view v-else-if="loadError.length > 0" class="state" :class="entered ? '' : 'state-pre'">
 				<text class="state-text">{{ loadError }}</text>
-
 			</view>
-
 			<view v-else-if="roleCode != 'CUSTOMER'" class="state" :class="entered ? '' : 'state-pre'">
 				<text class="state-text">档口展示面向学生用户开放</text>
 				<text class="state-hint">请用学生账号登录查看</text>
 			</view>
-
 			<view v-else-if="visibleWindows.length == 0" class="state" :class="entered ? '' : 'state-pre'">
 				<text class="state-text">{{ emptyHint() }}</text>
 			</view>
-
 			<view v-else class="stalls">
 				<view
 					class="stall"
@@ -92,13 +82,13 @@
 				</view>
 			</view>
 		</view>
-
 		<view class="footer">
 			<text class="footer-text">湖北经济学院 · 食堂管理中心</text>
 		</view>
-
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            </view>
         </scroll-view>
-
 		<!-- 餐厅选择面板：遮罩淡入，面板自底部上滑；关闭时先回落再卸载节点 -->
 		<view
 			v-if="pickerVisible"
@@ -108,7 +98,7 @@
 		></view>
 		<view v-if="pickerVisible" class="sheet" :class="pickerReady ? '' : 'sheet-pre'">
 			<text class="sheet-title">选择餐厅</text>
-			<scroll-view class="sheet-list" scroll-y="true" :style="sheetListStyle()">
+            <scroll-view class="sheet-list" direction="vertical" :style="sheetListStyle()">
 				<view
 					class="sheet-item"
 					hover-class="sheet-item-hover"
@@ -515,9 +505,9 @@ onReady(() => {
 	.hero {
 		position: relative;
 		background-color: #E4572E;
-		padding-top: 22px;
+		padding-top: 14px;
 		/* 首页已移除重叠的用户信息卡，底部只留常规留白 */
-		padding-bottom: 24px;
+		padding-bottom: 16px;
 		overflow: hidden;
 	}
 
@@ -565,8 +555,8 @@ onReady(() => {
 	}
 
 	.hero-body {
-		padding-left: 24px;
-		padding-right: 24px;
+		padding-left: 20px;
+		padding-right: 20px;
 	}
 
 	/* 第一行：左侧餐厅选择入口，右侧品牌小字，整行一起上浮入场 */
@@ -631,8 +621,8 @@ onReady(() => {
 	}
 
 	.hero-greeting {
-		margin-top: 10px;
-		font-size: 26px;
+		margin-top: 8px;
+		font-size: 24px;
 		font-weight: bold;
 		color: #FFFFFF;
 		letter-spacing: 1px;
@@ -726,9 +716,9 @@ onReady(() => {
 	/* ---------- 档口列表 ---------- */
 
 	.section {
-		margin-top: 24px;
-		padding-left: 20px;
-		padding-right: 20px;
+		margin-top: 16px;
+		padding-left: 16px;
+		padding-right: 16px;
 	}
 
 	.section-head {
@@ -832,8 +822,8 @@ onReady(() => {
 		border-width: 1px;
 		border-style: solid;
 		border-color: #EFE1D6;
-		padding: 14px;
-		margin-bottom: 12px;
+		padding: 12px;
+		margin-bottom: 8px;
 		opacity: 1;
 		transform: translateY(0);
 		/* 只过渡入场用的透明度与位移：底色/描边不在过渡列表内，

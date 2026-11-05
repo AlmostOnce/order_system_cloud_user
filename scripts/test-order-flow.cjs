@@ -1,3 +1,6 @@
+// Countdown timers must not keep this standalone assertion runner alive.
+const nodeSetInterval = global.setInterval;
+global.setInterval = (...args) => { const timer = nodeSetInterval(...args); timer.unref(); return timer; };
 // Runs frontend business logic in Node; does not compile the app or call live APIs.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -5,7 +8,7 @@ const assert = require('node:assert/strict');
 const ts = require(process.env.ORDER_TEST_TYPESCRIPT || 'D:/HBuilderX/plugins/compile-typescript/node_modules/typescript/lib/typescript.js');
 const root = path.resolve(__dirname, '..');
 const storage = new Map();
-global.uni = { getStorageSync: key => storage.get(key), setStorageSync: (key, value) => storage.set(key, value), removeStorageSync: key => storage.delete(key), redirectTo() {}, navigateTo() {}, getWindowInfo: () => ({ statusBarHeight: 0 }) };
+global.uni = { showToast() {}, getStorageSync: key => storage.get(key), setStorageSync: (key, value) => storage.set(key, value), removeStorageSync: key => storage.delete(key), redirectTo() {}, navigateTo() {}, getWindowInfo: () => ({ statusBarHeight: 0 }) };
 const calls = [];
 let response = null;
 const http = {};
@@ -14,6 +17,7 @@ const cache = new Map();
 function load(relative) {
     const file = path.resolve(root, relative);
     if (file === path.resolve(root, 'store/notifications.uts')) return { notificationState: { unreadCount: 0 }, startNotificationSession() {}, refreshNotificationCount: () => Promise.resolve() };
+    if (file === path.resolve(root, 'common/payment-password.uts')) return { requestPaymentPassword: () => new Promise(() => {}), cancelPaymentPassword() {} };
     if (cache.has(file)) return cache.get(file);
     if (file === path.resolve(root, 'common/http.uts')) return http;
     if (file === path.resolve(root, 'store/auth.uts')) return { currentUser: () => ({ userUuid: '12345678-1234-4234-8234-123456789abc', roleCode: 'CUSTOMER' }) };
@@ -33,7 +37,7 @@ function page(relative) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const ok = data => ({ ok: true, data: { data }, message: '', statusCode: 200 });
-const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, status: '待支付', items: [{ productId: 3, productName: '饭', quantity: 2, unitPrice: 9, lineAmount: 18 }] };
+const orderData = { createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(), orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, status: '待支付', items: [{ productId: 3, productName: '饭', quantity: 2, unitPrice: 9, lineAmount: 18 }] };
 
 (async () => {
     const api = load('api/order.uts');
@@ -116,8 +120,8 @@ const orderData = { orderId: 11, orderNo: 'O11', windowId: 2, totalAmount: 18, s
     assert.equal(state.paymentExpanded, false, 'password form is hidden initially');
     const beforeOpen = calls.length;
     state.openPayment();
-    assert.equal(state.paymentExpanded, true, 'pay order button expands password form');
-    assert.equal(calls.length, beforeOpen, 'opening form never submits payment');
+    assert.equal(state.paymentExpanded, true, 'pay order button opens the separate password dialog');
+    assert.equal(calls.length, beforeOpen, 'opening dialog never submits payment');
     state.payPassword = 'secret'; state.closePayment();
     assert.equal(state.paymentExpanded, false);
     assert.equal(state.payPassword, '', 'closing payment clears password');

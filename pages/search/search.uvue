@@ -2,7 +2,6 @@
 	<view class="page">
 		<!-- 状态栏底色与头部品牌区同色，避免顶部出现米色缝隙 -->
 		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
-
 		<!-- 头部：返回按钮 + 搜索条，沿用首页的柿子橙品牌色 -->
 		<view class="hero">
 			<view class="hero-shape hero-shape-1" :class="entered ? '' : 'hero-shape-1-pre'"></view>
@@ -14,7 +13,6 @@
 					</view>
 					<text class="hero-eyebrow">菜品搜索</text>
 				</view>
-
 				<view class="search-bar">
 					<view class="search-lens">
 						<view class="search-lens-handle"></view>
@@ -43,30 +41,25 @@
 				</view>
 			</view>
 		</view>
-
 		<!-- 结果区：状态卡与结果列表共用同一滚动容器 -->
-		<scroll-view class="results" scroll-y="true" :lower-threshold="120" @scrolltolower="loadMore">
+        <scroll-view class="results" direction="vertical" :lower-threshold="120" @scrolltolower="loadMore">
 			<view class="results-body">
 				<view v-if="!roleChecked" class="state" :class="entered ? '' : 'state-pre'">
 					<text class="state-text">正在确认身份…</text>
 				</view>
-
 				<view v-else-if="!canSearch" class="state" :class="entered ? '' : 'state-pre'">
 					<text class="state-text">搜索面向学生用户开放</text>
 					<text class="state-hint">请用学生账号登录后再试</text>
 				</view>
-
 				<view v-else-if="searching" class="state" :class="entered ? '' : 'state-pre'">
 					<text class="state-text">正在搜索「{{ submittedKeyword }}」…</text>
 				</view>
-
 				<view v-else-if="errorText.length > 0 && items.length == 0" class="state" :class="entered ? '' : 'state-pre'">
 					<text class="state-text">{{ errorText }}</text>
 					<view class="state-action" hover-class="state-action-hover" @click="retry">
 						<text class="state-action-text">重新搜索</text>
 					</view>
 				</view>
-
 				<view v-else-if="submittedKeyword.length == 0" class="history-area">
 					<view v-if="history.length > 0" class="history-card">
 						<view class="history-head">
@@ -79,9 +72,10 @@
 						<view class="history-list">
 							<view class="history-chip-wrap" v-for="entry in history" :key="entry">
 								<view class="history-chip" @click="searchHistory(entry)">
-									<text class="history-chip-text">{{ entry }}</text>
+									<text class="history-chip-text" :max-lines="1">{{ entry }}</text>
 								</view>
-								<view v-if="historyEditing" class="history-remove" :aria-label="'删除搜索记录' + entry" @click="removeHistory(entry)"><text class="history-remove-text">×</text></view>
+                                <view v-if="historyEditing" class="history-remove" @click="removeHistory(entry)">
+                                    <text class="history-remove-text">×</text></view>
 							</view>
 						</view>
 					</view>
@@ -90,18 +84,15 @@
 						<text class="state-hint">支持菜品名、档口名与餐厅名</text>
 					</view>
 				</view>
-
 				<view v-else-if="items.length == 0" class="state" :class="entered ? '' : 'state-pre'">
 					<text class="state-text">没有找到「{{ submittedKeyword }}」相关的菜品</text>
 					<text class="state-hint">换个关键词或检查错别字试试</text>
 				</view>
-
 				<view v-else class="list">
 					<view class="list-head">
 						<text class="list-title">搜索结果</text>
 						<text class="list-count">共 {{ total }} 道</text>
 					</view>
-
 					<view
 						class="result"
 						:class="listReady ? '' : 'result-pre'"
@@ -124,7 +115,6 @@
 							<text class="result-arrow">›</text>
 						</view>
 					</view>
-
 					<view class="list-tail">
 						<text v-if="loadingMore" class="list-tail-text">正在加载更多…</text>
 						<text v-else-if="errorText.length > 0" class="list-tail-text">加载更多失败，上拉重试</text>
@@ -134,12 +124,12 @@
 			</view>
 		</scroll-view>
 		<view v-if="historyClearConfirm" class="history-modal-mask" @click="cancelClearHistory">
-			<view class="history-modal" role="dialog" aria-label="确认清空搜索记录" aria-modal="true" @click.stop>
+            <view class="history-modal" @click.stop>
 				<text class="history-modal-title">清空搜索记录？</text>
 				<text class="history-modal-note">清空后将无法恢复。</text>
 				<view class="history-modal-actions">
-					<button class="history-modal-cancel" @click="cancelClearHistory"><text class="history-modal-cancel-text">取消</text></button>
-					<button class="history-modal-confirm" @click="confirmClearHistory"><text class="history-modal-confirm-text">确认清空</text></button>
+                    <button class="history-modal-cancel history-modal-cancel-text button-text button-text-46" @click="cancelClearHistory">取消</button>
+                    <button class="history-modal-confirm history-modal-confirm-text button-text button-text-46" @click="confirmClearHistory">确认清空</button>
 				</view>
 			</view>
 		</view>
@@ -747,7 +737,7 @@ onReady(() => {
 	}
 	.history-action-text { color: #8C7C6F; font-size: 12px; }
 	.history-list { flex-direction: row; flex-wrap: wrap; }
-	.history-chip-wrap { position: relative; margin: 4px 8px 8px 0; max-width: 100%; }
+	.history-chip-wrap { position: relative; margin: 4px 8px 8px 0; min-width: 0; flex-shrink: 1; }
 	.history-chip {
 		display: flex;
 		align-items: center;
@@ -759,7 +749,7 @@ onReady(() => {
 		border-radius: 999px;
 		background-color: #FDF0E8;
 		line-height: 20px;
-		max-width: 100%;
+		min-width: 0; flex-shrink: 1;
 	}
 	.history-chip-text { color: #6F4D3C; font-size: 13px; }
 	.history-remove {

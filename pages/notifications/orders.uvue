@@ -1,20 +1,31 @@
 <template>
     <view class="account-page account-secondary order-thread">
         <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回消息" @click="goBack"><view class="account-back-icon"></view></button><view class="thread-heading"><text class="account-title thread-title">订单中心</text><text class="thread-subtitle">订单状态通知</text></view></view>
-        <scroll-view class="account-scroll" scroll-y="true" :scroll-into-view="scrollTarget" @scrolltoupper="loadMore" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#F7F3EF" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
-            <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <view class="account-back vapor-account-secondary--account-back" @click="goBack">
+                <view class="account-back-icon"></view>
+            </view>
+            <view class="thread-heading"><text class="account-title thread-title">订单中心</text><text class="thread-subtitle">订单状态通知</text></view></view>
+        <scroll-view class="account-scroll" direction="vertical" :scroll-into-view="scrollTarget" @scrolltoupper="loadMore" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#F7F3EF" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
             <view class="thread-content">
                 <text v-if="loading" class="thread-history-hint">正在获取通知…</text>
                 <text v-else-if="loaded && !hasMore && chronologicalItems.length > 0" class="thread-history-hint">以上为全部订单通知</text>
                 <text v-else-if="hasMore" class="thread-history-hint">向上滑动查看更早通知</text>
-                <text v-if="errorText.length > 0" class="account-error" role="alert">{{ errorText }}</text>
+                <text v-if="errorText.length >0" class="account-error">
+{{ errorText }}</text>
                 <view v-if="loaded && items.length == 0 && errorText.length == 0" class="thread-empty"><image class="thread-empty-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image><text class="thread-empty-title">暂无订单通知</text><text class="thread-empty-note">订单状态更新后，通知会显示在这里</text></view>
                 <view v-for="item in chronologicalItems" :id="'notice-' + item.notificationId" :key="item.notificationId" class="thread-message">
                     <text class="thread-time">{{ formatDate(item.createdAt) }}</text>
-                    <view class="thread-message-row"><image class="thread-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image><view class="thread-message-content"><text class="thread-sender">订单中心</text><button class="thread-bubble" :disabled="item.orderId <= 0" @click="openNotification(item)"><text class="thread-bubble-title">{{ item.title }}</text><text class="thread-body">{{ item.content }}</text><view v-if="item.orderId > 0" class="thread-order-link"><text class="thread-order-label">查看订单</text><view class="thread-order-arrow"></view></view></button></view></view>
+                    <view class="thread-message-row"><image class="thread-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image><view class="thread-message-content"><text class="thread-sender">订单中心</text>
+                            <view class="thread-bubble" @click="() => { if (!(item.orderId <= 0)) openNotification(item) }" :style="(item.orderId <= 0) ? 'opacity:0.5' : ''">
+                                <text class="thread-bubble-title">{{ item.title }}</text><text class="thread-body">{{ item.content }}</text><view v-if="item.orderId > 0" class="thread-order-link"><text class="thread-order-label">查看订单</text><view class="thread-order-arrow"></view></view>
+                            </view>
+                        </view></view>
                 </view>
                 <view id="thread-bottom" class="thread-bottom"></view>
+            </view>
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
             </view>
         </scroll-view>
         <view class="thread-footer"><text class="thread-footer-text">订单中心为你同步订单进度</text></view>

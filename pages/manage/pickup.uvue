@@ -1,17 +1,24 @@
 <template>
     <view class="account-page account-secondary">
         <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-        <view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" :disabled="verifying" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">取餐核销</text></view>
-        <scroll-view class="account-scroll" scroll-y="true"><view class="account-content vapor-account-secondary--account-content">
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <view class="account-back vapor-account-secondary--account-back" @click="() => { if (!(verifying)) goBack() }" :style="(verifying) ? 'opacity:0.5' : ''">
+                <view class="account-back-icon"></view>
+            </view>
+            <text class="account-title">取餐核销</text></view>
+        <scroll-view class="account-scroll" direction="vertical"><view class="account-content vapor-account-secondary--account-content">
             <view class="pickup-intro"><text class="pickup-heading">核对凭据，确认交付</text><text class="pickup-note">输入顾客出示的六位取餐码，核对餐品后确认交付。</text></view>
-            <view v-if="succeeded" class="account-success"><text class="account-success-text">核销成功 · 订单已完成</text><text class="account-note">餐品已交付，顾客将收到订单完成通知。</text><button class="account-primary vapor-account-secondary--account-primary" @click="nextOrder"><text class="account-primary-text">继续核销</text></button></view>
+                <view v-if="succeeded" class="account-success"><text class="account-success-text">核销成功 · 订单已完成</text><text class="account-note">餐品已交付，顾客将收到订单完成通知。</text>
+                    <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="nextOrder">继续核销</button>
+                </view>
             <view v-else class="account-card vapor-account-secondary--account-card">
                 <text class="account-heading">取餐凭据</text>
                 <text class="account-label vapor-account-secondary--account-label">取餐码</text>
                 <input class="account-input vapor-account-secondary--account-input merchant-pickup-input" v-model="pickupCode" type="number" :maxlength="6" :disabled="verifying" placeholder="顾客出示的六位数字" aria-label="取餐码" />
                 <text class="account-note">仅可核销你负责窗口的待取货订单，取餐码由顾客持有。</text>
-                <text v-if="errorText.length > 0" class="account-error" role="alert">{{ errorText }}</text>
-                <button class="account-primary vapor-account-secondary--account-primary" :disabled="verifying" @click="verify"><text class="account-primary-text">{{ verifying ? '正在核销…' : '确认交付并核销' }}</text></button>
+                    <text v-if="errorText.length >0" class="account-error">
+{{ errorText }}</text>
+                    <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="verifying" @click="verify">{{ verifying ? '正在核销…' : '确认交付并核销' }}</button>
             </view>
         </view></scroll-view>
     </view>

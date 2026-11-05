@@ -6,7 +6,7 @@
 .review-star-button { display: flex; width: 48px; height: 48px; margin: 0; padding: 10px; border-width: 0; background-color: transparent; align-items: center; justify-content: center; }
 .review-star { width: 28px; height: 28px; }
 .review-score-hint { margin-top: 8px; text-align: center; color: #C2410C; font-size: 14px; line-height: 22px; }
-.review-textarea { width: 100%; height: 140px; padding: 14px; border-radius: 12px; background-color: #FDF6F0; font-size: 15px; line-height: 24px; color: #211C18; }
+.review-textarea { width: 100%; height: 96px; padding: 10px; border-radius: 12px; background-color: #FDF6F0; font-size: 14px; line-height: 22px; color: #211C18; }
 .review-counter { margin-top: 6px; font-size: 12px; color: #7A6C60; text-align: right; }
 .review-tags { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 8px; }
 .review-tag-button { display: flex; min-height: 44px; margin: 0 8px 8px 0; padding: 8px 12px; border-width: 1px; border-style: solid; border-color: #E8DED4; border-radius: 10px; background-color: #FFFFFF; align-items: center; justify-content: center; }
@@ -24,8 +24,8 @@
 .review-add-photo { display: flex; width: 88px; height: 88px; margin: 0 8px 10px 0; padding: 0; border-width: 1px; border-style: dashed; border-color: #D7C6B5; border-radius: 10px; background-color: #FDF6F0; align-items: center; justify-content: center; flex-direction: column; }
 .review-add-mark { font-size: 26px; line-height: 30px; color: #C2410C; }
 .review-pending { margin-top: 16px; padding: 12px; border-radius: 10px; background-color: #FFF0E6; font-size: 13px; line-height: 22px; color: #8F3B1E; }
-.review-summary { display: flex; flex-direction: row; align-items: center; margin-bottom: 20px; padding: 20px; border-radius: 18px; background-color: #FFF0E6; }
-.review-summary-number { display: flex; flex-direction: row; align-items: baseline; }
+.review-summary { display: flex; flex-direction: row; align-items: center; margin-bottom: 12px; padding: 14px; border-radius: 18px; background-color: #FFF0E6; }
+.review-summary-number { display: flex; flex-direction: row; align-items: flex-end; }
 .review-average { font-size: 42px; line-height: 50px; font-weight: bold; color: #C2410C; }
 .review-summary-unit { margin-left: 6px; font-size: 13px; color: #7A6C60; }
 .review-summary-copy { display: flex; flex-direction: column; margin-left: 24px; }
@@ -46,7 +46,7 @@
 /* #ifdef WEB */
 .review-intro, .review-author, .review-summary-copy, .review-empty { display: flex; flex-direction: column; }
 .account-page .review-stars, .account-page .review-tags, .account-page .review-photos, .account-page .review-section-row, .account-page .review-summary, .account-page .review-summary-number, .account-page .review-rating-pill { flex-direction: row; }
-.review-textarea { box-sizing: border-box; }
+.review-textarea { box-sizing: border-box;  height: 96px;  padding: 10px;  font-size: 14px;  line-height: 22px; }
 /* #endif */
 
 .review-order-tools { display: flex; flex-direction: column; align-items: flex-end; margin-left: 12px; }

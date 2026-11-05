@@ -2,14 +2,17 @@
     <view class="account-page account-secondary">
         <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
         <view class="account-nav vapor-account-secondary--account-nav conversation-nav"><text class="conversation-page-title">消息</text></view>
-        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
-            <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
             <view class="conversation-list">
-                <button class="conversation-entry" aria-label="订单中心，查看所有订单通知" @click="openOrders">
+                <view class="conversation-entry" @click="openOrders">
                     <view class="conversation-avatar-wrap"><image class="conversation-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image><view v-if="unreadCount > 0" class="conversation-badge"><text class="conversation-badge-text">{{ unreadCount > 99 ? '99+' : unreadCount }}</text></view></view>
                     <view class="conversation-copy"><view class="conversation-title-row"><text class="conversation-name">订单中心</text><text v-if="latest != null" class="conversation-time">{{ latestTime }}</text></view><text class="conversation-preview">{{ preview }}</text></view>
-                </button>
-                <text v-if="errorText.length > 0" class="conversation-error" role="alert">{{ errorText }}</text>
+                </view>
+                <text v-if="errorText.length >0" class="conversation-error">
+{{ errorText }}</text>
+            </view>
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
             </view>
         </scroll-view>
     </view>
@@ -79,7 +82,7 @@ onUnload(() => { visible = false; state.version++; unsubscribeNotifications(chan
 .conversation-nav { padding: 12px 22px 18px; }
 .conversation-page-title { color: #211C18; font-size: 25px; line-height: 34px; font-weight: bold; }
 .conversation-list { padding: 4px 16px 24px; }
-.conversation-entry { display: flex; flex-direction: row; align-items: center; width: 100%; padding: 20px 14px; margin: 0; border: 1px solid #F1E5DA; border-radius: 18px; background-color: #FFFFFF; text-align: left; overflow: visible; }
+.conversation-entry { display: flex; flex-direction: row; align-items: center; width: 100%; padding: 14px 12px; margin: 0; border: 1px solid #F1E5DA; border-radius: 18px; background-color: #FFFFFF; text-align: left; overflow: visible; }
 .conversation-avatar-wrap { position: relative; width: 54px; height: 54px; flex-shrink: 0; margin-right: 14px; overflow: visible; }
 .conversation-avatar { width: 54px; height: 54px; border-radius: 17px; }
 .conversation-badge { position: absolute; top: -8px; right: -6px; z-index: 1; min-width: 20px; height: 20px; padding: 0 4px; align-items: center; justify-content: center; border: 2px solid #FFFFFF; border-radius: 12px; background-color: #C9442B; }

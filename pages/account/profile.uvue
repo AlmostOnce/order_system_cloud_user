@@ -1,59 +1,77 @@
 <template>
 	<view class="account-page account-secondary">
 		<view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
-		<view class="account-nav vapor-account-secondary--account-nav"><button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack"><view class="account-back-icon"></view></button><text class="account-title">个人资料</text></view>
-        <scroll-view class="account-scroll" scroll-y="true" :refresher-enabled="!editing && !emailAuthorizationVisible && !profileSaving && !avatarPreviewVisible && !avatarChoosing && !avatarUploading && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
-                <refresh-header slot="refresher" :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <view class="account-back vapor-account-secondary--account-back" @click="goBack">
+                <view class="account-back-icon"></view>
+            </view>
+            <text class="account-title">个人资料</text></view>
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!editing && !emailAuthorizationVisible && !profileSaving && !avatarPreviewVisible && !avatarChoosing && !avatarUploading && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
 <view class="account-content vapor-account-secondary--account-content">
 			<view v-if="loading" class="account-card vapor-account-secondary--account-card"><text class="account-muted">正在获取资料…</text></view>
 			<view v-else-if="errorText.length > 0" class="account-card vapor-account-secondary--account-card"><text class="account-error">{{ errorText }}</text></view>
 			<view v-else class="profile-details">
                 <view class="profile-identity">
-                    <button class="profile-initial avatar-preview-trigger" aria-label="预览头像" @click="openAvatarPreview"><business-image :src="avatarUrl" kind="avatar"></business-image></button>
+                        <view class="profile-initial avatar-preview-trigger" @click="openAvatarPreview">
+                            <business-image :src="avatarUrl" kind="avatar"></business-image>
+                        </view>
                     <text class="profile-identity-name">{{ username }}</text>
                     <text class="profile-role-badge">{{ roleName }}</text>
                     <text class="profile-identity-note">你的校园用餐账号</text>
                 </view>
                 <view class="account-card vapor-account-secondary--account-card">
-				<view class="profile-card-header"><text class="account-heading">账号资料</text><button v-if="!editing" class="profile-edit-button" :disabled="refreshing || avatarChoosing || avatarUploading" @click="startEdit"><text class="account-link-text">修改昵称</text></button></view>
+                        <view class="profile-card-header"><text class="account-heading">账号资料</text>
+                            <button v-if="!editing" class="profile-edit-button account-link-text button-text button-text-44" :disabled="refreshing || avatarChoosing || avatarUploading" @click="startEdit">修改昵称</button>
+                        </view>
                 <view v-if="editing" class="profile-edit-form">
                     <text class="account-label vapor-account-secondary--account-label">昵称</text>
                     <input class="account-input vapor-account-secondary--account-input" v-model="draftUsername" :maxlength="64" :disabled="profileSaving" placeholder="请输入2至64个字符的昵称" aria-label="昵称" />
-                    <text v-if="profileError.length > 0" class="account-error" role="alert">{{ profileError }}</text>
-                    <button class="account-primary vapor-account-secondary--account-primary" :disabled="profileSaving" @click="saveProfile"><text class="account-primary-text">{{ profileSaving ? '正在保存…' : '保存昵称' }}</text></button>
-                    <button class="account-link" :disabled="profileSaving" @click="cancelEdit"><text class="account-link-text">取消编辑</text></button>
+                            <text v-if="profileError.length >0" class="account-error">
+{{ profileError }}</text>
+                            <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="profileSaving" @click="saveProfile">{{ profileSaving ? '正在保存…' : '保存昵称' }}</button>
+                            <button class="account-link account-link-text button-text button-text-44" :disabled="profileSaving" @click="cancelEdit">取消编辑</button>
                 </view>
 				<view v-if="!editing">
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">昵称</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ username }}</text></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">用户号</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ userNo }}</text></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">身份</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ roleName }}</text></view>
-				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">邮箱</text><view class="profile-email-line"><text class="profile-detail-value vapor-account-secondary--profile-detail-value profile-email-value">{{ email.length > 0 ? email : '未绑定' }}</text><button class="email-edit-trigger" :disabled="refreshing || avatarChoosing || avatarUploading" @click="openEmailAuthorization"><text class="email-edit-trigger-text">编辑</text></button></view></view>
+                            <view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">邮箱</text><view class="profile-email-line"><text class="profile-detail-value vapor-account-secondary--profile-detail-value profile-email-value">{{ email.length > 0 ? email : '未绑定' }}</text>
+                                    <button class="email-edit-trigger email-edit-trigger-text button-text button-text-34" :disabled="refreshing || avatarChoosing || avatarUploading" @click="openEmailAuthorization">编辑</button>
+                                </view></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">注册时间</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ createdAt }}</text></view>
                 </view>
 			</view>
             </view>
-		</view></scroll-view>
+            </view>
+    <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            </view>
+        </scroll-view>
         <view v-if="avatarPreviewVisible" class="avatar-preview-mask" @click="closeAvatarPreview">
-            <view class="avatar-preview-panel" role="dialog" aria-label="头像预览" @click.stop>
-                <view class="avatar-preview-top"><text class="account-heading">头像预览</text><button class="avatar-preview-close" aria-label="关闭预览" @click="closeAvatarPreview"><view class="avatar-close-line"></view><view class="avatar-close-line avatar-close-other"></view></button></view>
+            <view class="avatar-preview-panel" @click.stop>
+                <view class="avatar-preview-top"><text class="account-heading">头像预览</text>
+                    <view class="avatar-preview-close" @click="closeAvatarPreview">
+                        <view class="avatar-close-line"></view><view class="avatar-close-line avatar-close-other"></view>
+                    </view>
+                </view>
                 <view class="avatar-preview-picture"><image class="avatar-preview-image" :src="avatarPreviewSource" mode="aspectFit" @error="previewImageError"></image></view>
                 <text v-if="avatarChoosing || avatarUploading" class="account-note">{{ avatarChoosing ? '正在打开相册…' : '正在上传并保存头像…' }}</text>
-                <text v-if="avatarError.length > 0" class="account-error">{{ avatarError }}</text>
-                <button class="account-primary vapor-account-secondary--account-primary" :disabled="avatarChoosing || avatarUploading || refreshing || loading" @click="changeAvatar"><text class="account-primary-text">更换头像</text></button>
-                <button v-if="pendingAvatarKey.length > 0 && !avatarChoosing && !avatarUploading" class="account-link" @click="retryAvatar"><text class="account-link-text">重试保存</text></button>
+
+                <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="avatarChoosing || avatarUploading || refreshing || loading" @click="changeAvatar">更换头像</button>
+                <button v-if="pendingAvatarKey.length > 0 && !avatarChoosing && !avatarUploading" class="account-link account-link-text button-text button-text-44" @click="retryAvatar">重试保存</button>
             </view>
         </view>
-
         <view v-if="emailAuthorizationVisible" class="email-authorize-mask" @click="closeEmailAuthorization">
-            <view class="email-authorize-dialog" role="dialog" aria-modal="true" aria-label="验证登录密码" @click.stop>
+            <view class="email-authorize-dialog" @click.stop>
                 <text class="email-authorize-title">验证登录密码</text>
                 <text class="email-authorize-note">验证通过后进入邮箱更换页面。</text>
                 <text class="account-label vapor-account-secondary--account-label">登录密码</text>
                 <input class="account-input vapor-account-secondary--account-input" v-model="emailAuthorizationPassword" :password="true" :maxlength="64" :disabled="emailAuthorizationLoading" placeholder="请输入登录密码" aria-label="登录密码" />
-                <text v-if="emailAuthorizationError.length > 0" class="account-error" role="alert">{{ emailAuthorizationError }}</text>
+                <text v-if="emailAuthorizationError.length >0" class="account-error">
+{{ emailAuthorizationError }}</text>
                 <view class="email-authorize-actions">
-                    <button class="email-authorize-cancel" :disabled="emailAuthorizationLoading" @click="closeEmailAuthorization"><text class="email-authorize-cancel-text">取消</text></button>
-                    <button class="account-primary vapor-account-secondary--account-primary email-authorize-confirm" :disabled="emailAuthorizationLoading" @click="authorizeAndEditEmail"><text class="account-primary-text">{{ emailAuthorizationLoading ? '验证中…' : '验证并继续' }}</text></button>
+                    <button class="email-authorize-cancel email-authorize-cancel-text button-text button-text-48" :disabled="emailAuthorizationLoading" @click="closeEmailAuthorization">取消</button>
+                    <button class="account-primary vapor-account-secondary--account-primary email-authorize-confirm account-primary-text button-text button-text-50" :disabled="emailAuthorizationLoading" @click="authorizeAndEditEmail">{{ emailAuthorizationLoading ? '验证中…' : '验证并继续' }}</button>
                 </view>
             </view>
         </view>
@@ -67,7 +85,7 @@ import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { updateMyProfile, authorizeEmailChange, fetchMyProfile, walletPayload } from '../../api/wallet.uts';
 import { setEmailChangeAuthorization, clearEmailChangeAuthorization } from '../../common/email-change-session.uts';
-import { toastSuccess } from '../../common/feedback.uts';
+import { toast, toastSuccess } from '../../common/feedback.uts';
 import { HttpResult } from '../../common/http.uts';
 import { jsonString, jsonNumber } from '../../common/json.uts';
 import { uploadImage, saveAvatar } from '../../api/files.uts';
@@ -98,22 +116,21 @@ function saveProfile(): Promise<void> {
     if (!state.editing || state.profileSaving) return Promise.resolve();
     const name = state.draftUsername.trim();
     state.profileError = '';
-    if (name.length < 2 || name.length > 64) state.profileError = '昵称长度为2至64个字符';
-    if (state.profileError.length > 0) return Promise.resolve();
+    if (name.length < 2 || name.length > 64) { toast('昵称长度为2至64个字符'); return Promise.resolve(); }
     state.profileSaving = true;
     return updateMyProfile(name).then((result: HttpResult) => {
         const data = walletPayload(result);
         if (data == null) {
-            state.profileError = result.message.length > 0 ? result.message : '资料尚未保存，请重试';
+            toast(result.message.length > 0 ? result.message : '资料尚未保存，请重试');
             return;
         }
         const savedName = jsonString(data, 'username');
-        if (savedName == null) { state.profileError = '保存结果异常，请下拉刷新确认'; return; }
+        if (savedName == null) { toast('保存结果异常，请下拉刷新确认'); return; }
         state.username = savedName;
         toastSuccess('资料已保存');
         state.editing = false;
         state.draftUsername = '';
-    }).catch(() => { state.profileError = '资料保存失败，请重试'; }).finally(() => {
+    }).catch(() => { toast('资料保存失败，请重试'); }).finally(() => {
         state.profileSaving = false;
     });
 }
@@ -137,7 +154,7 @@ function closeEmailAuthorization() {
 function authorizeAndEditEmail(): Promise<void> {
     if (!state.emailAuthorizationVisible || state.emailAuthorizationLoading) return Promise.resolve();
     if (state.emailAuthorizationPassword.length == 0) {
-        state.emailAuthorizationError = '请输入登录密码';
+        toast('请输入登录密码');
         return Promise.resolve();
     }
     state.emailAuthorizationError = '';
@@ -146,14 +163,14 @@ function authorizeAndEditEmail(): Promise<void> {
         const data = walletPayload(result);
         const token = data == null ? null : jsonString(data, 'authorizationToken');
         if (token == null || token.length != 64) {
-            state.emailAuthorizationError = result.message.length > 0 ? result.message : '密码验证失败，请重试';
+            toast(result.message.length > 0 ? result.message : '密码验证失败，请重试');
             return;
         }
         setEmailChangeAuthorization(token);
         state.emailAuthorizationVisible = false;
         state.emailAuthorizationPassword = '';
         uni.navigateTo({ url: '/pages/account/email-change' });
-    }).catch(() => { state.emailAuthorizationError = '密码验证失败，请重试'; }).finally(() => {
+    }).catch(() => { toast('密码验证失败，请重试'); }).finally(() => {
         state.emailAuthorizationLoading = false;
         state.emailAuthorizationPassword = '';
     });
@@ -206,6 +223,7 @@ function changeAvatar() {
         state.avatarChoosing = false;
         if (choice.error.length > 0) {
             state.avatarError = choice.error;
+            toast(state.avatarError);
             state.avatarUploading = false;
             return;
         }
@@ -221,6 +239,7 @@ function changeAvatar() {
             if (key.length == 0) {
                 state.avatarUploading = false;
                 state.avatarError = result.message.length > 0 ? result.message : '头像上传失败';
+                toast(state.avatarError);
                 return;
             }
             state.pendingAvatarKey = key;
@@ -242,11 +261,13 @@ function bindAvatar() {
         state.avatarUploading = false;
         if (!result.ok || result.data == null) {
             state.avatarError = result.message.length > 0 ? result.message : '头像尚未保存，请重试';
+            toast(state.avatarError);
             return;
         }
         const url = jsonString(result.data, 'data') ?? '';
         if (url.length == 0) {
             state.avatarError = '头像保存结果异常，请重试';
+            toast(state.avatarError);
             return;
         }
         state.avatarUrl = url;
@@ -303,7 +324,7 @@ onPageShow(() => {
     .profile-card-header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
     .profile-edit-button { display: flex; align-items: center; justify-content: center; min-height: 44px; margin: 0; padding: 0 12px; border-width: 0; border-radius: 10px; background-color: #FDF6F0; }
     .profile-edit-form { margin-top: 4px; }
-	.profile-detail-row { padding-top: 18px; padding-bottom: 18px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #F4EBE4; }
+	.profile-detail-row { padding-top: 10px; padding-bottom: 10px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #F4EBE4; }
 	.profile-detail-label { font-size: 12px; line-height: 18px; color: #7A6C60; }
 	.profile-detail-value { margin-top: 6px; font-size: 15px; line-height: 22px; color: #211C18; }
     .profile-email-line { display: flex; flex-direction: row; align-items: center; width: 100%; min-width: 0; }
@@ -314,8 +335,8 @@ onPageShow(() => {
     .email-authorize-dialog { width: 100%; max-width: 390px; padding: 24px; border-radius: 22px; background-color: #FFFFFF; box-shadow: 0 18px 50px rgba(48, 31, 20, 0.18); }
     .email-authorize-title { color: #211C18; font-size: 19px; line-height: 27px; font-weight: bold; }
     .email-authorize-note { margin-top: 7px; color: #7A6C60; font-size: 13px; line-height: 20px; }
-    .email-authorize-actions { display: flex; flex-direction: row; gap: 10px; margin-top: 22px; }
-    .email-authorize-cancel { display: flex; flex: 1; height: 48px; margin: 0; padding: 0; align-items: center; justify-content: center; border: 1px solid #EADDD1; border-radius: 12px; background-color: #FCF9F6; }
+    .email-authorize-actions { display: flex; flex-direction: row; margin-top: 22px; }
+    .email-authorize-cancel { display: flex; flex: 1; height: 48px; margin: 0 10px 0 0; padding: 0; align-items: center; justify-content: center; border: 1px solid #EADDD1; border-radius: 12px; background-color: #FCF9F6; }
     .email-authorize-cancel-text { color: #6B5F56; font-size: 14px; line-height: 20px; }
     .email-authorize-confirm { flex: 1.35; margin: 0; }
     .profile-initial { overflow: hidden; }

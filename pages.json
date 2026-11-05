@@ -40,6 +40,10 @@
 				"navigationStyle": "custom"
 			}
 		},
+        {
+            "path": "pages/wallet/payment-password",
+            "style": { "navigationStyle": "custom", "disableScroll": true }
+        },
 		{
 			"path": "pages/wallet/recharge",
 			"style": { "navigationStyle": "custom" }
@@ -61,7 +65,11 @@
 			"style": { "navigationStyle": "custom" }
 		},
 		{
-			"path": "pages/account/email-change",
+			"path": "pages/account/email-verification",
+            "style": { "navigationStyle": "custom" }
+        },
+        {
+            "path": "pages/account/email-change",
 			"style": { "navigationStyle": "custom" }
 		},
 		{ "path": "pages/order/confirm", "style": { "navigationStyle": "custom" } },

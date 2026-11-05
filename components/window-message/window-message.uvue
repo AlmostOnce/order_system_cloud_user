@@ -2,7 +2,7 @@
     <view v-if="message.length > 0" class="window-message" @touchstart="pause" @touchend="resume" @touchcancel="resume">
         <view class="message-track" :style="trackStyle">
             <text class="message-copy" :style="copyStyle">{{ message }}</text>
-            <text class="message-copy" :style="copyStyle" aria-hidden="true">{{ message }}</text>
+            <text class="message-copy" :style="copyStyle">{{ message }}</text>
         </view>
     </view>
 </template>

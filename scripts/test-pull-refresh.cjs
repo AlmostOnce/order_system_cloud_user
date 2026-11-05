@@ -17,7 +17,7 @@ new Function('exports', 'module', ts.transpileModule(refreshSource, { compilerOp
 const cases = [
     ['home/home', ['loadCatalog'], { roleCode: 'CUSTOMER' }],
     ['menu/menu', ['loadMenu'], {}],
-    ['mine/mine', ['loadProfile', 'loadBalance'], { roleCode: 'CUSTOMER' }],
+    ['mine/mine', ['loadProfile', 'loadBalance', 'loadUnreadCount'], { roleCode: 'CUSTOMER' }],
     ['account/profile', ['loadProfile'], { loading: false }],
     ['account/pay-password', ['loadStatus'], { ready: true }],
     ['wallet/recharge', ['loadBalance'], { balanceReady: true }],
@@ -30,7 +30,7 @@ function page(name) {
     const source = fs.readFileSync(path.join(root, 'pages', name + '.uvue'), 'utf8');
     assert.ok(source.includes('@refresherrefresh="refreshPage"'), name + ': gesture handler wired');
     assert.ok(source.includes(':refresher-triggered="refreshing"'), name + ': indicator wired');
-    assert.ok(source.includes('<refresh-header slot="refresher"'), name + ': time is in refresher slot');
+    assert.ok( /<view slot="refresher" class="native-refresh-slot">\s*<refresh-header/.test(source), name + ': time is in refresher slot');
     assert.ok(source.includes('refresher-default-style="none"'), name + ': custom refresher enabled');
     assert.ok(!source.includes('class="refresh-status"') && !source.includes('上次刷新：'), name + ': no timestamp in page body');
     const script = source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
