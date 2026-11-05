@@ -14,9 +14,9 @@
 let apiBaseUrl = 'http://localhost:8088/api'
 
 // #ifdef APP-ANDROID
-// Android 模拟器（AVD）通过 10.0.2.2 回环访问开发机；如用真机调试，请改成开发机局域网 IP，
-// 例如 'http://192.168.1.10:8088/api'，并确保手机与开发机在同一网段。
-apiBaseUrl = 'http://10.0.2.2:8088/api'
+// Android 本地调试通过 adb reverse tcp:8088 tcp:8088 访问电脑 Nginx。
+// 真机与模拟器均使用此转发；重新连接设备后需重新设置，发布时改为正式 HTTPS 地址。
+apiBaseUrl = 'http://127.0.0.1:8088/api'
 // #endif
 
 /**
@@ -24,7 +24,7 @@ apiBaseUrl = 'http://10.0.2.2:8088/api'
  *
  * - 微信小程序：开发者工具运行在开发机上，保持 localhost 即可，
  *   但需在开发者工具中勾选「不校验合法域名」。
- * - Android 模拟器：已自动切换为 10.0.2.2。
+ * - Android 本地调试：使用 ADB 反向端口转发。
  */
 // 固化为常量对外导出，页面与业务层只读该常量，不得再用可变量 apiBaseUrl。
 export const API_BASE_URL: string = apiBaseUrl
