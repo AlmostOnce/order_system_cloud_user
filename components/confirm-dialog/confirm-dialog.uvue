@@ -1,0 +1,41 @@
+<template>
+    <view class="confirm-mask" @click.stop>
+        <view class="confirm-card" @click.stop>
+            <view class="confirm-accent"></view>
+            <text class="confirm-title">{{ title }}</text>
+            <text class="confirm-message">{{ message }}</text>
+            <view class="confirm-actions">
+                <button class="confirm-cancel button-text button-text-46" :disabled="busy" @click="dismiss">{{ cancelText }}</button>
+                <button class="confirm-submit button-text button-text-46" :disabled="busy" @click="submit">{{ busy ? busyText : confirmText }}</button>
+            </view>
+        </view>
+    </view>
+</template>
+
+<script setup lang="uts">
+const props = defineProps({
+    title: { type: String, default: '确认操作' },
+    message: { type: String, default: '' },
+    cancelText: { type: String, default: '取消' },
+    confirmText: { type: String, default: '确认' },
+    busy: { type: Boolean, default: false },
+    busyText: { type: String, default: '处理中…' }
+})
+const emit = defineEmits(['confirm', 'cancel'])
+function submit() { if (!props.busy) emit('confirm') }
+function dismiss() { if (!props.busy) emit('cancel') }
+</script>
+
+<style scoped>
+    .confirm-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 100; display: flex; flex-direction: row; align-items: center; justify-content: center; padding: 24px; background-color: rgba(28, 25, 23, 0.48); }
+    .confirm-card { display: flex; flex-direction: column; flex: 1; max-width: 336px; padding: 22px; border-radius: 20px; background-color: #FFFFFF; }
+    .confirm-accent { width: 24px; height: 4px; border-radius: 2px; background-color: #E4572E; margin-bottom: 16px; }
+    .confirm-title { font-size: 19px; line-height: 27px; font-weight: bold; color: #27221F; }
+    .confirm-message { margin-top: 9px; font-size: 14px; line-height: 22px; color: #786F69; }
+    .confirm-actions { display: flex; flex-direction: row; margin-top: 24px; }
+    .confirm-cancel { flex: 1; height: 46px; line-height: 46px; margin: 0 10px 0 0; padding: 0; border-width: 0; border-radius: 12px; background-color: #F3F1EF; color: #655D57; font-size: 14px; text-align: center; }
+    .confirm-submit { flex: 1; height: 46px; line-height: 46px; margin: 0; padding: 0; border-width: 0; border-radius: 12px; background-color: #E4572E; color: #FFFFFF; font-size: 14px; font-weight: bold; text-align: center; }
+    /* #ifdef WEB */
+    .confirm-cancel::after, .confirm-submit::after { border: none; }
+    /* #endif */
+</style>
