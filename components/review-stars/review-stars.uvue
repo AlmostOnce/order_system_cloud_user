@@ -1,0 +1,15 @@
+<template>
+    <view class="review-stars-display">
+        <image v-for="star in stars" :key="star" class="review-stars-image" :src="star <= props.score ? '/static/review/star-filled.svg' : '/static/review/star-outline.svg'" mode="aspectFit"></image>
+    </view>
+</template>
+<script setup lang="uts">
+// 单条评价使用后端的1～5整数评分，只读显示，不承担发布评价时的点选交互。
+// 固定保留五颗星，避免不同分数挤动用户名称；SVG复用现有资源，不受手机字体影响。
+const props = defineProps({ score: { type: Number, default: 0 } });
+const stars: Array<number> = [1, 2, 3, 4, 5];
+</script>
+<style scoped>
+    .review-stars-display { flex-direction: row; align-items: center; flex-shrink: 0; height: 20px; }
+    .review-stars-image { width: 14px; height: 14px; margin-left: 2px; }
+</style>

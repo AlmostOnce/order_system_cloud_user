@@ -8,13 +8,13 @@
             <text class="account-title">订单评价</text></view>
         <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!submitting && !imageBusy && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
             <view class="account-content vapor-account-secondary--account-content">
-                <view class="review-intro"><text class="review-eyebrow">记录这次用餐</text><text class="review-title">店铺与菜品，分别评价</text><text class="review-subtitle">只评分也可以，文字和照片选填，菜品可选择评价。</text></view>
+                <view class="review-intro"><text class="review-eyebrow">记录这次用餐</text><text class="review-title">店铺与菜品，分别评价</text><text class="review-subtitle">只评分也可以，每份评价最多3张图片，每张不超过5MB。</text></view>
                 <view v-for="(section, index) in sections" :key="section.productId" class="account-card vapor-account-secondary--account-card">
                     <view class="review-section-row"><view class="review-author"><text class="review-eyebrow">{{ section.productId == 0 ? '店铺体验' : '菜品体验' }}</text><text class="account-heading">{{ section.name }}</text></view><text v-if="section.saved != null" class="review-done-label">已评价</text>
                         <button v-else class="review-choice review-menu-label button-text button-text-44" :class="section.selected ? 'review-choice-active' : ''" :disabled="submitting || imageBusy || section.pending" @click="toggleSection(index)">{{ section.selected ? '已选择' : '选择评价' }}</button>
                     </view>
                     <view v-if="section.saved != null">
-                        <text class="review-score-hint">{{ section.saved!.score }} 星</text><text v-if="section.saved!.content.length > 0" class="review-body">{{ section.saved!.content }}</text>
+                        <review-stars :score="section.saved!.score"></review-stars><text v-if="section.saved!.content.length > 0" class="review-body">{{ section.saved!.content }}</text>
                         <view v-if="section.saved!.images.length > 0" class="review-photos"><image v-for="(url, photoIndex) in section.saved!.images" :key="url" class="review-photo review-list-photo" :src="photoSource(url)" mode="aspectFill" @click="previewSaved(index, photoIndex)"></image></view>
                     </view>
                     <view v-else-if="section.selected">
@@ -32,8 +32,8 @@
                         <view class="review-photos"><view v-for="(photo, photoIndex) in section.photos" :key="photo.fileKey" class="review-photo-cell"><image class="review-photo" :src="photoSource(photo.url)" mode="aspectFill" @click="previewPhoto(index, photoIndex)"></image>
                                 <button v-if="!section.pending" class="review-photo-remove review-remove-label button-text button-text-44" :disabled="submitting || imageBusy" @click="removePhoto(index, photoIndex)">移除</button>
                             </view>
-                            <view v-if="section.photos.length < 6 && !section.pending" class="review-add-photo" @click="() => { if (!(submitting || imageBusy)) addPhoto(index) }" :style="(submitting || imageBusy) ? 'opacity:0.5' : ''">
-                                <text class="review-add-mark">＋</text><text class="account-muted">添加照片</text>
+                            <view v-if="section.photos.length < 3 && !section.pending" class="review-add-photo" @click="() => { if (!(submitting || imageBusy)) addPhoto(index) }" :style="(submitting || imageBusy) ? 'opacity:0.5' : ''">
+                                <text class="review-add-mark">＋</text><text class="account-muted">{{ section.photos.length + '/3' }}</text>
                             </view>
                         </view>
                         <text v-if="section.pending" class="review-pending">提交结果待确认，重试会使用原请求，不会重复发布。</text>
@@ -55,6 +55,7 @@
     </view>
 </template>
 <script setup lang="uts">
+import ReviewStars from '../../components/review-stars/review-stars.uvue';
 import { toast } from '../../common/feedback.uts'
 import { reactive, toRefs, computed } from 'vue'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
@@ -127,9 +128,10 @@ function photoSource(url: string): string { return imageSource(url, 'product') }
 function previewPhoto(index: number, photoIndex: number) { const urls = state.sections[index].photos.map((p: ReviewPhoto): string => photoSource(p.url)); if (photoIndex >= 0 && photoIndex < urls.length) uni.previewImage({current: urls[photoIndex], urls: urls}) }
 function previewSaved(index: number, photoIndex: number) { const saved = state.sections[index].saved; if (saved == null) return; const urls = saved.images.map((url: string): string => photoSource(url)); if (photoIndex >= 0 && photoIndex < urls.length) uni.previewImage({current: urls[photoIndex], urls: urls}) }
 function removePhoto(index: number, photoIndex: number) { const s = state.sections[index]; if (!state.submitting && !state.imageBusy && !s.pending && s.saved == null) s.photos.splice(photoIndex, 1) }
+/** 每份店铺/菜品评价独立累计最多三张；逐张使用系统相册，上传失败不占名额。 */
 async function addPhoto(index: number): Promise<void> {
     const s = state.sections[index]
-    if (!state.ready || state.submitting || state.imageBusy || s.pending || s.saved != null || s.photos.length >= 6) return
+    if (!state.ready || state.submitting || state.imageBusy || s.pending || s.saved != null || s.photos.length >= 3) return
     state.imageBusy = true; state.errorText = ''
     try {
         const choice = await chooseLocalImage()
@@ -146,6 +148,8 @@ async function submit(): Promise<void> {
     const selected = state.sections.filter((s: ReviewSection): boolean => s.selected && s.saved == null)
     state.errorText = ''; state.successText = ''
     if (selected.length == 0) { toast('请选择尚未评价的店铺或菜品'); return }
+    // 提交前再次校验，避免异常恢复数据绕过添加入口的数量限制。
+    if (selected.some((s: ReviewSection): boolean => s.photos.length > 3)) { toast('每份评价最多上传3张图片'); return }
     for (let i = 0; i < selected.length; i++) if (selected[i].score < 1 || selected[i].score > 5) { toast('请为“' + selected[i].name + '”评分'); return }
     state.submitting = true
     let published = 0

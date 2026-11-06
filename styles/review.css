@@ -31,9 +31,6 @@
 .review-summary-copy { display: flex; flex-direction: column; margin-left: 24px; }
 .review-author { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .review-author-name { font-size: 15px; line-height: 24px; font-weight: bold; color: #211C18; }
-.review-rating-pill { display: flex; flex-direction: row; align-items: center; margin-left: 10px; }
-.review-small-star { width: 16px; height: 16px; margin-right: 4px; }
-.review-rating-text { font-size: 13px; line-height: 20px; color: #C2410C; }
 .review-body { margin-top: 16px; font-size: 15px; line-height: 25px; color: #211C18; }
 .review-product-link { display: flex; flex-direction: row; min-height: 44px; margin: 12px 0 0 0; padding: 8px 0 0 0; border-width: 0; background-color: transparent; align-items: center; justify-content: space-between; }
 .review-empty { padding: 40px 20px; align-items: center; }
@@ -45,7 +42,7 @@
 .review-entry-icon { width: 22px; height: 22px; }
 /* #ifdef WEB */
 .review-intro, .review-author, .review-summary-copy, .review-empty { display: flex; flex-direction: column; }
-.account-page .review-stars, .account-page .review-tags, .account-page .review-photos, .account-page .review-section-row, .account-page .review-summary, .account-page .review-summary-number, .account-page .review-rating-pill { flex-direction: row; }
+.account-page .review-stars, .account-page .review-tags, .account-page .review-photos, .account-page .review-section-row, .account-page .review-summary, .account-page .review-summary-number { flex-direction: row; }
 .review-textarea { box-sizing: border-box;  height: 96px;  padding: 10px;  font-size: 14px;  line-height: 22px; }
 /* #endif */
 

@@ -8,7 +8,7 @@ const comment = { commentId: 'a1111111-1111-4111-8111-111111111111', productId: 
 const result = data => ({ ok: true, data: { code: 'COMMON_000', data }, message: '', statusCode: 200 });
 const http = {
  httpUploadImage(file,bizType,bizRef) { calls.push({file,bizType,bizRef}); return Promise.resolve(result({fileKey:'0123456789abcdef0123456789abcdef'})); },
- httpGet(url) { calls.push({url}); if(url.includes('/ratings/batch')) return Promise.resolve(listMode==='error'?{ok:false,data:null,message:'服务暂不可用',statusCode:503}:result([{id:5,reviewCount:2,averageScore:4.5}])); if(url.startsWith('/comments/orders/')) return Promise.resolve(statusFailure ? {ok:false,data:null,message:'状态查询失败',statusCode:503} : result({orderId:7,windowReview:savedWindow,productReviews:savedProducts})); if(url.startsWith('/orders/')) return Promise.resolve(result({orderId:7,orderNo:'O7',windowId:2,totalAmount:12,status:'已完成',remark:'',pickupCode:'',createdAt:'',items:[{productId:5,productName:'番茄鸡蛋',quantity:1,unitPrice:12,lineAmount:12}]})); if(url.endsWith('/rating')) return Promise.resolve(result({productId:5,reviewCount:0,averageScore:null})); if(listMode==='error') return Promise.resolve({ok:false,data:null,message:'服务暂不可用',statusCode:503}); if(url.includes('cursor=')) return Promise.resolve(result({items:[comment,{...comment,commentId:'b1111111-1111-4111-8111-111111111111'}],nextCursor:null,hasMore:false})); return Promise.resolve(result({items:[comment],nextCursor:comment.commentId,hasMore:listMode==='pages'})); },
+ httpGet(url) { calls.push({url}); if(url.endsWith('/summary')) return Promise.resolve(result({reviewCount:0,averageScore:null,positiveCount:0,negativeCount:0})); if(url.includes('/ratings/batch')) return Promise.resolve(listMode==='error'?{ok:false,data:null,message:'服务暂不可用',statusCode:503}:result([{id:5,reviewCount:2,averageScore:4.5}])); if(url.startsWith('/comments/orders/')) return Promise.resolve(statusFailure ? {ok:false,data:null,message:'状态查询失败',statusCode:503} : result({orderId:7,windowReview:savedWindow,productReviews:savedProducts})); if(url.startsWith('/orders/')) return Promise.resolve(result({orderId:7,orderNo:'O7',windowId:2,totalAmount:12,status:'已完成',remark:'',pickupCode:'',createdAt:'',items:[{productId:5,productName:'番茄鸡蛋',quantity:1,unitPrice:12,lineAmount:12}]})); if(url.endsWith('/rating')) return Promise.resolve(result({productId:5,reviewCount:0,averageScore:null})); if(listMode==='error') return Promise.resolve({ok:false,data:null,message:'服务暂不可用',statusCode:503}); if(url.includes('cursor=')) return Promise.resolve(result({items:[comment,{...comment,commentId:'b1111111-1111-4111-8111-111111111111'}],nextCursor:null,hasMore:false})); return Promise.resolve(result({items:[comment],nextCursor:comment.commentId,hasMore:listMode==='pages'})); },
  httpPost(url,body,auth,key) { calls.push({url,body:JSON.parse(JSON.stringify(body)),auth,key}); return Promise.resolve(mode==='success' && !(failProduct && url==='/comments')?result(url.includes('window-reviews')?{...comment,score:body.score,content:body.content,reviewId:comment.commentId,windowId:2}:{...comment,score:body.score,content:body.content}):{ok:false,data:null,message:'网络连接失败',statusCode:0}); }
 };
 global.uni = { showToast() {}, getStorageSync:k=>storage.get(k)??'',setStorageSync:(k,v)=>storage.set(k,v),removeStorageSync:k=>storage.delete(k),chooseImage:o=>chooseMode==='cancel'?o.fail({errMsg:'chooseImage:fail cancel'}):o.success({tempFilePaths:['blob:photo'],tempFiles:[{size:1024}]}),previewImage:()=>{},getWindowInfo:()=>({statusBarHeight:0}),navigateTo:()=>{},reLaunch:()=>{},switchTab:()=>{} };
@@ -35,6 +35,16 @@ function load(file) {
  assert.equal(api.parseRating({productId:5,reviewCount:0,averageScore:null}).averageScore,null);
  let ratings=await api.fetchCardRatings('products',[5,6]);assert.equal(api.cardRatingText(ratings,5),'★ 4.5 · 2条评价');assert.equal(api.cardRatingText(ratings,6),'暂无评分');
  listMode='error';ratings=await api.fetchCardRatings('products',[5]);assert.equal(api.cardRatingText(ratings,5),'评分暂不可用');listMode='success';
+ // 汇总解析必须拒绝缺字段、负数、重复计数和无效平均分，不由当前页凑数。
+ assert.deepEqual(api.parseReviewSummary({reviewCount:3,averageScore:3,positiveCount:1,negativeCount:1,imageCount:2}),{reviewCount:3,averageScore:3,positiveCount:1,negativeCount:1,imageCount:2});
+ for(const data of [{reviewCount:1,averageScore:5},{reviewCount:1,averageScore:5,positiveCount:2,negativeCount:0},{reviewCount:1,averageScore:NaN,positiveCount:0,negativeCount:0}]) assert.equal(api.parseReviewSummary(data),null);
+ await api.fetchComments(5,'cursor',5);assert.ok(calls.at(-1).url.includes('&score=5'));
+ await api.fetchWindowReviews(2,'',1);assert.ok(calls.at(-1).url.includes('&score=1'));
+ await api.fetchComments(5,'');assert.ok(!calls.at(-1).url.includes('score='));
+ await api.fetchComments(5,'',0,true);assert.ok(calls.at(-1).url.includes('&hasImages=true'));
+ await api.fetchWindowReviews(2,'',0,true);assert.ok(calls.at(-1).url.includes('&hasImages=true'));
+ assert.equal(api.parseReviewSummary({reviewCount:1,averageScore:5,positiveCount:1,negativeCount:0,imageCount:2}),null,'image count cannot exceed total');
+ assert.equal(api.parseReviewSummary({reviewCount:1,averageScore:5,positiveCount:1,negativeCount:0,imageCount:null}).imageCount,null,'unknown image metadata is not zero');
  const pending=load('common/comments.uts');
  assert.match(pending.newCommentKey(),/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
  assert.notEqual(pending.commentPendingKey(user.userUuid,7,5),pending.commentPendingKey('another',7,5));
@@ -46,6 +56,13 @@ function load(file) {
  assert.equal(vm.sections[0].selected,true);assert.equal(vm.sections[1].selected,false,'dish review is optional');
  vm.sections[0].score=5;vm.sections[0].content='店铺服务好';vm.toggleSection(1);vm.sections[1].score=3;vm.sections[1].content='菜品有待改进';
  await vm.addPhoto(1);assert.equal(vm.sections[1].photos.length,1);assert.equal(vm.sections[0].photos.length,0,'photos stay with the rated target');
+ // 店铺和单道菜分别累计最多三张，满额后不再调用相册或上传。
+ for (const index of [0,1]) {
+  for (let i=0;i<4;i++) await vm.addPhoto(index);
+  assert.equal(vm.sections[index].photos.length,3,'each review target accepts at most three photos');
+  vm.removePhoto(index,0);await vm.addPhoto(index);
+  assert.equal(vm.sections[index].photos.length,3,'removing a photo makes one slot available again');
+ }
  mode='network';await vm.submit();assert.equal(vm.sections[0].pending,true);const first=calls.find(c=>c.body);
  const restored=load('pages/review/create.uvue').create();restored.$hooks.onLoad({orderId:'7'});restored.$hooks.onPageShow();await new Promise(resolve=>setImmediate(resolve));
  assert.equal(restored.sections[0].content,'店铺服务好');restored.setScore(0,1);assert.equal(restored.sections[0].score,5,'uncertain submissions cannot change payload');
@@ -69,8 +86,8 @@ function load(file) {
  mode='success';await ratingOnly.submit();assert.ok(ratingOnly.sections[0].saved);assert.ok(ratingOnly.sections[1].saved);
  const ratingsOnly=calls.filter(c=>c.body).slice(-2);for(const call of ratingsOnly){assert.equal(call.body.content,'');assert.deepEqual(call.body.imageFileKeys,[]);assert.deepEqual(call.body.tags,[]);}
  assert.equal(api.parseOrderReviews({orderId:7,windowReview:null,productReviews:[comment,comment]}),null,'duplicate product states rejected');
- const list=load('pages/review/list.uvue').create();list.showWindowReviews=false;listMode='pages';await list.loadReviews(true);assert.equal(list.hasMore,true);await list.loadReviews(false);assert.equal(list.reviews.length,2,'overlapping pages are deduplicated');assert.equal(list.hasMore,false);listMode='error';await list.loadReviews(true);assert.equal(list.reviews.length,2,'failed refresh preserves previous reviews');assert.equal(list.errorText,'服务暂不可用');
+ const list=load('components/review-list/review-list.uvue').create();list.showWindowReviews=false;listMode='pages';await list.loadReviews(true);assert.equal(list.hasMore,true);await list.loadReviews(false);assert.equal(list.reviews.length,2,'overlapping pages are deduplicated');assert.equal(list.hasMore,false);listMode='error';await list.loadReviews(true);assert.equal(list.reviews.length,2,'failed refresh preserves previous reviews');assert.equal(list.errorText,'服务暂不可用');
  listMode='success';list.productId=5;await list.loadRating();assert.equal(list.averageScore,null);assert.equal(list.reviewCount,0);
- for(const file of ['pages/menu/menu.uvue','pages/review/list.uvue']) assert.ok(fs.readFileSync(path.join(root,file),'utf8').includes(':src="review.authorAvatarUrl"'),'review author avatar: '+file);
+ for(const file of ['components/review-list/review-list.uvue']) assert.ok(fs.readFileSync(path.join(root,file),'utf8').includes(':src="review.authorAvatarUrl"'),'review author avatar: '+file);
  console.log('Comment checks passed: independent shop/dish payloads and photos, all-draft recovery, idempotent retry, reopened review lock, unavailable-state guard, avatar parsing and pagination.');
 })().catch(e=>{console.error(e);process.exitCode=1});

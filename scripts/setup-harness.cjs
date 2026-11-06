@@ -31,7 +31,7 @@ exports.loadSetup=function(source,resolve){
  for(const n of refs)descriptors+=`${JSON.stringify(n)}:{enumerable:true,get:()=>${n}.value,set:v=>{${n}.value=v}},`;
  for(const n of methods)descriptors+=`${JSON.stringify(n)}:{enumerable:true,get:()=>${n},set:v=>{${n}=v}},`;
  for(const n of props)descriptors+=`${JSON.stringify(n)}:{enumerable:true,get:()=>props.${n},set:v=>{props.${n}=v}},`;
- const program=imports+`\nexport function create(initialProps: any = {}) { const hooks: any = {}; __setHooks(hooks); const defineProps=(definitions: any)=>__defineProps(definitions,initialProps);\n`+body+`\nconst vm: any={}; Object.defineProperties(vm,{${descriptors}}); vm.$hooks=hooks; return vm; }`;
+ const program=imports+`\nexport function create(initialProps: any = {}) { const hooks: any = {}; __setHooks(hooks); const defineProps=(definitions: any)=>__defineProps(definitions,initialProps);\nconst defineEmits=(_events: any)=>(..._args: any[])=>{};\n`+body+`\nconst vm: any={}; Object.defineProperties(vm,{${descriptors}}); vm.$hooks=hooks; return vm; }`;
  const mod={exports:{}},env={hooks:{}};
  const output=ts.transpileModule(program,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText;
  new Function('require','module','exports','__setHooks','__defineProps',output)(p=>{

@@ -88,16 +88,18 @@ export function parseRating(raw: UTSJSONObject): ProductRating | null {
     if (id <= 0 || count == null || !Number.isInteger(count) || count < 0 || (count > 0 && (average == null || average < 1 || average > 5))) return null
     return { productId: id, reviewCount: count, averageScore: count == 0 ? null : average }
 }
-export function fetchComments(productId: number, cursor: string): Promise<HttpResult> {
+/** 一星/五星由服务端先筛选再分页；0表示全部，兼容既有两参数调用。 */
+export function fetchComments(productId: number, cursor: string, score: number = 0, hasImages: boolean = false): Promise<HttpResult> {
     const base = productId > 0 ? '/comments/products/' + productId : '/comments/me'
-    return httpGet(base + '?limit=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : ''), true)
+    return httpGet(base + '?limit=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : '') + (score == 1 || score == 5 ? '&score=' + score : '') + (hasImages ? '&hasImages=true' : ''), true)
 }
 export function fetchProductRating(productId: number): Promise<HttpResult> { return httpGet('/comments/products/' + productId + '/rating', true) }
 export function createComment(body: UTSJSONObject, key: string): Promise<HttpResult> { return httpPost('/comments', body, true, key) }
 export function createWindowReview(body: UTSJSONObject, key: string): Promise<HttpResult> { return httpPost('/comments/window-reviews', body, true, key) }
-export function fetchWindowReviews(windowId: number, cursor: string): Promise<HttpResult> {
+/** 店铺与本人店铺评价沿用相同筛选规则，不在客户端过滤一页数据。 */
+export function fetchWindowReviews(windowId: number, cursor: string, score: number = 0, hasImages: boolean = false): Promise<HttpResult> {
     const base = windowId > 0 ? '/comments/window-reviews/windows/' + windowId : '/comments/window-reviews/me'
-    return httpGet(base + '?limit=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : ''), true)
+    return httpGet(base + '?limit=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : '') + (score == 1 || score == 5 ? '&score=' + score : '') + (hasImages ? '&hasImages=true' : ''), true)
 }
 export function fetchWindowRating(windowId: number): Promise<HttpResult> { return httpGet('/comments/window-reviews/windows/' + windowId + '/rating', true) }
 export function parseWindowReviewPage(raw: UTSJSONObject): ReviewPage | null {
@@ -141,4 +143,22 @@ export function parseOrderReviews(raw: UTSJSONObject): OrderReviews | null {
         windowReview = page.items[0]
     }
     return { orderId: orderId, windowReview: windowReview, productReviews: productReviews }
+}
+
+/** 概览对应全部评价，不随当前一星/五星筛选改变。 */
+export type ReviewSummary = { reviewCount: number, averageScore: number | null, positiveCount: number, negativeCount: number, imageCount: number | null }
+export function fetchReviewSummary(windowId: number, productId: number): Promise<HttpResult> {
+    const base = windowId > 0 ? '/comments/window-reviews/windows/' + windowId : '/comments/products/' + productId
+    return httpGet(base + '/summary', true)
+}
+/** 严格校验统计上限；接口缺字段或故障不伪装成0条，也不由当前页推算总量。 */
+export function parseReviewSummary(raw: UTSJSONObject): ReviewSummary | null {
+    const count = jsonNumber(raw, 'reviewCount')
+    const positive = jsonNumber(raw, 'positiveCount')
+    const negative = jsonNumber(raw, 'negativeCount')
+    const average = jsonNumber(raw, 'averageScore')
+    const images = jsonNumber(raw, 'imageCount')
+    if (images != null && (!Number.isInteger(images) || images < 0 || (count != null && images > count))) return null
+    if (count == null || positive == null || negative == null || !Number.isInteger(count) || !Number.isInteger(positive) || !Number.isInteger(negative) || count < 0 || positive < 0 || negative < 0 || positive + negative > count || (count > 0 && (average == null || !Number.isFinite(average) || average < 1 || average > 5))) return null
+    return { reviewCount: count, averageScore: count == 0 ? null : average, positiveCount: positive, negativeCount: negative, imageCount: images }
 }
