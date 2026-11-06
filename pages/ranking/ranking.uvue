@@ -2,6 +2,12 @@
     <view class="account-page ranking-page">
         <view class="ranking-status" :style="'height:' + statusBarHeight + 'px'"></view>
         <view class="ranking-header">
+            <!-- 纯装饰销量柱形，不代表真实数值；固定占位，播放时不挤动标题和列表。 -->
+            <view class="ranking-motion">
+                <view class="ranking-motion-bar ranking-motion-second" :class="rankAnimationEntered ? '' : 'ranking-motion-pre'"></view>
+                <view class="ranking-motion-bar ranking-motion-first" :class="rankAnimationEntered ? '' : 'ranking-motion-pre'"></view>
+                <view class="ranking-motion-bar ranking-motion-third" :class="rankAnimationEntered ? '' : 'ranking-motion-pre'"></view>
+            </view>
             <text class="ranking-kicker">校园食堂 · 人气之选</text>
             <text class="ranking-title">排行榜</text>
             <view class="ranking-heading-row"><text class="ranking-selected">销量榜</text><text class="ranking-scope">累计已支付 · TOP 50</text></view>
@@ -13,8 +19,12 @@
                 <view v-if="loading && !refreshing && items.length == 0" class="ranking-state"><text class="account-muted">正在加载销量榜…</text></view>
                 <view v-if="!loading && errorText.length == 0 && items.length == 0" class="ranking-state"><text class="account-heading">好味道，等你发现</text><text class="account-note">有菜品售出后，就会出现在这里。</text></view>
                 <view v-if="items.length > 0" class="ranking-list">
-                    <view v-for="item in items" :key="item.productId + ':' + item.windowId" class="ranking-row" :class="item.rank <= 3 ? 'ranking-row-leading' : ''" hover-class="ranking-row-pressed" @click="() => { if (!(!canOrder)) openWindow(item) }" :style="(!canOrder) ? 'opacity:0.5' : ''">
-                        <view class="ranking-number" :class="item.rank <= 3 ? 'ranking-number-leading' : ''"><text :class="(item.rank <= 3 ? 'vapor-ranking-number-leading--ranking-number-text' : '')" class="ranking-number-text">{{ item.rank < 10 ? '0' + item.rank : '' + item.rank }}</text></view>
+                    <view v-for="item in items" :key="item.productId + ':' + item.windowId" class="ranking-row" hover-class="ranking-row-pressed" @click="() => { if (!(!canOrder)) openWindow(item) }" :style="(!canOrder) ? 'opacity:0.5' : ''">
+                        <!-- 前三名用带名次数字的金银铜牌区分，不再改变整行底色；后续名次保留数字。 -->
+                        <view class="ranking-number">
+                            <image v-if="item.rank <= 3" class="ranking-medal" :src="item.rank == 1 ? '/static/ranking/gold.svg' : (item.rank == 2 ? '/static/ranking/silver.svg' : '/static/ranking/bronze.svg')" mode="aspectFit"></image>
+                            <text v-else class="ranking-number-text">{{ item.rank < 10 ? '0' + item.rank : '' + item.rank }}</text>
+                        </view>
                         <view class="ranking-image"><business-image :src="dishImage(item)" kind="product" :preview="false"></business-image></view>
                         <view class="ranking-dish"><text class="ranking-dish-name" :max-lines="1">{{ item.productName }}</text><text class="ranking-window">{{ windowLabel(item.windowId) }}</text></view>
                         <view class="ranking-sales"><view class="ranking-sales-value"><text class="ranking-count">{{ item.sales }}</text><text class="ranking-unit">份</text></view><text class="ranking-sales-label">累计售出</text></view>
@@ -42,9 +52,9 @@ import { listActiveWindows, listProductImages, ProductImage, WindowItem, WindowL
 const initialImages: ProductImage[] = [];
 const initialItems: SalesRankItem[] = [];
 const initialWindows: WindowItem[] = [];
-const state = reactive({ statusBarHeight: 0, loading: false, refreshing: false, currentRefreshTime: '', errorText: '', items: initialItems, images: initialImages, windows: initialWindows, canOrder: false })
+const state = reactive({ rankAnimationEntered: false, statusBarHeight: 0, loading: false, refreshing: false, currentRefreshTime: '', errorText: '', items: initialItems, images: initialImages, windows: initialWindows, canOrder: false })
 
-const { statusBarHeight, loading, refreshing, currentRefreshTime, errorText, items, windows, canOrder } = toRefs(state)
+const { rankAnimationEntered, statusBarHeight, loading, refreshing, currentRefreshTime, errorText, items, windows, canOrder } = toRefs(state)
 
 function loadRanking(): Promise<void> {
     if (state.loading)
@@ -106,7 +116,30 @@ function openWindow(item: SalesRankItem) {
     uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId + '&productId=' + item.productId });
 }
 
+// tab页仅首次触发onReady，返回时通过可见性钩子重播，避免用刷新数据触发动画。
+let rankReady = false;
+let rankVisible = false;
+let rankAnimationTimer = 0;
+/** 离页时取消延迟回调并恢复起点，防止后台或卸载页面继续改变视图。 */
+function stopRankAnimation() {
+    if (rankAnimationTimer > 0) { clearTimeout(rankAnimationTimer); rankAnimationTimer = 0; }
+    state.rankAnimationEntered = false;
+}
+/** 起点先布局一帧，随后由CSS执行一次错峰升起，不创建循环计时器。 */
+function replayRankAnimation() {
+    stopRankAnimation();
+    rankAnimationTimer = setTimeout(() => {
+        rankAnimationTimer = 0;
+        if (rankVisible) state.rankAnimationEntered = true;
+    }, 60);
+}
+onReady(() => { rankReady = true; if (rankVisible) replayRankAnimation(); });
+onPageHide(() => { rankVisible = false; stopRankAnimation(); });
+onUnload(() => { rankVisible = false; stopRankAnimation(); });
+
 onPageShow(() => {
+    rankVisible = true;
+    if (rankReady) replayRankAnimation();
     startNotificationSession()
     if (!isLoggedIn()) {
         uni.reLaunch({ url: '/pages/login/login' });
@@ -122,7 +155,14 @@ onPageShow(() => {
 <style>
     @import '../../styles/account.css';
     .ranking-status, .ranking-header { background-color: #E4572E; }
-    .ranking-header { padding: 20px 24px 0 24px; }
+    .ranking-header { position: relative; padding: 20px 24px 0 24px; }
+    /* 使用原生支持的位移/透明度过渡；底部裁切让柱形从同一基线升起。 */
+    .ranking-motion { position: absolute; right: 24px; top: 16px; width: 68px; height: 60px; flex-direction: row; align-items: flex-end; overflow: hidden; }
+    .ranking-motion-bar { width: 16px; margin-left: 5px; border-top-left-radius: 5px; border-top-right-radius: 5px; opacity: 1; transform: translateY(0); transition-property: transform, opacity; transition-duration: 0.55s; transition-timing-function: ease-out; }
+    .ranking-motion-second { height: 32px; background-color: #FFD6BF; transition-delay: 0.08s; }
+    .ranking-motion-first { height: 52px; background-color: #F2A93B; transition-delay: 0.18s; }
+    .ranking-motion-third { height: 23px; background-color: #FFC09D; transition-delay: 0.28s; }
+    .ranking-motion-pre { opacity: 0; transform: translateY(60px); }
     .ranking-kicker { font-size: 12px; line-height: 18px; color: #FFE3D6; }
     .ranking-title { margin-top: 4px; font-size: 24px; line-height: 32px; font-weight: bold; color: #FFFFFF; }
     .ranking-heading-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding-top: 22px; padding-bottom: 14px; }
@@ -133,11 +173,10 @@ onPageShow(() => {
     .ranking-state { padding: 36px 20px; border-radius: 18px; background-color: #FFFFFF; }
     .ranking-list { border-radius: 18px; overflow: hidden; background-color: #FFFFFF; }
     .ranking-row { display: flex; flex-direction: row; align-items: center; width: 100%; min-height: 76px; margin: 0; padding: 12px; border-width: 0; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #F4EBE4; border-radius: 0; background-color: #FFFFFF; text-align: left; }
-    .ranking-row-leading { background-color: #FFFAF6; }
     .ranking-row-pressed { background-color: #FDF0E8; }
-    .ranking-number { flex-shrink: 0; width: 24px; margin-right: 8px; }
+    .ranking-number { flex-shrink: 0; width: 28px; margin-right: 8px; align-items: center; justify-content: center; }
+    .ranking-medal { width: 28px; height: 36px; }
     .ranking-number-text { font-size: 20px; line-height: 28px; font-weight: bold; color: #7A6C60; }
-    .vapor-ranking-number-leading--ranking-number-text { color: #C2410C; }
     .ranking-image { width: 48px; height: 48px; border-radius: 10px; overflow: hidden; flex-shrink: 0; margin-right: 10px; }
     .ranking-dish { flex: 1; min-width: 0; }
     .ranking-dish-name { font-size: 15px; line-height: 22px; font-weight: bold; color: #211C18; }
@@ -155,8 +194,5 @@ onPageShow(() => {
     .ranking-row:focus-visible { outline: 2px solid #C2410C; outline-offset: -3px; }
     /* #endif */
 
-/* #ifdef WEB */
-/* Preserve VDOM Web specificity; native uses explicit vapor-* classes above. */
-.ranking-number-leading .ranking-number-text { color: #C2410C; }
-/* #endif */
+
 </style>
