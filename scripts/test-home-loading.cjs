@@ -16,6 +16,13 @@ const create=()=>loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1],
 const tick=()=>new Promise(r=>setImmediate(r));
 (async()=>{
  const vm=create();vm.$hooks.onPageShow();vm.$hooks.onPageShow();await tick();assert.equal(requests,2,'first visit loads once, including while pending');
+ // 首次就绪及每次返回都重播右上角图形，离页后不允许迟到定时器重新点亮。
+ vm.$hooks.onReady();await new Promise(r=>setTimeout(r,90));assert.equal(vm.heroShapesEntered,true);
+ vm.$hooks.onPageHide();assert.equal(vm.heroShapesEntered,false);
+ vm.$hooks.onPageShow();assert.equal(vm.heroShapesEntered,false);
+ await new Promise(r=>setTimeout(r,90));assert.equal(vm.heroShapesEntered,true);
+ vm.$hooks.onPageHide();vm.$hooks.onPageShow();vm.$hooks.onPageHide();
+ await new Promise(r=>setTimeout(r,90));assert.equal(vm.heroShapesEntered,false,'hidden page cannot resume its animation');
  vm.selectRestaurant(1,'一食堂');const windows=vm.windows;
  vm.$hooks.onPageShow();await tick();assert.equal(requests,2,'returning home does not fetch');assert.equal(vm.windows,windows);assert.equal(vm.selectedRestaurantId,1,'selection survives return');
  await vm.loadCatalog();assert.equal(requests,4,'manual refresh remains available');

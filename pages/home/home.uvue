@@ -5,8 +5,8 @@
         <scroll-view class="home-scroll" direction="vertical" :refresher-enabled="roleCode == 'CUSTOMER' && !pickerVisible && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
 		<!-- 品牌区：柿子橙实色块 + 半透明几何圆，控件与标题错峰上浮 -->
 		<view class="hero">
-			<view class="hero-shape hero-shape-1" :class="entered ? '' : 'hero-shape-1-pre'"></view>
-			<view class="hero-shape hero-shape-2" :class="entered ? '' : 'hero-shape-2-pre'"></view>
+			<view class="hero-shape hero-shape-1" :class="heroShapesEntered ? '' : 'hero-shape-1-pre'"></view>
+			<view class="hero-shape hero-shape-2" :class="heroShapesEntered ? '' : 'hero-shape-2-pre'"></view>
 			<view class="hero-body">
 				<!-- 左上角餐厅选择入口：点击后从底部弹出餐厅列表 -->
 				<view class="hero-top" :class="entered ? '' : 'hero-top-pre'">
@@ -224,6 +224,8 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     loadError: '',
     // 是否已进入入场动画终态，切换后驱动各元素的过渡。
     entered: false,
+    // 右上角图形独立重播，不让正文和列表在返回首页时一起隐藏或重刷。
+    heroShapesEntered: false,
     // 档口列表是否已就绪，控制卡片依次浮入的过渡。
     listReady: false,
     // 餐厅选择面板是否已挂载显示。
@@ -231,7 +233,7 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     // 餐厅选择面板是否已进入终态，控制其滑入滑出过渡。
     pickerReady: false })
 
-const { refreshing, currentRefreshTime, statusBarHeight, greeting, roleCode, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, listReady, pickerVisible, pickerReady } = toRefs(state)
+const { refreshing, currentRefreshTime, statusBarHeight, greeting, roleCode, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, heroShapesEntered, listReady, pickerVisible, pickerReady } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.loading || state.pickerVisible || state.roleCode != 'CUSTOMER')
@@ -475,7 +477,29 @@ function openSearch() {
     uni.navigateTo({ url: '/pages/search/search' });
 }
 
+// 首页为缓存tab页，onReady只执行一次；可见性生命周期单独管理图形动画。
+let heroShapesTimer = 0;
+let homeReady = false;
+let homeVisible = false;
+/** 取消迟到回调并恢复动画起点；离页后不再操作隐藏视图。 */
+function stopHeroShapes() {
+    if (heroShapesTimer > 0) { clearTimeout(heroShapesTimer); heroShapesTimer = 0; }
+    state.heroShapesEntered = false;
+}
+/** 等待起始样式完成一帧布局，再切换终态以触发现有缩放和透明度过渡。 */
+function replayHeroShapes() {
+    stopHeroShapes();
+    heroShapesTimer = setTimeout(() => {
+        heroShapesTimer = 0;
+        if (homeVisible) state.heroShapesEntered = true;
+    }, 60);
+}
+onPageHide(() => { homeVisible = false; stopHeroShapes(); });
+onUnload(() => { homeVisible = false; stopHeroShapes(); });
+
 onPageShow(() => {
+    homeVisible = true;
+    if (homeReady) replayHeroShapes();
     startNotificationSession()
     // 状态栏高度取不到时用 24px 兜底，避免顶部内容被系统栏遮挡。
     const info = uni.getWindowInfo();
@@ -489,6 +513,8 @@ onPageShow(() => {
 })
 
 onReady(() => {
+    homeReady = true;
+    if (homeVisible) replayHeroShapes();
     // 页面渲染完成后窗口信息才准确（app-android 尤其如此），此处再同步一次状态栏高度。
     const readyInfo = uni.getWindowInfo();
     state.statusBarHeight = readyInfo.statusBarHeight > 0 ? readyInfo.statusBarHeight : 24;
