@@ -20,23 +20,16 @@
                     <text class="profile-identity-note">你的校园用餐账号</text>
                 </view>
                 <view class="account-card vapor-account-secondary--account-card">
-                        <view class="profile-card-header"><text class="account-heading">账号资料</text>
-                            <button v-if="!editing" class="profile-edit-button account-link-text button-text button-text-44" :disabled="refreshing || avatarChoosing || avatarUploading" @click="startEdit">修改昵称</button>
-                        </view>
-                <view v-if="editing" class="profile-edit-form">
-                    <text class="account-label vapor-account-secondary--account-label">昵称</text>
-                    <input class="account-input vapor-account-secondary--account-input" v-model="draftUsername" :maxlength="64" :disabled="profileSaving" placeholder="请输入2至64个字符的昵称" aria-label="昵称" />
-                            <text v-if="profileError.length >0" class="account-error">
-{{ profileError }}</text>
-                            <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="profileSaving" @click="saveProfile">{{ profileSaving ? '正在保存…' : '保存昵称' }}</button>
-                            <button class="account-link account-link-text button-text button-text-44" :disabled="profileSaving" @click="cancelEdit">取消编辑</button>
-                </view>
-				<view v-if="!editing">
-				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">昵称</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ username }}</text></view>
+                        <view class="profile-card-header"><text class="account-heading">账号资料</text></view>
+<view>
+				<!-- 编辑入口归属于昵称字段，复用邮箱行的布局，长昵称换行也不会挤走右侧按钮。 -->
+                <view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">昵称</text><view class="profile-field-line"><text class="profile-detail-value vapor-account-secondary--profile-detail-value profile-field-value">{{ username }}</text>
+                    <button class="profile-field-edit profile-field-edit-text button-text button-text-34" :disabled="refreshing || avatarChoosing || avatarUploading" @click="startEdit">修改昵称</button>
+                </view></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">用户号</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ userNo }}</text></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">身份</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ roleName }}</text></view>
-                            <view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">邮箱</text><view class="profile-email-line"><text class="profile-detail-value vapor-account-secondary--profile-detail-value profile-email-value">{{ email.length > 0 ? email : '未绑定' }}</text>
-                                    <button class="email-edit-trigger email-edit-trigger-text button-text button-text-34" :disabled="refreshing || avatarChoosing || avatarUploading" @click="openEmailAuthorization">编辑</button>
+                            <view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">邮箱</text><view class="profile-field-line"><text class="profile-detail-value vapor-account-secondary--profile-detail-value profile-field-value">{{ email.length > 0 ? email : '未绑定' }}</text>
+                                    <button class="profile-field-edit profile-field-edit-text button-text button-text-34" :disabled="refreshing || avatarChoosing || avatarUploading" @click="openEmailAuthorization">编辑</button>
                                 </view></view>
 				<view class="profile-detail-row vapor-account-secondary--profile-detail-row"><text class="profile-detail-label">注册时间</text><text class="profile-detail-value vapor-account-secondary--profile-detail-value">{{ createdAt }}</text></view>
                 </view>
@@ -47,25 +40,19 @@
                 <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
             </view>
         </scroll-view>
-        <view v-if="emailAuthorizationVisible" class="email-authorize-mask" @click="closeEmailAuthorization">
-            <view class="email-authorize-dialog" @click.stop>
-                <text class="email-authorize-title">验证登录密码</text>
-                <text class="email-authorize-note">验证通过后进入邮箱更换页面。</text>
-                <text class="account-label vapor-account-secondary--account-label">登录密码</text>
-                <input class="account-input vapor-account-secondary--account-input" v-model="emailAuthorizationPassword" :password="true" :maxlength="64" :disabled="emailAuthorizationLoading" placeholder="请输入登录密码" aria-label="登录密码" />
-                <text v-if="emailAuthorizationError.length >0" class="account-error">
-{{ emailAuthorizationError }}</text>
-                <view class="email-authorize-actions">
-                    <button class="email-authorize-cancel email-authorize-cancel-text button-text button-text-48" :disabled="emailAuthorizationLoading" @click="closeEmailAuthorization">取消</button>
-                    <button class="account-primary vapor-account-secondary--account-primary email-authorize-confirm account-primary-text button-text button-text-50" :disabled="emailAuthorizationLoading" @click="authorizeAndEditEmail">{{ emailAuthorizationLoading ? '验证中…' : '验证并继续' }}</button>
-                </view>
-            </view>
-        </view>
+        <!-- 输入放在滚动区外的统一弹层中，原资料列表始终保留，避免编辑时改变页面高度。 -->
+        <confirm-dialog v-if="editing" title="修改昵称" message="请输入2至64个字符的昵称" confirm-text="保存" :busy="profileSaving" busy-text="保存中…" @cancel="cancelEdit" @confirm="saveProfile">
+            <input class="profile-dialog-input" v-model="draftUsername" :maxlength="64" :disabled="profileSaving" placeholder="请输入昵称" confirm-type="done" @confirm="saveProfile" />
+        </confirm-dialog>
+        <confirm-dialog v-if="emailAuthorizationVisible" title="验证登录密码" message="验证通过后进入邮箱更换页面。" confirm-text="验证并继续" :busy="emailAuthorizationLoading" busy-text="验证中…" @cancel="closeEmailAuthorization" @confirm="authorizeAndEditEmail">
+            <input class="profile-dialog-input" v-model="emailAuthorizationPassword" :password="true" :maxlength="64" :disabled="emailAuthorizationLoading" placeholder="请输入登录密码" confirm-type="done" @confirm="authorizeAndEditEmail" />
+        </confirm-dialog>
 	</view>
 </template>
 
 <script setup lang="uts">
 import { reactive, toRefs } from 'vue'
+import ConfirmDialog from '../../components/confirm-dialog/confirm-dialog.uvue';
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
@@ -314,26 +301,18 @@ onPageShow(() => {
 <style>
 	@import '../../styles/account.css';
     .profile-card-header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
-    .profile-edit-button { display: flex; align-items: center; justify-content: center; min-height: 44px; margin: 0; padding: 0 12px; border-width: 0; border-radius: 10px; background-color: #FDF6F0; }
-    .profile-edit-form { margin-top: 4px; }
 	.profile-detail-row { padding-top: 10px; padding-bottom: 10px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #F4EBE4; }
 	.profile-detail-label { font-size: 12px; line-height: 18px; color: #7A6C60; }
 	.profile-detail-value { margin-top: 6px; font-size: 15px; line-height: 22px; color: #211C18; }
-    .profile-email-line { display: flex; flex-direction: row; align-items: center; width: 100%; min-width: 0; }
-    .profile-email-value { flex: 1; min-width: 0; margin-top: 6px; }
-    .email-edit-trigger { display: flex; flex-shrink: 0; min-height: 34px; margin: 0 0 0 10px; padding: 0 12px; align-items: center; justify-content: center; border-width: 1px; border-style: solid; border-color: #EADDD1; border-radius: 10px; background-color: #FCF9F6; }
-    .email-edit-trigger-text { color: #C2410C; font-size: 12px; line-height: 18px; }
-    .email-authorize-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 120; display: flex; align-items: center; justify-content: center; padding: 24px; background-color: rgba(33, 28, 24, 0.55); }
-    .email-authorize-dialog { width: 100%; max-width: 390px; padding: 24px; border-radius: 22px; background-color: #FFFFFF; box-shadow: 0 18px 50px rgba(48, 31, 20, 0.18); }
-    .email-authorize-title { color: #211C18; font-size: 19px; line-height: 27px; font-weight: bold; }
-    .email-authorize-note { margin-top: 7px; color: #7A6C60; font-size: 13px; line-height: 20px; }
-    .email-authorize-actions { display: flex; flex-direction: row; margin-top: 22px; }
-    .email-authorize-cancel { display: flex; flex: 1; height: 48px; margin: 0 10px 0 0; padding: 0; align-items: center; justify-content: center; border: 1px solid #EADDD1; border-radius: 12px; background-color: #FCF9F6; }
-    .email-authorize-cancel-text { color: #6B5F56; font-size: 14px; line-height: 20px; }
-    .email-authorize-confirm { flex: 1.35; margin: 0; }
+    .profile-field-line { display: flex; flex-direction: row; align-items: center; width: 100%; min-width: 0; }
+    .profile-field-value { flex: 1; min-width: 0; margin-top: 6px; }
+    .profile-field-edit { display: flex; flex-shrink: 0; min-height: 34px; margin: 0 0 0 10px; padding: 0 12px; align-items: center; justify-content: center; border-width: 1px; border-style: solid; border-color: #EADDD1; border-radius: 10px; background-color: #FCF9F6; }
+    .profile-field-edit-text { color: #C2410C; font-size: 12px; line-height: 18px; }
+    /* 输入区沿用账户表单颜色，固定触控高度，键盘提交复用同一保存/验证函数。 */
+    .profile-dialog-input { height: 46px; margin-top: 18px; padding: 0 12px; border-width: 1px; border-style: solid; border-color: #EADDD1; border-radius: 12px; background-color: #FCF9F6; font-size: 14px; color: #211C18; }
     .profile-initial { overflow: hidden; }
     /* #ifdef WEB */
-    .account-page .profile-card-header, .account-page .profile-email-line, .account-page .email-authorize-actions { flex-direction: row; }
-    .account-page .profile-email-value { overflow-wrap: anywhere; }
+    .account-page .profile-card-header, .account-page .profile-field-line { flex-direction: row; }
+    .account-page .profile-field-value { overflow-wrap: anywhere; }
     /* #endif */
 </style>

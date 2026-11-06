@@ -35,8 +35,12 @@ const vm = loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1], p => 
  assert.equal(global.savedAuthorization, 'a'.repeat(64));
  assert.deepEqual(navigation, [{ url: '/pages/account/email-change' }]);
  assert.equal(vm.emailAuthorizationPassword, '');
- assert.ok(/class="email-edit-trigger(?: |")/.test(source));
- assert.ok(source.includes('class="email-authorize-dialog"'));
+ assert.ok(/class="profile-field-edit(?: |")/.test(source));
+ // 资料页两种输入均复用统一弹层，禁止在资料卡片中展开表单。
+ assert.ok(source.includes('<confirm-dialog v-if="editing"'));
+ assert.ok(source.includes('<confirm-dialog v-if="emailAuthorizationVisible"'));
+ assert.ok(!source.includes('<view v-if="editing"'));
+ assert.ok(!source.includes('class="email-authorize-dialog"'));
  assert.ok(!source.includes('startEmailChange'));
 
  const api = fs.readFileSync('api/wallet.uts', 'utf8');
