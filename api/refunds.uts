@@ -1,0 +1,44 @@
+import { httpGet, httpPost, HttpResult } from '../common/http.uts'
+import { jsonArray, jsonBoolean, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
+/** 学生售后契约；金额是服务端实付分摊结果，前端只传订单项及数量。 */
+export type Refund = { refundId: number, refundNo: string, requestKey: string, itemId: number, productName: string, quantity: number, amount: number, status: string, reason: string, decisionReason: string, createdAt: string, dueAt: string }
+export type RefundPage = { items: Array<Refund>, nextCursor: string, hasMore: boolean }
+export function applyRefund(orderId: number, itemId: number, quantity: number, reason: string, key: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { itemId: itemId, quantity: quantity, reason: reason }
+    return httpPost('/orders/' + orderId + '/refunds', body, true, key)
+}
+export function fetchRefunds(orderId: number, cursor: string = ''): Promise<HttpResult> {
+    return httpGet('/orders/' + orderId + '/refunds' + (cursor.length > 0 ? '?cursor=' + encodeURIComponent(cursor) : ''), true)
+}
+export function appealRefund(orderId: number, id: number): Promise<HttpResult> { return httpPost('/orders/' + orderId + '/refunds/' + id + '/appeal', null, true) }
+export function withdrawRefund(orderId: number, id: number): Promise<HttpResult> { return httpPost('/orders/' + orderId + '/refunds/' + id + '/withdraw', null, true) }
+export function refundPayload(result: HttpResult): UTSJSONObject | null { return result.ok && result.data != null ? jsonObject(result.data, 'data') : null }
+/** 未知状态、负金额或非整数数量拒绝展示为成功，避免退款页面误报到账。 */
+export function parseRefund(raw: UTSJSONObject): Refund | null {
+    const id = jsonNumber(raw, 'refundId') ?? 0; const item = jsonNumber(raw, 'itemId') ?? 0
+    const qty = jsonNumber(raw, 'quantity') ?? 0; const amount = jsonNumber(raw, 'amount') ?? -1
+    const status = jsonString(raw, 'status') ?? ''; const no = jsonString(raw, 'refundNo') ?? ''
+    if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(item) || item <= 0 || !Number.isSafeInteger(qty) || qty <= 0 || !Number.isFinite(amount) || amount <= 0 || !/^[a-f0-9]{32}$/.test(no) || !['PENDING', 'REJECTED', 'APPEALED', 'APPROVED', 'PROCESSING', 'SUCCESS', 'CLOSED'].includes(status)) return null
+    return { refundId: id, refundNo: no, requestKey: jsonString(raw, 'requestKey') ?? '', itemId: item, quantity: qty, amount: amount, status: status,
+        productName: jsonString(raw, 'productName') ?? '菜品', reason: jsonString(raw, 'reason') ?? '', decisionReason: jsonString(raw, 'decisionReason') ?? '', createdAt: jsonString(raw, 'createdAt') ?? '', dueAt: jsonString(raw, 'dueAt') ?? '' }
+}
+/** 与订单分页相同的有界游标契约；坏记录导致整页失败，不推进游标或丢掉旧记录。 */
+export function parseRefundPage(raw: UTSJSONObject): RefundPage | null {
+    const rows = jsonArray(raw, 'items'); const more = jsonBoolean(raw, 'hasMore'); const cursor = jsonString(raw, 'nextCursor') ?? ''
+    if (rows == null || rows.length > 20 || more == null) return null
+    const items = [] as Array<Refund>
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) return null
+        const item = parseRefund(rows[i] as UTSJSONObject); if (item == null) return null; items.push(item)
+    }
+    if (more && (items.length == 0 || cursor != items[items.length - 1].refundId.toString())) return null
+    return { items: items, nextCursor: cursor, hasMore: more }
+}
+export function refundStatusLabel(value: string): string {
+    if (value == 'PENDING') return '等待商家处理'
+    if (value == 'REJECTED') return '商家未同意'
+    if (value == 'APPEALED') return '经理介入中'
+    if (value == 'APPROVED' || value == 'PROCESSING') return '退款处理中'
+    if (value == 'SUCCESS') return '退款已完成'
+    return '申请已关闭'
+}

@@ -1,0 +1,185 @@
+<template>
+    <view class="account-page account-secondary">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav"><view class="account-back vapor-account-secondary--account-back" @click="goBack"><view class="account-back-icon"></view></view><text class="account-title">退款与售后</text></view>
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!submitting && !loading && !loadingMore" :refresher-triggered="refreshing" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72" refresher-background="#FDF6F0" @scrolltolower="loadMore" :lower-threshold="80">
+            <view class="account-content vapor-account-secondary--account-content">
+                <view v-if="order != null" class="refund-intro"><text class="refund-shop">{{ order!.windowName }}</text><text class="account-note">{{ order!.status == '已支付' ? '商家尚未接单，申请后由平台直接退款并回补库存。' : '按实际购买数量申请，其他菜品正常履约。' }}</text><text class="account-note">完成后72小时内可申请；商家72小时未处理将自动退款。</text></view>
+                <view v-if="canApply" class="account-card vapor-account-secondary--account-card">
+                    <text class="account-heading">选择退款菜品</text>
+                    <view v-for="item in order!.items" :key="item.itemId" class="refund-item" :class="selectedId == item.itemId ? 'refund-item-selected' : ''" @click="selectItem(item)">
+                        <view class="refund-item-copy"><text class="refund-item-name">{{ item.productName }}</text><text class="account-note">可申请 {{ item.refundableQuantity }} 份 · 已退 {{ item.refundedQuantity }} 份</text></view><text class="refund-select">{{ selectedId == item.itemId ? '已选' : '选择' }}</text>
+                    </view>
+                    <view v-if="selectedId > 0" class="refund-quantity"><text class="account-label">退款数量</text><button class="refund-step button-text button-text-44" :disabled="pending || submitting || quantity <= 1" @click="changeQuantity(-1)">−</button><text class="refund-number">{{ quantity }}</text><button class="refund-step button-text button-text-44" :disabled="pending || submitting || quantity >= selectedMaximum" @click="changeQuantity(1)">+</button></view>
+                    <textarea v-model="reason" class="refund-reason" placeholder="请说明需要退款的原因" :maxlength="500" :disabled="pending || submitting"></textarea>
+                    <text v-if="pending" class="account-note">上次申请结果待确认，请使用原申请重试。</text>
+                    <button class="account-primary vapor-account-secondary--account-primary button-text button-text-50" :disabled="loading || submitting" @click="askApply">{{ pending ? '重试原申请' : '申请退款' }}</button>
+                    <text class="account-note">退款金额由系统按实际支付金额计算，退回账户余额。</text>
+                </view>
+                <text class="refund-section-title">处理记录</text>
+                <view v-for="row in records" :key="row.refundNo" class="account-card vapor-account-secondary--account-card refund-record">
+                    <view class="refund-record-head"><text class="refund-item-name">{{ row.productName }} × {{ row.quantity }}</text><text class="refund-state">{{ refundStatusLabel(row.status) }}</text></view>
+                    <text class="refund-amount">¥{{ row.amount.toFixed(2) }}</text><text class="account-note">{{ row.reason }}</text>
+                    <text v-if="row.decisionReason.length > 0" class="account-note">{{ row.decisionReason }}</text>
+                    <text class="account-note">{{ formatTime(row.createdAt) }}</text>
+                    <text v-if="row.status == 'PENDING'" class="account-note">处理截止 {{ formatTime(row.dueAt) }}</text>
+                    <view v-if="row.status == 'REJECTED' || row.status == 'PENDING' || row.status == 'APPEALED'" class="refund-actions">
+                        <button v-if="row.status == 'REJECTED'" class="refund-action button-text button-text-44" :disabled="submitting || loading" @click="askAction('appeal', row.refundId)">申请经理介入</button>
+                        <button class="refund-action refund-action-muted button-text button-text-44" :disabled="submitting || loading" @click="askAction('withdraw', row.refundId)">撤回申请</button>
+                    </view>
+                </view>
+                <text v-if="loading || loadingMore" class="account-note">正在获取售后记录…</text>
+                <text v-else-if="records.length == 0" class="account-note">暂无退款申请</text>
+                <text v-else-if="!hasMore" class="account-note">已显示全部记录</text>
+                <text v-if="loadError.length > 0" class="account-error">{{ loadError }}</text>
+            </view>
+            <view slot="refresher" class="native-refresh-slot"><refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header></view>
+        </scroll-view>
+        <confirm-dialog v-if="confirmMode.length > 0" :title="confirmMode == 'apply' ? '确认申请退款？' : (confirmMode == 'appeal' ? '申请经理介入？' : '撤回退款申请？')" :message="confirmMessage" confirm-text="确认" cancel-text="再想想" :busy="submitting" @cancel="closeConfirm" @confirm="confirmAction" />
+    </view>
+</template>
+<script setup lang="uts">
+import { reactive, toRefs, computed } from 'vue'
+import ConfirmDialog from '../../components/confirm-dialog/confirm-dialog.uvue'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+import { currentUser } from '../../store/auth.uts'
+import { toast } from '../../common/feedback.uts'
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
+import { accountDate } from '../../common/account.uts'
+import { jsonNumber, jsonString, parseJsonObject } from '../../common/json.uts'
+import { startOrderLiveRefresh } from '../../common/order-live.uts'
+import { CustomerOrder, OrderLine, fetchOrder, orderPayload, parseOrder } from '../../api/order.uts'
+import { Refund, applyRefund, fetchRefunds, appealRefund, withdrawRefund, parseRefund, parseRefundPage, refundPayload, refundStatusLabel } from '../../api/refunds.uts'
+
+/** 独立学生售后页，不提供商家审批；订单数量是服务端快照，不能在客户端修改成交金额。 */
+const state = reactive({ statusBarHeight: 0, orderId: 0, owner: '', order: null as CustomerOrder | null, records: [] as Array<Refund>,
+    selectedId: 0, quantity: 1, reason: '', requestKey: '', pending: false, submitting: false, loading: false, loadingMore: false,
+    nextCursor: '', hasMore: false, historyExpanded: false, refreshing: false, currentRefreshTime: '', loadError: '', confirmMode: '', actionId: 0 })
+const { statusBarHeight, order, records, selectedId, quantity, reason, pending, submitting, loading, loadingMore, hasMore, refreshing, currentRefreshTime, loadError, confirmMode } = toRefs(state)
+const canApply = computed((): boolean => state.order != null && ['已支付', '制作中', '待取货', '已完成'].includes(state.order!.status))
+const selectedMaximum = computed((): number => state.order?.items.find((item: OrderLine): boolean => item.itemId == state.selectedId)?.refundableQuantity ?? 0)
+const confirmMessage = computed((): string => state.confirmMode == 'apply' ? '本次申请 ' + state.quantity + ' 份，金额按实付计算。未接单的菜品将直接退款。' : (state.confirmMode == 'appeal' ? '将交由有权限的食堂经理或总经理处理。' : '撤回后释放本次申请数量；已批准的退款不能撤回。'))
+let visible = false; let version = 0; let stopLive: (() => void) | null = null
+function valid(v: number, owner: string): boolean { return visible && version == v && state.owner == owner && currentUser()?.userUuid == owner }
+function draftKey(): string { return 'refund-draft:' + state.owner + ':' + state.orderId }
+function clearDraft() { state.pending = false; state.requestKey = ''; try { uni.removeStorageSync(draftKey()) } catch (_) {} }
+/** 不确定结果保留同一申请内容及幂等键；草稿按用户UUID和订单隔离，不保存任何密码或令牌。 */
+function restoreDraft() {
+    try {
+        const raw = uni.getStorageSync(draftKey()); if (typeof raw != 'string' || (raw as string).length == 0) return
+        const data = parseJsonObject(raw as string); if (data == null) return
+        const key = jsonString(data, 'key') ?? ''; const id = jsonNumber(data, 'itemId') ?? 0; const qty = jsonNumber(data, 'quantity') ?? 0; const text = jsonString(data, 'reason') ?? ''
+        if (/^[A-Za-z0-9_-]{8,64}$/.test(key) && Number.isSafeInteger(id) && id > 0 && Number.isSafeInteger(qty) && qty > 0 && text.trim().length > 0 && text.length <= 500) {
+            state.requestKey = key; state.selectedId = id; state.quantity = qty; state.reason = text; state.pending = true
+        }
+    } catch (_) { toast('上次申请信息无法读取，请先查看退款记录') }
+}
+function selectItem(item: OrderLine) { if (state.pending || state.submitting) return; if (item.itemId <= 0 || item.refundableQuantity <= 0) { toast('该菜品暂无可申请数量'); return }; state.selectedId = item.itemId; state.quantity = 1 }
+function changeQuantity(delta: number) { if (state.pending || state.submitting) return; state.quantity = Math.max(1, Math.min(selectedMaximum.value, state.quantity + delta)) }
+function askApply() {
+    if (state.loading || state.submitting) return
+    if (!state.pending && (state.selectedId <= 0 || state.quantity > selectedMaximum.value || state.quantity <= 0)) { toast('请选择可退款的菜品及数量'); return }
+    if (state.reason.trim().length == 0) { toast('请填写申请原因'); return }
+    state.confirmMode = 'apply'
+}
+function askAction(mode: string, id: number) { if (state.loading || state.submitting) return; state.actionId = id; state.confirmMode = mode }
+function closeConfirm() { if (!state.submitting) state.confirmMode = '' }
+function formatTime(value: string): string { return accountDate(value) }
+function goBack() { if (!state.submitting) uni.navigateBack() }
+
+/** 刷新失败保留现有记录；每次头部查询递增版本，使旧筛选/账号/离页响应全部失效。 */
+async function load(): Promise<void> {
+    if (!visible || state.loading || state.submitting) return
+    const v = ++version; const owner = state.owner; state.loading = true; state.loadingMore = false; state.loadError = ''
+    try {
+        const results = await Promise.all([fetchOrder(state.orderId), fetchRefunds(state.orderId)])
+        if (!valid(v, owner)) return
+        const orderData = orderPayload(results[0]); const historyData = refundPayload(results[1])
+        const next = orderData == null ? null : parseOrder(orderData); const page = historyData == null ? null : parseRefundPage(historyData)
+        if (next == null || page == null) { state.loadError = results[0].message || results[1].message || '售后记录暂不可用，请下拉重试'; toast(state.loadError); return }
+        state.order = next; state.records = page.items; state.nextCursor = page.nextCursor; state.hasMore = page.hasMore; state.historyExpanded = false
+        if (state.pending && state.records.some((r: Refund): boolean => r.requestKey == state.requestKey)) { clearDraft(); state.selectedId = 0; state.quantity = 1; state.reason = '' }
+    } catch (_) { if (valid(v, owner)) { state.loadError = '售后记录暂不可用，请下拉重试'; toast(state.loadError) } }
+    finally { if (valid(v, owner)) state.loading = false }
+}
+/** 到底只追加下一页，同一游标不并发请求；失败保留游标，可再次上滑重试。 */
+async function loadMore(): Promise<void> {
+    if (!visible || state.loading || state.loadingMore || state.submitting || !state.hasMore || state.nextCursor.length == 0) return
+    const v = version; const owner = state.owner; const cursor = state.nextCursor; state.loadingMore = true
+    try {
+        const result = await fetchRefunds(state.orderId, cursor); if (!valid(v, owner)) return
+        const data = refundPayload(result); const page = data == null ? null : parseRefundPage(data)
+        if (page == null || (page.hasMore && page.nextCursor == cursor)) { toast(result.message || '记录加载失败，请重试'); return }
+        const merged = state.records.slice(); for (let i = 0; i < page.items.length; i++) { const row = page.items[i]; if (!merged.some((r: Refund): boolean => r.refundId == row.refundId)) merged.push(row) }
+        state.records = merged; state.nextCursor = page.nextCursor; state.hasMore = page.hasMore; state.historyExpanded = true
+    } catch (_) { if (valid(v, owner)) toast('记录加载失败，请重试') }
+    finally { if (valid(v, owner)) state.loadingMore = false }
+}
+async function confirmAction(): Promise<void> {
+    if (state.submitting || state.confirmMode.length == 0) return
+    const mode = state.confirmMode; const v = version; const owner = state.owner
+    if (mode == 'apply' && !state.pending) {
+        state.requestKey = 'refund-' + Date.now() + '-' + Math.floor(Math.random() * 1000000000)
+        try { const draft: UTSJSONObject = { key: state.requestKey, itemId: state.selectedId, quantity: state.quantity, reason: state.reason.trim() }; uni.setStorageSync(draftKey(), JSON.stringify(draft)); state.pending = true }
+        catch (_) { toast('无法保存申请信息，请重试'); return }
+    }
+    state.submitting = true
+    try {
+        const result = mode == 'apply' ? await applyRefund(state.orderId, state.selectedId, state.quantity, state.reason.trim(), state.requestKey)
+            : mode == 'appeal' ? await appealRefund(state.orderId, state.actionId) : await withdrawRefund(state.orderId, state.actionId)
+        if (!valid(v, owner)) return
+        const data = refundPayload(result); const row = data == null ? null : parseRefund(data)
+        if (row == null) {
+            // 408等超时响应仍可能已受理，必须保留原编号；仅明确拒绝才释放草稿。
+            if (mode == 'apply' && [400, 401, 403, 404, 409, 422].includes(result.statusCode)) clearDraft()
+            toast(result.message || '结果待确认，请重试同一申请'); return
+        }
+        if (mode == 'apply') { clearDraft(); state.selectedId = 0; state.reason = ''; state.quantity = 1 }
+        state.confirmMode = ''; toast(mode == 'apply' ? (row.status == 'PENDING' ? '已提交，等待商家处理' : '已提交，退款处理中') : '处理成功')
+    } catch (_) { if (valid(v, owner)) toast('结果待确认，请重试同一申请') }
+    finally { if (valid(v, owner)) { state.submitting = false; if (state.confirmMode.length == 0) await load() } }
+}
+function refreshPage() {
+    if (state.refreshing || state.submitting || state.loading || state.loadingMore) return
+    state.refreshing = true; state.currentRefreshTime = refreshTimeLabel(); const start = Date.now()
+    load().finally(() => { finishPullRefresh(start, state.loadError.length == 0, (_time: string) => { state.refreshing = false }) })
+}
+onLoad((options: OnLoadOptions) => { state.orderId = Number(options['orderId'] ?? '0') })
+onPageShow(() => {
+    visible = true; const user = currentUser()
+    if (user == null || user.roleCode != 'CUSTOMER') { uni.reLaunch({ url: '/pages/login/login' }); return }
+    if (!Number.isSafeInteger(state.orderId) || state.orderId <= 0) { toast('订单编号无效'); return }
+    if (state.owner != user.userUuid) { state.records = []; state.order = null; state.pending = false; state.requestKey = ''; state.selectedId = 0; state.reason = ''; state.quantity = 1 }
+    state.owner = user.userUuid; state.statusBarHeight = uni.getWindowInfo().statusBarHeight; restoreDraft(); load()
+    if (stopLive != null) stopLive!()
+    // 阅读历史页时不因推送截断历史；返回页面或主动下拉会重新同步最新记录。
+    stopLive = startOrderLiveRefresh((): Promise<void> => state.historyExpanded ? Promise.resolve() : load(), (): boolean => state.loading || state.loadingMore || state.submitting || state.refreshing || state.confirmMode.length > 0)
+})
+function leave() { visible = false; version++; if (stopLive != null) stopLive!(); stopLive = null; state.loading = false; state.loadingMore = false; state.submitting = false; state.confirmMode = '' }
+onPageHide(() => { leave() })
+onUnload(() => { leave() })
+</script>
+<style>
+@import '../../styles/account.css';
+</style>
+<style scoped>
+.refund-intro { margin-bottom: 12px; }
+.refund-shop { font-size: 18px; font-weight: bold; color: #211C18; }
+.refund-item { flex-direction: row; align-items: center; padding: 10px 8px; margin-top: 6px; border-radius: 10px; background-color: #FCF9F6; }
+.refund-item-selected { background-color: #FBE3D5; }
+.refund-item-copy { flex: 1; }
+.refund-item-name { font-size: 14px; color: #211C18; }
+.refund-select { font-size: 12px; color: #C2410C; margin-left: 8px; }
+.refund-quantity { flex-direction: row; align-items: center; margin-top: 8px; }
+.refund-step { width: 44px; height: 44px; padding: 0; margin: 0; background-color: #FCF9F6; color: #C2410C; border-radius: 10px; }
+.refund-number { width: 36px; text-align: center; font-size: 15px; }
+.refund-reason { width: 100%; height: 76px; padding: 10px; margin-top: 12px; border-radius: 10px; background-color: #FCF9F6; font-size: 14px; color: #211C18; }
+.refund-section-title { font-size: 15px; font-weight: bold; margin-bottom: 10px; color: #211C18; }
+.refund-record { margin-bottom: 10px; }
+.refund-record-head { flex-direction: row; justify-content: space-between; align-items: center; }
+.refund-state { font-size: 12px; color: #C2410C; margin-left: 8px; }
+.refund-amount { font-size: 20px; font-weight: bold; margin-top: 6px; color: #211C18; }
+.refund-actions { flex-direction: row; justify-content: flex-end; margin-top: 4px; }
+.refund-action { height: 44px; padding: 0 10px; margin: 0; color: #C2410C; font-size: 13px; background-color: #FFFFFF; }
+.refund-action-muted { color: #7A6C60; }
+</style>
