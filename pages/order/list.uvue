@@ -6,10 +6,14 @@
                 <view class="account-back-icon"></view>
             </view>
             <text class="account-title">{{ pageTitle }}</text></view>
+        <!-- 筛选标签直接使用原生view/text，避免button回退组件转发动态class后高亮丢失。
+             标题、查询、背景及文字仍共用selectedStatus；原生文字颜色显式设置，不依赖继承。 -->
         <view class="order-filter-bar">
-            <button v-for="tab in filterTabs" :key="tab.code" class="order-filter order-filter-text button-text button-text-42" :class="[selectedStatus == tab.code ? 'order-filter-on' : '', (selectedStatus == tab.code ? 'vapor-order-filter-on--order-filter-text' : '')]" @click="selectFilter(tab.code)">{{ tab.label }}</button>
+            <view v-for="tab in filterTabs" :key="tab.code" class="order-filter" :class="selectedStatus == tab.code ? 'order-filter-selected' : 'order-filter-idle'" @click="selectFilter(tab.code)">
+                <text class="order-filter-label" :class="selectedStatus == tab.code ? 'order-filter-label-selected' : 'order-filter-label-idle'">{{ tab.label }}</text>
+            </view>
         </view>
-        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @scrolltolower="loadMore" @scroll="listScrolled" :lower-threshold="80" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
 <view class="account-content vapor-account-secondary--account-content">
             <view class="account-banner"><view class="banner-copy"><text class="banner-kicker">校园食堂 · 用餐记录</text><text class="banner-title">这一餐，进行到哪了</text><text class="banner-note">查看订单进度，继续支付或到窗口取餐。</text></view></view>
                 <view v-if="pendingWindowId > 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">有一笔提交结果待确认</text><text class="account-note">继续确认原订单，避免重复下单。</text>
@@ -25,7 +29,9 @@
                 <view v-if="!loading && visibleOrders.length == 0 && errorText.length == 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">{{ selectedStatus == 'all' ? '还没有订单' : '暂无该状态的订单' }}</text><text class="account-note">去食堂挑选喜欢的菜品，开启下一餐。</text>
                     <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="goHome">去点餐</button>
                 </view>
-            <text v-if="loading" class="account-note">正在获取订单…</text><text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
+            <text v-if="loading" class="account-note">正在获取订单…</text>
+            <text v-if="loadingMore" class="order-page-hint">正在加载更多…</text>
+            <text v-if="!loading && !loadingMore && !hasMore && orders.length > 0 && errorText.length == 0" class="order-page-hint">已显示全部订单</text><text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
             </view>
     <view slot="refresher" class="native-refresh-slot">
                 <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
@@ -40,9 +46,8 @@ import { orderPaymentDeadline, orderPaymentTimeLabel } from '../../common/order-
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { normalizeOrderStatusFilter } from '../../common/order-navigation.uts';
-import { CustomerOrder, fetchOrders, parseOrder } from '../../api/order.uts';
-import { jsonArray } from '../../common/json.uts';
-import { HttpResult } from '../../common/http.uts';
+import { CustomerOrder, fetchOrders, parseOrderPage } from '../../api/order.uts';
+import { toast } from '../../common/feedback.uts';
 import { currentUser } from '../../store/auth.uts';
 import { readCheckout } from '../../common/checkout.uts';
 import { accountDate, backToAccount } from '../../common/account.uts';
@@ -57,9 +62,9 @@ let stopLiveOrders: (() => void) | null = null
 function stopOrderUpdates() {
     if (stopLiveOrders != null) { stopLiveOrders!(); stopLiveOrders = null }
 }
-const state = reactive({ clockNow: Date.now(), receivedAt: Date.now(), refreshing: false, currentRefreshTime: '', selectedStatus: 'all', filterTabs: initialFilterTabs, statusBarHeight: 0, orders: initialOrders, loading: false, errorText: '', pendingWindowId: 0 })
+const state = reactive({ clockNow: Date.now(), receivedAt: Date.now(), serverClockOffset: 0, userUuid: '', nextCursor: '', hasMore: false, loadingMore: false, refreshing: false, currentRefreshTime: '', selectedStatus: 'all', filterTabs: initialFilterTabs, statusBarHeight: 0, orders: initialOrders, loading: false, errorText: '', pendingWindowId: 0 })
 
-const { refreshing, currentRefreshTime, selectedStatus, filterTabs, statusBarHeight, orders, loading, errorText, pendingWindowId } = toRefs(state)
+const { loadingMore, hasMore, refreshing, currentRefreshTime, selectedStatus, filterTabs, statusBarHeight, orders, loading, errorText, pendingWindowId } = toRefs(state)
 
 const pageTitle = computed((): string => {
     if (state.selectedStatus == 'pending')
@@ -73,23 +78,15 @@ const pageTitle = computed((): string => {
     return '全部订单';
 })
 
-const visibleOrders = computed((): Array<CustomerOrder> => {
-    if (state.selectedStatus == 'all')
-        return state.orders;
-    return state.orders.filter((item: CustomerOrder): boolean => {
-        if (state.selectedStatus == 'pending')
-            return item.status == '待支付';
-        if (state.selectedStatus == 'completed')
-            return item.status == '已完成';
-        if (state.selectedStatus == 'cancelled')
-            return item.status == '已取消';
-        return item.status == '已支付' || item.status == '制作中' || item.status == '待取货';
-    });
-})
+// 数据已由后端筛选；不在本页再次筛掉记录，避免对一页子集做筛选导致“后面还有但首屏为空”。
+const visibleOrders = computed((): Array<CustomerOrder> => state.orders)
 
 let countdownTimer = 0
 let listVisible = false
 let loadVersion = 0
+// 阅读历史时不让后台通知重置分页；用户回到顶部后再合并处理一次延迟刷新。
+let atListTop = true
+let awaitingLiveRefresh = false
 function stopCountdown() { if (countdownTimer > 0) { clearInterval(countdownTimer); countdownTimer = 0 } }
 function startCountdown() {
     stopCountdown(); state.clockNow = Date.now()
@@ -100,13 +97,14 @@ function startCountdown() {
 function paymentTime(item: CustomerOrder): string {
     const deadline = orderPaymentDeadline(item.createdAt)
     if (deadline <= 0) return '--:--'
-    const now = item.serverTime > 0 ? item.serverTime + Math.max(0, state.clockNow - state.receivedAt) : state.clockNow
+    // 用当前服务端时钟偏移统一计时，追加新页不能把旧页订单的倒计时重新起算。
+    const now = state.clockNow + state.serverClockOffset
     const seconds = Math.max(0, Math.ceil((deadline - now) / 1000))
     return seconds == 0 ? '已超时，等待系统确认' : orderPaymentTimeLabel(seconds)
 }
 
 function refreshPage() {
-    if (state.refreshing || state.loading)
+    if (state.refreshing || state.loading || state.loadingMore)
         return;
     state.refreshing = true;
     const refreshStartedAt = Date.now();
@@ -122,8 +120,16 @@ function refreshPage() {
     });
 }
 
+/** 切换状态立即作废旧请求、清空旧筛选和游标；onLoad只设状态，页面显示后才请求。 */
 function selectFilter(value: string) {
-    state.selectedStatus = normalizeOrderStatusFilter(value);
+    const status = normalizeOrderStatusFilter(value)
+    if (status == state.selectedStatus) return
+    loadVersion++
+    state.selectedStatus = status
+    state.orders = []; state.nextCursor = ''; state.hasMore = false
+    state.loading = false; state.loadingMore = false; state.errorText = ''
+    stopCountdown(); atListTop = true; awaitingLiveRefresh = false
+    if (listVisible) load()
 }
 
 function goBack() {
@@ -146,38 +152,85 @@ function resume() {
     uni.navigateTo({ url: '/pages/order/confirm?windowId=' + state.pendingWindowId });
 }
 
-function load(): Promise<void> {
-    if (state.loading)
-        return Promise.resolve();
-    const version = ++loadVersion;
-    state.loading = true;
-    state.errorText = '';
-    return fetchOrders().then((result: HttpResult) => {
-        if (!listVisible || version != loadVersion) return;
-        state.loading = false;
-        const rows = result.ok && result.data != null ? jsonArray(result.data, 'data') : null;
-        if (rows == null) {
-            state.errorText = result.message.length > 0 ? result.message : '订单列表格式异常';
-            return;
+/** 判断异步响应是否仍属于当前页面、账号及筛选；离页和切换筛选均递增代次。 */
+function accepts(version: number, owner: string, status: string): boolean {
+    return listVisible && version == loadVersion && currentUser()?.userUuid == owner && state.userUuid == owner && state.selectedStatus == status
+}
+
+/** 用本次有界响应校准时钟；只更新统一偏移，不改写每笔订单真实创建时间。 */
+function updateClock(rows: Array<CustomerOrder>): void {
+    state.receivedAt = Date.now()
+    const sample = rows.find((item: CustomerOrder): boolean => item.serverTime > 0)
+    if (sample != null) state.serverClockOffset = sample.serverTime - state.receivedAt
+    startCountdown()
+}
+
+/**
+ * 首屏、下拉及实时变更读取当前筛选最新一页。成功才替换旧记录和游标；失败保留已加载列表供继续查看。
+ * 新的首屏查询会使仍在途的追加页失效，旧追加响应不能重新混入刷新后的列表。
+ */
+async function load(): Promise<void> {
+    if (!listVisible || state.loading) return
+    const version = ++loadVersion
+    awaitingLiveRefresh = false
+    const owner = state.userUuid; const status = state.selectedStatus
+    state.loading = true; state.loadingMore = false; state.errorText = ''
+    try {
+        const result = await fetchOrders(status)
+        if (!accepts(version, owner, status)) return
+        const page = parseOrderPage(result)
+        if (page == null) {
+            state.errorText = result.message.length > 0 ? result.message : '订单暂时无法获取，请下拉重试'
+            toast(state.errorText); return
         }
-        const orders: Array<CustomerOrder> = [];
-        for (let i = 0; i < rows.length; i++) {
-            if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) {
-                state.errorText = '订单数据异常';
-                return;
-            }
-            const order = parseOrder(rows[i] as UTSJSONObject);
-            if (order == null) {
-                state.errorText = '订单数据异常';
-                return;
-            }
-            orders.push(order);
+        state.orders = page.items; state.nextCursor = page.nextCursor; state.hasMore = page.hasMore
+        updateClock(page.items)
+    } catch (_error) {
+        if (accepts(version, owner, status)) { state.errorText = '订单暂时无法获取，请下拉重试'; toast(state.errorText) }
+    } finally { if (version == loadVersion) state.loading = false }
+}
+
+/**
+ * 到底加载更早订单。请求串行、失败不推进游标；重复订单按ID合并，同一游标不前进时拒绝该页。
+ * 当前列表只保存用户实际打开的页，不发全量请求；刷新和筛选切换重新从首屏开始。
+ */
+async function loadMore(): Promise<void> {
+    if (!listVisible || state.loading || state.loadingMore || state.refreshing || !state.hasMore || state.nextCursor.length == 0) return
+    const version = loadVersion; const owner = state.userUuid; const status = state.selectedStatus; const cursor = state.nextCursor
+    state.loadingMore = true; state.errorText = ''; atListTop = false
+    try {
+        const result = await fetchOrders(status, cursor)
+        if (!accepts(version, owner, status)) return
+        const page = parseOrderPage(result)
+        if (page == null || (page.hasMore && page.nextCursor == cursor)) {
+            toast(result.message.length > 0 ? result.message : '加载失败，请再次上滑重试'); return
         }
-        orders.sort((a: CustomerOrder, b: CustomerOrder): number => b.orderId - a.orderId);
-        state.orders = orders;
-        state.receivedAt = Date.now();
-        startCountdown();
-    });
+        const merged = state.orders.slice()
+        for (let i = 0; i < page.items.length; i++) {
+            const item = page.items[i]
+            const index = merged.findIndex((old: CustomerOrder): boolean => old.orderId == item.orderId)
+            if (index >= 0) merged[index] = item; else merged.push(item)
+        }
+        merged.sort((a: CustomerOrder, b: CustomerOrder): number => b.orderId - a.orderId)
+        state.orders = merged; state.nextCursor = page.nextCursor; state.hasMore = page.hasMore
+        updateClock(page.items)
+    } catch (_error) {
+        if (accepts(version, owner, status)) toast('加载失败，请再次上滑重试')
+    } finally { if (version == loadVersion) { state.loadingMore = false; resumeLiveRefresh() } }
+}
+
+/** 请求结束后也检查延迟刷新，覆盖用户在追加请求进行中已经返回顶部的情况。 */
+function resumeLiveRefresh(): void {
+    if (listVisible && atListTop && awaitingLiveRefresh && !state.loading && !state.loadingMore && !state.refreshing) {
+        awaitingLiveRefresh = false
+        load()
+    }
+}
+
+/** 记录阅读位置；回到顶部后消化一次后台变化，避免用户阅读较早订单时被自动跳回首屏。 */
+function listScrolled(event: UniScrollEvent): void {
+    atListTop = event.detail.scrollTop <= 12
+    resumeLiveRefresh()
 }
 
 onLoad((options: OnLoadOptions) => {
@@ -188,6 +241,7 @@ onLoad((options: OnLoadOptions) => {
 
 onPageShow(() => {
     stopOrderUpdates();
+    atListTop = true; awaitingLiveRefresh = false
     listVisible = true;
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     const user = currentUser();
@@ -199,19 +253,28 @@ onPageShow(() => {
         uni.switchTab({ url: '/pages/home/home' });
         return;
     }
+    // 账号变化先清除旧列表，即使新账号请求失败也不能继续展示上一位顾客的订单。
+    if (state.userUuid != user.userUuid) {
+        loadVersion++; state.userUuid = user.userUuid; state.orders = []
+        state.nextCursor = ''; state.hasMore = false; state.loading = false; state.loadingMore = false; state.serverClockOffset = 0
+    }
     const draft = readCheckout(user.userUuid);
     state.pendingWindowId = draft == null ? 0 : draft.windowId;
     load();
     const liveOwner = user.userUuid;
     stopLiveOrders = startOrderLiveRefresh((): Promise<void> => {
         if (!listVisible || currentUser()?.userUuid != liveOwner) return Promise.resolve();
+        // 读历史时保留页和游标；返回顶部或主动下拉后再刷新最新状态。
+        if (!atListTop) { awaitingLiveRefresh = true; return Promise.resolve() }
         return load();
-    }, (): boolean => state.loading || state.refreshing);
+    }, (): boolean => state.loading || state.loadingMore || state.refreshing);
 })
-onPageHide(() => { stopOrderUpdates(); listVisible = false; loadVersion++; state.loading = false; stopCountdown() })
-onUnload(() => { stopOrderUpdates(); listVisible = false; loadVersion++; state.loading = false; stopCountdown() })
+onPageHide(() => { stopOrderUpdates(); listVisible = false; awaitingLiveRefresh = false; loadVersion++; state.loading = false; state.loadingMore = false; stopCountdown() })
+onUnload(() => { stopOrderUpdates(); listVisible = false; awaitingLiveRefresh = false; loadVersion++; state.loading = false; state.loadingMore = false; stopCountdown() })
 </script>
 <style>
     @import '../../styles/account.css';
     @import '../../styles/order.css';
+    /* 分页反馈沿用订单辅助文字，不增加刷新按钮或压缩卡片触控区域。 */
+    .order-page-hint { padding: 12px 0; font-size: 12px; line-height: 18px; color: #8F8178; text-align: center; }
 </style>

@@ -1,7 +1,7 @@
 import { httpGet, httpPost, httpPatch, HttpResult } from '../common/http.uts'
-import { jsonObject, jsonArray, jsonNumber, jsonString } from '../common/json.uts'
+import { jsonObject, jsonArray, jsonNumber, jsonString, jsonBoolean } from '../common/json.uts'
 
-export type OrderLine = { productId: number, productName: string, quantity: number, unitPrice: number, lineAmount: number }
+export type OrderLine = { itemId: number, refundableQuantity: number, fulfillableQuantity: number, refundedQuantity: number, productId: number, productName: string, quantity: number, unitPrice: number, lineAmount: number }
 export type CustomerOrder = { orderId: number, orderNo: string, windowId: number, windowName: string, totalAmount: number, status: string, remark: string, pickupCode: string, createdAt: string, paymentExpiresAt: number, serverTime: number, items: Array<OrderLine> }
 
 export function orderPayload(result: HttpResult): UTSJSONObject | null {
@@ -26,7 +26,8 @@ export function parseOrder(data: UTSJSONObject): CustomerOrder | null {
             const unit = jsonNumber(raw, 'unitPrice')
             const line = jsonNumber(raw, 'lineAmount')
             if (productId <= 0 || quantity <= 0 || unit == null || line == null || unit < 0 || line < 0) return null
-            items.push({ productId: productId, productName: jsonString(raw, 'productName') ?? '菜品', quantity: quantity, unitPrice: unit, lineAmount: line })
+            items.push({ itemId: jsonNumber(raw, 'itemId') ?? 0, refundableQuantity: jsonNumber(raw, 'refundableQuantity') ?? 0,
+                fulfillableQuantity: jsonNumber(raw, 'fulfillableQuantity') ?? quantity, refundedQuantity: jsonNumber(raw, 'refundedQuantity') ?? 0, productId: productId, productName: jsonString(raw, 'productName') ?? '菜品', quantity: quantity, unitPrice: unit, lineAmount: line })
         }
     }
     return { orderId: id, orderNo: jsonString(data, 'orderNo') ?? '', windowId: windowId, windowName: jsonString(data, 'windowName') ?? '', totalAmount: amount, status: status,
@@ -34,7 +35,39 @@ export function parseOrder(data: UTSJSONObject): CustomerOrder | null {
 }
 
 export function createOrder(body: UTSJSONObject, key: string): Promise<HttpResult> { return httpPost('/orders', body, true, key) }
-export function fetchOrders(): Promise<HttpResult> { return httpGet('/orders/list', true) }
+/**
+ * 本人订单分页请求：筛选由后端执行，每次固定20条；仅发送服务端返回的游标，不自行递增页码。
+ * 首屏/刷新不传cursor，进行中由后端映射为已支付、制作中和待取货。
+ */
+export function fetchOrders(status: string = 'all', cursor: string = ''): Promise<HttpResult> {
+    return httpGet('/orders/list?status=' + encodeURIComponent(status) + '&limit=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : ''), true)
+}
+
+/** 一页订单摘要；nextCursor保留字符串形式，避免客户端计算或改变服务端分页边界。 */
+export type OrderPage = { items: Array<CustomerOrder>, nextCursor: string, hasMore: boolean }
+
+/**
+ * 严格解析有界分页信封，不再兼容旧全量数组，避免新页面误把旧响应当作已加载全部数据。
+ * 任意订单不完整或后续游标不指向本页末条时整页失败，不推进游标也不覆盖旧列表。
+ */
+export function parseOrderPage(result: HttpResult): OrderPage | null {
+    const data = orderPayload(result)
+    if (data == null) return null
+    const rows = jsonArray(data, 'items')
+    const more = jsonBoolean(data, 'hasMore')
+    const cursor = jsonString(data, 'nextCursor') ?? ''
+    if (rows == null || rows.length > 50 || more == null) return null
+    const items: Array<CustomerOrder> = []
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i]
+        if (row == null || typeof row != 'object' || Array.isArray(row)) return null
+        const order = parseOrder(row as UTSJSONObject)
+        if (order == null || !Number.isSafeInteger(order.orderId)) return null
+        items.push(order)
+    }
+    if (more && (items.length == 0 || !/^[1-9][0-9]*$/.test(cursor) || cursor != items[items.length - 1].orderId.toString())) return null
+    return { items: items, nextCursor: cursor, hasMore: more }
+}
 export function fetchOrder(id: number): Promise<HttpResult> { return httpGet('/orders/' + id, true) }
 /** 仅订单所属顾客可读取，取餐码不随普通订单查询返回。 */
 export function fetchPickupCode(id: number): Promise<HttpResult> { return httpGet('/orders/' + id + '/pickup-code', true) }

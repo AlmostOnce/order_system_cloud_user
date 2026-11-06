@@ -48,7 +48,8 @@ function advance(){const batch=[...timers.values()];timers.clear();for(const fn 
    if(p.includes('order-live'))return mod.exports;
    if(p.includes('store/auth'))return{currentUser:()=>({userUuid:owner,roleCode:'CUSTOMER'})};
    if(p.includes('api/order'))return{
-    fetchOrders:async()=>({ok:true,data:{data:[row()]}}),
+    fetchOrders:async()=>({ok:true,data:{items:[row()],hasMore:false,nextCursor:''}}),
+    parseOrderPage:result=>result.data,
     fetchOrder:()=>detailResolve?new Promise(r=>detailResolve=r):Promise.resolve({ok:true,data:row()}),
     parseOrder:data=>data,orderPayload:result=>result.data,
     fetchPickupCode:async()=>({ok:true,data:{pickupCode:'012345'}})

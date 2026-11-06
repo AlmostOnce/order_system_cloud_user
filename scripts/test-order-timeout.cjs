@@ -30,7 +30,7 @@ global.uni={getWindowInfo:()=>({statusBarHeight:0})};
 const pending={orderId:1,windowId:2,windowName:'食堂',status:'待支付',createdAt:'1970-01-01T08:16:40'};
 const listFactory=loadSetup(listSource.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1],p=>{
  if(p.includes('order-countdown'))return countdownModule.exports;
- if(p.includes('api/order'))return {fetchOrders:async()=>({ok:true,data:{data:[{...pending,serverTime:now}]}}),parseOrder:r=>r};
+ if(p.includes('api/order'))return {fetchOrders:async()=>({ok:true,data:{items:[{...pending,serverTime:now}],hasMore:false,nextCursor:''}}),parseOrderPage:r=>r.data};
  if(p.includes('common/json'))return {jsonArray:(r,k)=>r[k]};
  if(p.includes('store/auth'))return {currentUser:()=>({roleCode:'CUSTOMER',userUuid:'test'})};
  if (p.includes('common/order-live')) return {startOrderLiveRefresh:()=>()=>{}};

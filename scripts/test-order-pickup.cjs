@@ -9,7 +9,7 @@ function page(file) {
   if (path.includes('common/order-live')) return {startOrderLiveRefresh:()=>()=>{}};
   if (path.includes('api/comments')) return {fetchOrderReviews: () => Promise.resolve({}), commentPayload: () => null, parseOrderReviews: () => null};
   if (path.includes('api/order')) return {
-   fetchOrder: () => Promise.resolve({ ok: true, data: { orderId: 18, status, items: [] } }), parseOrder: data => data,
+   fetchOrder: () => Promise.resolve({ ok: true, data: { orderId: 18, status, items: [{quantity:1,fulfillableQuantity:1}] } }), parseOrder: data => data,
    fetchPickupCode: () => { calls++; return Promise.resolve({ ok: true, data: { pickupCode: '012345' } }); },
    orderPayload: result => result.ok ? result.data : null,
    verifyOrderPickup: (...args) => { verifyCalls.push(args); return new Promise(resolve => { resolveVerify = resolve; }); }
@@ -23,6 +23,7 @@ function page(file) {
 (async () => {
  const customer = page('pages/order/detail.uvue'); customer.orderId = 18;
  customer.$hooks.onPageShow(); await tick(); assert.equal(customer.pickupCode, '012345'); assert.equal(calls, 1);
+ customer.order.items[0].fulfillableQuantity=0;const oldCalls=calls;await customer.loadPickupCode();assert.equal(calls,oldCalls,'approved full refund cannot load an old code');assert.equal(customer.canPickup,false);
  customer.$hooks.onPageHide(); assert.equal(customer.pickupCode, '');
  await customer.loadPickupCode(); assert.equal(calls, 1);
  status = '已完成'; customer.$hooks.onPageShow(); await tick(); assert.equal(customer.pickupCode, ''); assert.equal(calls, 1);

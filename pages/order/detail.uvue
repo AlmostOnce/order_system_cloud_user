@@ -16,9 +16,9 @@
                     <text v-if="!paymentDeadlineKnown" class="order-status-note">下单时间暂不可用，请下拉刷新。</text>
                     <text v-else-if="paymentExpired" class="order-status-note">支付期限已到，正在等待系统确认订单状态。</text>
                 </view>
-                <text class="order-status-note">{{ order!.status == '待支付' ? (paymentSuccess ? '支付已成功，订单状态确认中' : (paymentExpired ? '订单状态以系统确认为准' : '请在下单后十五分钟内完成支付')) : (order!.status == '已取消' ? '订单已取消' : (order!.status == '已完成' ? '已凭取餐码核销，订单已完成' : '请留意订单进度，到窗口取餐')) }}</text>
+                <text class="order-status-note">{{ order!.status == '待支付' ? (paymentSuccess ? '支付已成功，订单状态确认中' : (paymentExpired ? '订单状态以系统确认为准' : '请在下单后十五分钟内完成支付')) : (order!.status == '已退款' ? '该订单已全部退款，无需取餐' : order!.status == '已取消' ? '订单已取消' : (order!.status == '已完成' ? '已凭取餐码核销，订单已完成' : '请留意订单进度，到窗口取餐')) }}</text>
             </view>
-            <view v-if="order != null && (order!.status == '已支付' || order!.status == '制作中' || order!.status == '待取货')" class="account-card vapor-account-secondary--account-card pickup-code-card">
+            <view v-if="canPickup" class="account-card vapor-account-secondary--account-card pickup-code-card">
                 <text class="pickup-code-label">取餐码</text>
                 <text v-if="pickupCode.length > 0" class="pickup-code-number">{{ pickupCode }}</text>
                 <text v-else class="account-note">{{ pickupLoading ? '正在获取取餐码…' : '取餐码暂不可用' }}</text>
@@ -28,7 +28,7 @@
             </view>
             <view v-if="order != null" class="account-card vapor-account-secondary--account-card">
                 <text class="account-heading">{{ order!.windowName.length > 0 ? order!.windowName : '店铺名称暂不可用' }}</text>
-                <view v-for="item in order!.items" :key="item.productId" class="order-line"><view class="order-line-copy"><text class="order-line-name">{{ item.productName }}</text><text class="account-muted">¥{{ item.unitPrice.toFixed(2) }} × {{ item.quantity }}</text></view><text class="order-line-price">¥{{ item.lineAmount.toFixed(2) }}</text></view>
+                <view v-for="item in order!.items" :key="item.productId" class="order-line"><view class="order-line-copy"><text class="order-line-name">{{ item.productName }}</text><text class="account-muted">¥{{ item.unitPrice.toFixed(2) }} × {{ item.quantity }}</text><text v-if="item.refundedQuantity > 0 || item.fulfillableQuantity < item.quantity" class="account-note">已退 {{ item.refundedQuantity }} 份 · 待履约 {{ item.fulfillableQuantity }} 份</text></view><text class="order-line-price">¥{{ item.lineAmount.toFixed(2) }}</text></view>
                 <view class="order-total"><text class="account-muted">订单金额</text><text class="order-total-price">¥{{ order!.totalAmount.toFixed(2) }}</text></view>
                 <text class="account-note">订单号 {{ order!.orderNo }}</text><text class="account-note">下单时间 {{ formatDate(order!.createdAt) }}</text>
                 <text v-if="order!.remark.length > 0" class="account-note">备注：{{ order!.remark }}</text>
@@ -46,6 +46,8 @@
             <text v-if="loading" class="account-note">正在获取订单…</text>
             <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
             <text v-if="cleanupMessage.length > 0" class="account-note">{{ cleanupMessage }}</text>
+                <button v-if="order != null && ['已支付', '制作中', '待取货', '已完成'].includes(order!.status)" class="account-primary vapor-account-secondary--account-primary button-text button-text-50" :disabled="contacting || loading" @click="contactMerchant">{{ contacting ? '正在进入…' : '联系商家' }}</button>
+                <button v-if="order != null && ['已支付', '制作中', '待取货', '已完成', '已退款'].includes(order!.status)" class="account-link account-link-text button-text button-text-44" :disabled="paying || cancelling || loading" @click="openRefunds">退款与售后</button>
                 <button class="account-link account-link-text button-text button-text-44" :disabled="paying || cancelling" @click="openOrders">查看我的订单</button>
             </view>
     <view slot="refresher" class="native-refresh-slot">
@@ -56,11 +58,12 @@
     </view>
 </template>
 <script setup lang="uts">
+import { createOrderChat, chatPayload, parseChatConversation } from '../../api/chat.uts'
 import ConfirmDialog from '../../components/confirm-dialog/confirm-dialog.uvue';
 import { requestPaymentPassword, cancelPaymentPassword } from '../../common/payment-password.uts'
 import { toast } from '../../common/feedback.uts'
 import { startOrderLiveRefresh } from '../../common/order-live.uts'
-import { reactive, toRefs } from 'vue'
+import { reactive, toRefs, computed } from 'vue'
 import { orderPaymentDeadline, orderPaymentTimeLabel } from '../../common/order-countdown.uts'
 import { Review, fetchOrderReviews, parseOrderReviews, commentPayload } from '../../api/comments.uts'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
@@ -80,9 +83,12 @@ let stopLiveOrders: (() => void) | null = null
 function stopOrderUpdates() {
     if (stopLiveOrders != null) { stopLiveOrders!(); stopLiveOrders = null }
 }
-const state = reactive({ paymentDeadlineKnown: false, paymentExpired: false, remainingPaymentText: '--:--', reviewStatusReady: false, orderReviewed: false, orderReviewComplete: false, pickupCode: '', pickupLoading: false, pickupError: '', refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
+const state = reactive({ contacting: false, paymentDeadlineKnown: false, paymentExpired: false, remainingPaymentText: '--:--', reviewStatusReady: false, orderReviewed: false, orderReviewComplete: false, pickupCode: '', pickupLoading: false, pickupError: '', refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
 
-const { paymentDeadlineKnown, paymentExpired, remainingPaymentText, reviewStatusReady, orderReviewed, orderReviewComplete, pickupCode, pickupLoading, pickupError, refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
+const { contacting, paymentDeadlineKnown, paymentExpired, remainingPaymentText, reviewStatusReady, orderReviewed, orderReviewComplete, pickupCode, pickupLoading, pickupError, refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
+/** 已批准退款的份数不再履约，全部获批时隐藏旧取餐码，最终权限仍由后端核销条件保证。 */
+const canPickup = computed((): boolean => state.order != null && ['已支付', '制作中', '待取货'].includes(state.order!.status) && state.order!.items.some((item: OrderLine): boolean => item.fulfillableQuantity > 0))
+
 
 let paymentClock = 0
 let deadlineChecked = false
@@ -154,6 +160,9 @@ function reviewWindow() {
     uni.navigateTo({ url: '/pages/review/create?orderId=' + state.orderId });
 }
 
+/** 售后独立页面，避免在小屏订单详情堆叠申请表单；只传订单号，归属由后端确认。 */
+function openRefunds() { if (state.order == null || state.loading || state.paying || state.cancelling) return; uni.navigateTo({ url: '/pages/order/refunds?orderId=' + state.orderId }) }
+
 function openOrders() {
     uni.navigateTo({ url: '/pages/order/list' });
 }
@@ -189,6 +198,19 @@ function closePayment() {
     if (state.paymentExpanded) cancelPaymentPassword();
     state.paymentExpanded = false;
     state.payPassword = '';
+}
+
+/** 用户显式点击才创建订单会话；接口按订单幂等返回，离开页面或切换账号后不使用旧响应跳转。 */
+async function contactMerchant(): Promise<void> {
+    if (state.contacting || state.loading || state.order == null || !['已支付', '制作中', '待取货', '已完成'].includes(state.order!.status)) return
+    const owner = currentUser()?.userUuid ?? ''; state.contacting = true
+    try {
+        const result = await createOrderChat(state.orderId)
+        if (!pickupPageVisible || currentUser()?.userUuid != owner) return
+        const conversation = parseChatConversation(chatPayload(result))
+        if (conversation == null) { toast(result.message.length > 0 ? result.message : '暂时无法联系商家，请稍后重试'); return }
+        uni.navigateTo({ url: '/pages/notifications/chat?conversationUuid=' + conversation.conversationUuid })
+    } finally { state.contacting = false }
 }
 
 function keepOrder() {
@@ -259,7 +281,7 @@ function refresh(): Promise<void> {
 }
 
 function loadPickupCode(): Promise<void> {
-    if (!pickupPageVisible || state.order == null || !['已支付', '制作中', '待取货'].includes(state.order!.status)) return Promise.resolve();
+    if (!pickupPageVisible || !canPickup.value) return Promise.resolve();
     const id = state.orderId;
     const owner = state.userUuid;
     const version = ++pickupVersion;

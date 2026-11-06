@@ -159,21 +159,27 @@ const orderData = { createdAt: new Date().toISOString(), expiresAt: new Date(Dat
     assert.equal(storage.has(checkout.paymentPendingKey(state.userUuid, 11)), false, 'confirmed payment clears recovery marker');
     state.payPassword = 'secret'; const paidCalls = calls.length; state.pay(); await flush();
     assert.equal(calls.length, paidCalls, 'successful payment cannot be reissued from detail');
+    const allOrders = ['待支付', '已支付', '制作中', '待取货', '已完成', '已取消'].map((status, index) => ({ ...orderData, orderId: 6 - index, status }));
+    // 后端响应替身只返回当前筛选匹配的页，页面不再对全量订单执行本地筛选。
+    response = route => {
+        const query = new URL(route, 'http://localhost').searchParams;
+        const status = query.get('status');
+        const rows = allOrders.filter(order => status === 'all' || (status === 'pending' && order.status === '待支付') || (status === 'active' && ['已支付','制作中','待取货'].includes(order.status)) || (status === 'completed' && order.status === '已完成') || (status === 'cancelled' && order.status === '已取消'));
+        return ok({ items: rows, nextCursor: null, hasMore: false });
+    };
     const list = page('pages/order/list.uvue');
-    list.vm.orders = ['待支付', '已支付', '制作中', '待取货', '已完成', '已取消'].map((status, index) => ({ ...api.parseOrder(orderData), orderId: index + 1, status }));
-    list.component.onLoad.call(list.vm, { filter: 'pending' });
+    list.component.onLoad({ filter: 'pending' });list.component.onPageShow();await flush();
     assert.deepEqual(list.vm.visibleOrders.map(o => o.status), ['待支付']);
-    list.vm.selectFilter('active');
+    list.vm.selectFilter('active');await flush();
     assert.deepEqual(list.vm.visibleOrders.map(o => o.status), ['已支付', '制作中', '待取货']);
-    list.vm.selectFilter('completed');
+    list.vm.selectFilter('completed');await flush();
     assert.deepEqual(list.vm.visibleOrders.map(o => o.status), ['已完成']);
-    list.vm.selectFilter('cancelled');
+    list.vm.selectFilter('cancelled');await flush();
     assert.deepEqual(list.vm.visibleOrders.map(o => o.status), ['已取消']);
-    list.component.onLoad.call(list.vm, { filter: 'cancelled' });
-    assert.equal(list.vm.selectedStatus, 'cancelled');
-    list.vm.selectFilter('all');
+    list.vm.selectFilter('all');await flush();
     assert.equal(list.vm.visibleOrders.length, 6, 'cancelled orders remain in all orders');
     list.vm.selectFilter('invalid'); assert.equal(list.vm.selectedStatus, 'all');
+    list.component.onPageHide();
     const mine = page('pages/mine/mine.uvue');
     let url = ''; uni.navigateTo = options => { url = options.url; };
     const destinations = [
@@ -190,11 +196,13 @@ const orderData = { createdAt: new Date().toISOString(), expiresAt: new Date(Dat
         const [pathname, search] = url.split('?');
         assert.ok(config.pages.some(p => '/' + p.path === pathname), 'target page registered');
         const destination = page('pages/order/list.uvue');
-        destination.vm.orders = list.vm.orders;
         destination.component.onLoad.call(destination.vm, Object.fromEntries(new URLSearchParams(search)));
+        destination.component.onPageShow();await flush();
         assert.equal(destination.vm.selectedStatus, status, method + ': selected tab');
         assert.equal(destination.vm.pageTitle, title);
         assert.deepEqual(destination.vm.visibleOrders.map(o => o.status), expected);
+        assert.equal(new URL(calls.at(-1).args[0], "http://localhost").searchParams.get("status"), status);
+        destination.component.onPageHide();
     }
     console.log('All 5 order shortcuts passed route registration, query parsing, selected tab, page title and result filtering checks.');
     console.log('Order flow assertions passed: price isolation, snapshot cleanup, idempotent retry/recovery, duplicate guard, rejection recovery, payment contract, cancellation guard, password clearing.');

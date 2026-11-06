@@ -20,18 +20,18 @@
 /* #endif */
 
 .order-filter-bar { display: flex; flex-direction: row; padding: 4px 16px 8px 16px; background-color: #FDF6F0; }
-.order-filter { display: flex; flex: 1; min-width: 0; height: 42px; align-items: center; justify-content: center; margin: 0 4px; padding: 0; border-width: 0; border-radius: 12px; background-color: #F2E9E1; line-height: 20px; }
-.order-filter-on { background-color: #E4572E; }
-.order-filter-text { font-size: 13px; line-height: 20px; color: #7A6C60; }
-.vapor-order-filter-on--order-filter-text { color: #FFFFFF; font-weight: bold; }
+.order-filter { display: flex; flex: 1; min-width: 0; height: 42px; align-items: center; justify-content: center; margin: 0 4px; padding: 0; border-width: 0; border-radius: 12px; font-size: 13px; line-height: 20px; }
+/* 每个按钮只应用一种完整状态；重回页面时默认全部同样具有明确的背景和文字色。 */
+.order-filter-idle { background-color: #F2E9E1; }
+.order-filter-selected { background-color: #E4572E; }
+.order-filter-label { font-size: 13px; line-height: 20px; text-align: center; }
+.order-filter-label-idle { color: #7A6C60; font-weight: normal; }
+.order-filter-label-selected { color: #FFFFFF; font-weight: bold; }
 /* #ifdef WEB */
 .account-page .order-filter-bar { flex-direction: row;  padding: 4px 16px 8px 16px; }
 /* #endif */
 
-/* #ifdef WEB */
-/* Preserve VDOM Web specificity; native uses explicit vapor-* classes above. */
-.order-filter-on .order-filter-text { color: #FFFFFF; font-weight: bold; }
-/* #endif */
+
 
 .order-payment-countdown { margin-top: 18px; }
 .order-countdown-label { font-size: 12px; line-height: 20px; color: #F4DCCB; }
