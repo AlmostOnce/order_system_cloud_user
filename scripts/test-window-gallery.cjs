@@ -1,0 +1,31 @@
+// 执行真实菜单解析和页面预览方法，验证旧接口兼容及多图顺序，不模拟原生渲染能力。
+const fs = require('fs'), assert = require('assert/strict');
+const ts = require('D:/HBuilderX/plugins/compile-typescript/node_modules/typescript/lib/typescript.js');
+const { loadSetup } = require('./setup-harness.cjs');
+const source = fs.readFileSync('api/menu.uts', 'utf8');
+const mod = { exports: {} };
+new Function('require','module','exports',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(p => {
+ if(p.includes('json')) return { jsonArray:(o,k)=>Array.isArray(o[k])?o[k]:null, jsonString:(o,k)=>typeof o[k]==='string'?o[k]:null };
+ return {};
+},mod,mod.exports);
+assert.equal(typeof mod.exports.windowGalleryUrls,'function','menu API must normalize gallery and legacy cover');
+const urls = mod.exports.windowGalleryUrls;
+assert.deepEqual(urls({imageUrl:'old'}),['old']);
+assert.deepEqual(urls({imageUrl:'old',imageUrls:[]}),[],'explicit empty gallery must stay empty');
+assert.deepEqual(urls({imageUrls:['a','b','a','',null,3,'c','d','e','f']}),['a','b','c','d','e']);
+const page = fs.readFileSync('pages/menu/menu.uvue','utf8');
+let preview;
+global.uni = { previewImage:o=>preview=o };
+const vm = loadSetup(page.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1], p=>p.includes('images')?{imageSource:u=>'gateway/'+u}:{}).create();
+vm.windowImageUrls=['a','b']; vm.previewWindowImage(1);
+assert.deepEqual(preview,{current:'gateway/b',urls:['gateway/a','gateway/b']});
+vm.windowImageChanged({detail:{current:1}});assert.equal(vm.windowImageIndex,1);
+vm.windowImageChanged({detail:{current:8}});assert.equal(vm.windowImageIndex,1,'ignore out-of-range swipe event');
+preview=undefined;vm.previewWindowImage(2);assert.equal(preview,undefined);
+vm.windowImageUrls=[];vm.previewWindowImage(0);assert.equal(preview,undefined);
+assert.ok(page.includes('<business-image v-else kind="window"'),'empty gallery must display only default image');
+assert.ok(page.includes('<swiper') && page.includes('<swiper-item') && page.includes('windowImageUrls.length == 1'));
+assert.ok(page.includes('kind="window"></business-image>'), 'a single shop photo previews via business-image, not a swiper');
+assert.ok(page.includes('@click="previewCurrentWindowImage"'));
+assert.ok(!page.includes('autoplay="true"'),'manual sliding must not interrupt browsing');
+console.log('Window gallery passed: legacy fallback, explicit empty, five-image cap, deduplication, full-gallery preview and bounds.');

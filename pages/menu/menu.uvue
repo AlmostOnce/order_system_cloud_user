@@ -45,8 +45,9 @@
 				<text class="shop-result-arrow">›</text>
 			</view>
 		</scroll-view>
-		<view v-else class="catalog">
-			<!-- 左侧分类栏：纵向排列，选中项带主色竖条与实色底 -->
+		<view v-else-if="layoutReady" class="catalog">
+			<!-- 分类栏放进固定宽度的普通 view，避免两个 scroll-view 直接做横向 flex 子项时，左侧栏被排到右侧且高度为 0。 -->
+			<view class="rail-shell">
 			<scroll-view class="rail" direction="vertical" :scroll-into-view="railAnchor">
 				<view
 					class="rail-item"
@@ -60,13 +61,26 @@
 					<text class="rail-text" :class="activeCategoryId == group.categoryId ? 'rail-text-on' : ''">{{ group.categoryName }}</text>
 				</view>
 			</scroll-view>
+			</view>
 			<!-- 右侧菜品区 -->
 			<scroll-view class="dishes" direction="vertical" :scroll-into-view="dishesAnchor" :scroll-with-animation="false" @scroll="onDishesScroll" :refresher-enabled="!mutating && (refreshing || (!loading && !stockLoading && !cartLoading))" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
 				<view v-if="stockLoading || stockLoadError.length > 0" class="stock-status">
 					<text class="stock-status-text">{{ stockLoading ? '正在查询库存…' : stockLoadError }}</text>
 				</view>
                 <text v-if="cartLoadError.length > 0" class="stock-status-text">{{ cartLoadError }}</text>
-				<view class="menu-window-cover"><business-image :src="windowImageUrl" kind="window"></business-image></view>
+				<!-- 店铺图片保持紧凑高度。只有一张时不放进 swiper：原生滑动容器会把点击吃掉，预览出不来。 -->
+                <view class="menu-window-cover">
+                    <business-image v-if="windowImageUrls.length == 1" :src="windowImageUrls[0]" kind="window"></business-image>
+                    <swiper v-else-if="windowImageUrls.length > 1" class="menu-window-swiper" :current="windowImageIndex" @change="windowImageChanged" @click="previewCurrentWindowImage">
+                        <swiper-item v-for="(url, index) in windowImageUrls" :key="url">
+                            <view class="menu-window-slide">
+                                <business-image :src="url" kind="window"></business-image>
+                            </view>
+                        </swiper-item>
+                    </swiper>
+                    <business-image v-else kind="window" :preview="false"></business-image>
+                    <text v-if="windowImageUrls.length > 1" class="menu-window-counter">{{ windowImageIndex + 1 }}/{{ windowImageUrls.length }}</text>
+                </view>
                 <window-message :content="windowDescription"></window-message>
 				<!-- 空菜单 / 当前分类无菜品 -->
 				<view v-if="groups.length == 0" class="state state-inline">
@@ -87,20 +101,19 @@
 							:key="product.productId"
 						>
 							<view class="dish-anchor" :id="productSectionId(product.productId)"></view>
-							<!-- 缩略区：有图片用图片，没有图片用菜品名首字兜底 -->
+							<!-- 点卡片打开评价抽屉；加减号放在点击区外，避免加菜时误开评论。 -->
+							<view class="dish-hit" hover-class="dish-hit-hover" @click="openProductReviewDrawer(product)">
 							<view class="dish-thumb">
 								<business-image :src="product.imageUrl" kind="product"></business-image>
 							</view>
 							<view class="dish-body">
-								<text class="dish-name">{{ product.productName }}</text>
-								<text class="dish-rating">{{ cardRatingText(productRatings, product.productId) }}</text>
-								<text v-if="product.description.length > 0" class="dish-desc">{{ product.description }}</text>
-								<text class="dish-stock">{{ stockHint(product.productId) }}</text>
-                                    <button class="review-menu-action review-menu-label button-text button-text-44" @click="openProductReviews(product)">查看评价</button>
+								<text class="dish-name" :max-lines="1">{{ product.productName }}</text>
+								<view class="dish-meta"><text class="dish-rating">{{ cardRatingText(productRatings, product.productId) }}</text><text class="dish-stock">{{ stockHint(product.productId) }}</text></view>
+								<text v-if="product.description.length > 0" class="dish-desc" :max-lines="1">{{ product.description }}</text>
 							</view>
-								<view class="dish-foot">
+							</view>
+								<view class="dish-buy">
 									<text class="dish-price">¥{{ formatPrice(product.price) }}</text>
-									<!-- 数量步进器：数量为 0 时只显示加号，避免出现无意义的 0 -->
 									<view class="stepper">
 										<view
 											v-if="quantityOf(product.productId) > 0"
@@ -126,25 +139,12 @@
 				</view>
 			</scroll-view>
 		</view>
+		<view v-else class="catalog-placeholder"></view>
 		</view>
-        <scroll-view v-else class="shop-review-list" direction="vertical" :lower-threshold="120" @scrolltolower="loadMoreShopReviews" :refresher-enabled="!shopReviewsLoading" :refresher-triggered="shopReviewsRefreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshShopReviews">
-			<view class="shop-review-content">
-				<view class="shop-rating-card"><text class="shop-rating-value">{{ shopRatingReady && shopAverageScore != null ? shopAverageScore!.toFixed(1) : '--' }}</text><view class="shop-rating-info"><text class="shop-rating-title">店铺评分</text><text class="shop-rating-meta">{{ shopRatingReady ? shopReviewCount + ' 条评价' : '评分暂不可用' }}</text></view></view>
-				<view v-for="review in shopReviews" :key="review.commentId" class="shop-review-card">
-					<view class="shop-review-head"><view class="shop-review-avatar"><business-image :src="review.authorAvatarUrl" kind="avatar"></business-image></view><text class="shop-review-author">{{ review.authorName }}</text><text class="shop-review-score">{{ review.score }} 分</text></view>
-					<text class="shop-review-date">{{ review.createdAt.replace('T', ' ').substring(0, 16) }}</text><text class="shop-review-body">{{ review.content }}</text>
-					<view v-if="review.tags.length > 0" class="shop-review-tags"><text v-for="tag in review.tags" :key="tag" class="shop-review-tag">{{ tag }}</text></view>
-					<view v-if="review.images.length > 0" class="shop-review-images"><image v-for="(url, index) in review.images" :key="url" class="shop-review-image" :src="shopReviewImage(url)" mode="aspectFill" @click="previewShopReview(review, index)"></image></view>
-				</view>
-				<text v-if="shopReviewsLoading" class="shop-review-status">正在获取评价…</text>
-				<text v-else-if="shopReviewsError.length > 0" class="shop-review-status">{{ shopReviewsError }}</text>
-				<text v-else-if="shopReviewsLoaded && shopReviews.length == 0" class="shop-review-status">还没有店铺评价，完成订单后可以分享用餐体验</text>
-				<text v-else-if="shopReviewsLoaded && !shopReviewsHasMore" class="shop-review-status">已经看到全部评价</text>
-			</view>
-            <view slot="refresher" class="native-refresh-slot">
-                <refresh-header :refreshing="shopReviewsRefreshing" :current-refresh-time="shopReviewsRefreshTime"></refresh-header>
-            </view>
-		</scroll-view>
+		<!-- 评价标签占满档口头下方，不是抽屉；列表与筛选复用菜品评价同一套 review-list。 -->
+		<view v-else class="shop-review-panel">
+			<review-list v-if="windowId > 0" :embedWindowId="windowId" :embedProductName="windowName" :embedded="true" :hideNav="true"></review-list>
+		</view>
 		<!-- 底部购物车栏：菜单就绪后随页面出现；点击左侧信息区展开购物车清单 -->
 		<view v-if="shopTab == 'menu' && !loading && loadError.length == 0" class="cartbar">
 			<view class="cartbar-info" hover-class="cartbar-info-hover" @click="toggleCartPanel">
@@ -209,6 +209,11 @@
 				</view>
 			</scroll-view>
 		</view>
+		<!-- 抽屉只做自下而上的容器；评论界面复用既有评价列表，不在菜单里另写一套卡片。 -->
+		<view v-if="productReviewVisible" class="mask" :class="productReviewReady ? '' : 'mask-pre'" @click="closeProductReviewDrawer"></view>
+		<view v-if="productReviewVisible" class="review-sheet" :class="productReviewReady ? '' : 'review-sheet-pre'" :style="productReviewSheetStyle()">
+			<review-list :key="productReviewId" :embedProductId="productReviewId" :embedProductName="productReviewName" :embedded="true" @close="closeProductReviewDrawer"></review-list>
+		</view>
 	</view>
 </template>
 
@@ -217,6 +222,7 @@ import { reactive, toRefs, computed, nextTick, watch, getCurrentInstance } from 
 import WindowMessage from '../../components/window-message/window-message.uvue';
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
+import ReviewList from '../../components/review-list/review-list.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 // 导入轻量提示：购物车操作反馈。
 import { toast } from '../../common/feedback.uts';
@@ -225,8 +231,7 @@ import { isLoggedIn } from '../../store/auth.uts';
 // 导入菜单接口与类型：档口菜单快照。
 import { fetchWindowMenu, MenuProduct, WindowMenuResult } from '../../api/menu.uts';
 import { fetchWindowStocks, ProductStock, StockListResult } from '../../api/stock.uts';
-import { Review, CardRating, fetchCardRatings, cardRatingText, fetchWindowReviews, fetchWindowRating, commentPayload, parseWindowReviewPage } from '../../api/comments.uts';
-import { jsonNumber } from '../../common/json.uts';
+import { CardRating, fetchCardRatings, cardRatingText } from '../../api/comments.uts';
 import { imageSource } from '../../common/images.uts';
 // 导入购物车接口与类型：数量增减与金额汇总。
 import { fetchCart, addToCart, setCartItemQuantity, removeCartItem, clearCartWindow, CartItem, CartWindow, CartResult, CartActionResult } from '../../api/cart.uts';
@@ -295,14 +300,18 @@ const initialEmptyQuantities: Array<QuantityEntry> = [];
 const initialEmptyCartItems: Array<CartItem> = [];
 const initialEmptyStocks: Array<ProductStock> = [];
 const initialCategoryOffsets: Array<CategoryOffset> = [];
-const initialShopReviews: Array<Review> = [];
 const initialProductRatings: Array<CardRating> = [];
 const menuInstance = getCurrentInstance();
 let measurementScheduled = false;
 let layoutVersion = 0;
 let menuDisposed = false;
+// 请求序号只属于当前页面实例；返回首页后旧实例不能再更新原生视图，
+// 同一实例连续加载时也只接受最后一次请求，防止分类与菜品被迟到响应重置。
+let menuRequestVersion = 0;
+let cartRequestVersion = 0;
 let locationVersion = 0;
 let productRatingVersion = 0;
+let productReviewVersion = 0;
 const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTime: '', cartLoading: false,
     // 状态栏高度（px），用于顶部占位。
     statusBarHeight: 0,
@@ -312,15 +321,15 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     highlightedProductId: 0,
     shopKeyword: '',
     productRatings: initialProductRatings,
-    shopTab: 'menu', shopReviews: initialShopReviews, shopReviewsLoading: false, shopReviewsLoaded: false,
-    shopReviewsError: '', shopReviewsCursor: '', shopReviewsHasMore: false, shopReviewsRefreshing: false,
-    shopReviewsRefreshTime: '', shopRatingReady: false, shopAverageScore: null as number | null, shopReviewCount: 0,
+    shopTab: 'menu',
+    // 菜品评价抽屉只在点卡片时打开；与购物车面板互斥。内容交给共用评价列表，这里只保存当前菜编号。
+    productReviewVisible: false, productReviewReady: false, productReviewId: 0, productReviewName: '',
     stocks: initialEmptyStocks,
     stockLoading: false,
     stockRequestVersion: 0,
     stockLoadError: '',
     // 档口名称，接口返回前使用默认标题。
-    windowName: '', windowImageUrl: '',
+    windowName: '', windowImageUrls: [] as Array<string>, windowImageIndex: 0,
     // 档口位置。
     windowLocation: '',
     // 窗口简介，未配置时不占展示空间。
@@ -350,11 +359,14 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     mutating: false,
     // 是否已进入入场动画终态。
     entered: false,
+    // 首帧完成后再挂载分类栏。首页跳转时父级高度尚未稳定，两个 scroll-view 并排会把左栏排到右侧且无法显示。
+    layoutReady: false,
     // 菜品卡片是否已就绪，控制依次浮入。
     listReady: false })
 
-const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHeight, windowId, highlightedProductId, shopKeyword, stocks, stockLoading, stockRequestVersion, stockLoadError, windowName, windowImageUrl, windowLocation, windowDescription, loading, loadError, groups, activeCategoryId, dishesAnchor, railAnchor, dishesScrollTop, categoryTailHeight, categoryOffsets, quantities, cartItems, cartQuantity, cartAmount, cartPanelVisible, cartPanelReady, mutating, entered, listReady } = toRefs(state)
-const { shopTab, shopReviews, shopReviewsLoading, shopReviewsLoaded, shopReviewsError, shopReviewsHasMore, shopReviewsRefreshing, shopReviewsRefreshTime, shopRatingReady, shopAverageScore, shopReviewCount } = toRefs(state)
+const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHeight, windowId, highlightedProductId, shopKeyword, stocks, stockLoading, stockRequestVersion, stockLoadError, windowName, windowImageUrls, windowImageIndex, windowLocation, windowDescription, loading, loadError, groups, activeCategoryId, dishesAnchor, railAnchor, dishesScrollTop, categoryTailHeight, categoryOffsets, quantities, cartItems, cartQuantity, cartAmount, cartPanelVisible, cartPanelReady, mutating, entered, layoutReady, listReady } = toRefs(state)
+const { shopTab } = toRefs(state)
+const { productReviewVisible, productReviewReady, productReviewId, productReviewName } = toRefs(state)
 const { productRatings } = toRefs(state)
 
 const shopSearchResults = computed((): Array<MenuProduct> => {
@@ -373,55 +385,32 @@ const shopSearchResults = computed((): Array<MenuProduct> => {
 
 function clearShopSearch() { state.shopKeyword = ''; }
 
+/** 菜品/评价切换。评价标签直接挂共用列表，不在这里再拉一套店铺评论。 */
 function selectShopTab(tab: string) {
     if (state.shopTab == tab) return;
     state.shopTab = tab;
     closeCartPanel();
-    if (tab == 'reviews' && !state.shopReviewsLoaded) { loadShopReviews(true); loadShopRating(); }
+    closeProductReviewDrawer();
     if (tab == 'menu' && state.shopKeyword.trim().length == 0) nextTick(() => { resetCategoryNavigation(); });
 }
 
-async function loadShopReviews(reset: boolean): Promise<void> {
-    if (state.windowId <= 0 || state.shopReviewsLoading || (!reset && !state.shopReviewsHasMore)) return;
-    state.shopReviewsLoading = true; state.shopReviewsError = '';
-    try {
-        const result = await fetchWindowReviews(state.windowId, reset ? '' : state.shopReviewsCursor);
-        const raw = commentPayload(result);
-        const page = raw == null ? null : parseWindowReviewPage(raw);
-        if (page == null || (!reset && page.hasMore && page.nextCursor == state.shopReviewsCursor) || page.items.some((item: Review): boolean => item.windowId != state.windowId)) {
-            state.shopReviewsError = result.message.length > 0 ? result.message : '评价暂不可用，请下拉重试'; return;
-        }
-        if (reset) state.shopReviews = page.items;
-        else for (let i = 0; i < page.items.length; i++) {
-            const item = page.items[i];
-            if (!state.shopReviews.some((existing: Review): boolean => existing.commentId == item.commentId)) state.shopReviews.push(item);
-        }
-        state.shopReviewsCursor = page.nextCursor; state.shopReviewsHasMore = page.hasMore; state.shopReviewsLoaded = true;
-    } finally { state.shopReviewsLoading = false; }
+/** 原生swiper事件只更新页码，不触发菜单加载，避免滑动图片打断点餐。 */
+function windowImageChanged(event: UniSwiperChangeEvent) {
+    const index = event.detail.current;
+    if (index >= 0 && index < state.windowImageUrls.length) state.windowImageIndex = index;
 }
-async function loadShopRating(): Promise<void> {
-    if (state.windowId <= 0) return;
-    const result = await fetchWindowRating(state.windowId);
-    const raw = commentPayload(result);
-    const count = raw == null ? null : jsonNumber(raw, 'reviewCount');
-    const average = raw == null ? null : jsonNumber(raw, 'averageScore');
-    if (count == null || count < 0 || (count > 0 && (average == null || average < 1 || average > 5))) { state.shopRatingReady = false; return; }
-    state.shopReviewCount = count; state.shopAverageScore = count == 0 ? null : average; state.shopRatingReady = true;
+
+/** 复用统一网关地址解析；预览传入全部图片，用户在预览内也可左右切换。 */
+function previewWindowImage(index: number) {
+    if (index < 0 || index >= state.windowImageUrls.length) return;
+    const urls = [] as Array<string>;
+    for (let i = 0; i < state.windowImageUrls.length; i++) urls.push(imageSource(state.windowImageUrls[i], 'window'));
+    uni.previewImage({ current: urls[index], urls: urls });
 }
-function loadMoreShopReviews() { if (!state.shopReviewsRefreshing) loadShopReviews(false); }
-function refreshShopReviews() {
-    if (state.shopReviewsRefreshing || state.shopReviewsLoading) return;
-    state.shopReviewsRefreshing = true;
-    const start = Date.now(); state.shopReviewsRefreshTime = refreshTimeLabel(start);
-    Promise.all([loadShopReviews(true), loadShopRating()]).then(() => {
-        finishPullRefresh(start, state.shopReviewsError.length == 0, (_time: string) => { state.shopReviewsRefreshing = false; });
-    }).catch(() => { finishPullRefresh(start, false, (_time: string) => { state.shopReviewsRefreshing = false; }); });
-}
-function shopReviewImage(url: string): string { return imageSource(url, 'product'); }
-function previewShopReview(review: Review, index: number) {
-    const urls: Array<string> = [];
-    for (let i = 0; i < review.images.length; i++) urls.push(shopReviewImage(review.images[i]));
-    if (index >= 0 && index < urls.length) uni.previewImage({ current: urls[index], urls: urls });
+
+/** 多图轮播点当前这张；页码由 swiper 的 change 维护，避免点到空白索引。 */
+function previewCurrentWindowImage() {
+    previewWindowImage(state.windowImageIndex);
 }
 
 function openShopResult(product: MenuProduct) {
@@ -462,6 +451,8 @@ function goBack() {
 }
 
 function loadMenu(): Promise<void> {
+    if (menuDisposed) return Promise.resolve();
+    const requestVersion = ++menuRequestVersion;
     // 使页面上次查询失效，避免返回页面时旧请求覆盖新库存。
     state.stockRequestVersion = state.stockRequestVersion + 1;
     state.stockLoading = false;
@@ -478,6 +469,8 @@ function loadMenu(): Promise<void> {
     // 归零卡片就绪标记，数据回来后再重播入场。
     state.listReady = false;
     return fetchWindowMenu(state.windowId).then((result: WindowMenuResult) => {
+        // 必须在修改loading或分组之前拦截，避免旧请求触发条件分支重建。
+        if (menuDisposed || requestVersion != menuRequestVersion) return;
         // 菜单结果返回后统一结束加载态。
         state.loading = false;
         // 请求失败时直接落到错误态。
@@ -493,7 +486,9 @@ function loadMenu(): Promise<void> {
         }
         // 写入档口基本信息，供头部展示。
         state.windowName = menu.windowName;
-        state.windowImageUrl = menu.imageUrl;
+        // 刷新或切换窗口后重置页码，防止旧的第五张索引落在新的短列表之外。
+        state.windowImageUrls = menu.imageUrls ?? [] as Array<string>;
+        state.windowImageIndex = 0;
         state.windowLocation = menu.location;
         state.windowDescription = menu.description;
         // 把后端分类转换成页面分组，只保留有菜品的分类。
@@ -542,6 +537,8 @@ function loadMenu(): Promise<void> {
         locateRequestedProduct();
         // 菜单渲染完成后再切到「已入场」，菜品卡片才会依次浮入。
         setTimeout(() => {
+            // 页面退出或刷新开始后，不再播放上一批菜品的入场动画。
+            if (menuDisposed || requestVersion != menuRequestVersion) return;
             state.listReady = true;
         }, 60);
         // 菜单就绪后同步购物车，保证数量与金额是服务端的最新值。
@@ -559,7 +556,7 @@ function loadStocks(): Promise<void> {
     state.stockRequestVersion = state.stockRequestVersion + 1;
     const requestVersion = state.stockRequestVersion;
     return fetchWindowStocks(state.windowId).then((result: StockListResult) => {
-        if (requestVersion != state.stockRequestVersion) {
+        if (menuDisposed || requestVersion != state.stockRequestVersion) {
             return;
         }
         state.stockLoading = false;
@@ -601,9 +598,13 @@ function stockHint(productId: number): string {
 }
 
 function loadCart(): Promise<void> {
+    if (menuDisposed) return Promise.resolve();
+    const requestVersion = ++cartRequestVersion;
     state.cartLoading = true;
     state.cartLoadError = '';
     return fetchCart().then((result: CartResult) => {
+        // 加减菜品和返回页面都可能重新查购物车，只接收当前实例最新响应。
+        if (menuDisposed || requestVersion != cartRequestVersion) return;
         state.cartLoading = false;
         // 购物车为空时的统一展示值，避免每个分支重复构造。
         const emptyEntries: Array<QuantityEntry> = [];
@@ -809,12 +810,13 @@ function scheduleCategoryMeasurement() {
 
 // 库存提示、购物车错误或菜单变化会影响分组位置，布局完成后重新测量。
 watch(() => state.groups, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
+watch(() => state.layoutReady, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
 watch(() => state.loading, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
 watch(() => state.stockLoading, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
 watch(() => state.stockLoadError, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
 watch(() => state.cartLoadError, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
 onResize(() => { scheduleCategoryMeasurement(); });
-onUnload(() => { menuDisposed = true; layoutVersion++; locationVersion++; });
+onUnload(() => { menuDisposed = true; layoutVersion++; locationVersion++; productReviewVersion++; });
 
 function quantityOf(productId: number): number {
     // 遍历扁平数量列表，命中即返回。
@@ -827,8 +829,43 @@ function quantityOf(productId: number): number {
     return 0;
 }
 
-function openProductReviews(product: MenuProduct) {
-    uni.navigateTo({ url: '/pages/review/list?productId=' + product.productId + '&name=' + encodeURIComponent(product.productName) });
+/**
+ * 打开当前菜品的评价抽屉。
+ *
+ * 卡片上不再放评价按钮；点卡片主体进入这里。加减号在点击区外。
+ * 抽屉只保存当前菜编号；列表查询仍走共用评价页，换菜时靠 key 重建列表，避免两道菜的旧响应互相覆盖。
+ */
+function openProductReviewDrawer(product: MenuProduct) {
+    if (product.productId <= 0 || menuDisposed) return;
+    closeCartPanel();
+    const version = ++productReviewVersion;
+    state.productReviewId = product.productId;
+    state.productReviewName = product.productName;
+    state.productReviewReady = false;
+    state.productReviewVisible = true;
+    setTimeout(() => {
+        if (!menuDisposed && version == productReviewVersion) state.productReviewReady = true;
+    }, 30);
+}
+
+/** 先滑出再卸载，避免抽屉动画被截断。 */
+function closeProductReviewDrawer() {
+    if (!state.productReviewVisible) return;
+    productReviewVersion++;
+    state.productReviewReady = false;
+    setTimeout(() => {
+        if (!state.productReviewReady) state.productReviewVisible = false;
+    }, 240);
+}
+
+/**
+ * 抽屉高度按窗口取一段固定区域，让共用评价列表在内部滚动。
+ * 不用百分比高度：原生端对百分数支持不稳定，条数变化时也不能跟着把整页撑高。
+ */
+function productReviewSheetStyle(): string {
+    const height = uni.getWindowInfo().windowHeight;
+    const sheet = Math.max(480, Math.min(720, Math.floor((height > 0 ? height : 720) * 0.88)));
+    return 'height:' + sheet + 'px';
 }
 
 function productGlyph(product: MenuProduct): string {
@@ -946,6 +983,7 @@ function openCartPanel() {
         toast('购物车还是空的');
         return;
     }
+    closeProductReviewDrawer();
     // 先置为初始态，保证面板以「未就绪」的样子挂载。
     state.cartPanelReady = false;
     // 挂载面板节点（此时还是初始态）。
@@ -1045,8 +1083,17 @@ onReady(() => {
     // 页面渲染完成后窗口信息才准确，此处再同步一次状态栏高度。
     const readyInfo = uni.getWindowInfo();
     state.statusBarHeight = readyInfo.statusBarHeight > 0 ? readyInfo.statusBarHeight : 24;
+    // 等页面拿到确定高度后再挂载左栏和菜品区，避免从首页跳入时首帧把分类栏挤到右侧。
+    nextTick(() => {
+        if (menuDisposed) return;
+        state.layoutReady = true;
+        // 分类栏此时才插入 DOM，再测一次分组位置，否则滚动联动仍按空布局计算。
+        nextTick(() => { scheduleCategoryMeasurement(); });
+    });
     // 首帧绘制完成后再切到「已入场」，属性变化才会驱动入场过渡。
     setTimeout(() => {
+        // 首帧回调可能晚于返回操作，已卸载页面不能继续改变动画样式。
+        if (menuDisposed) return;
         state.entered = true;
     }, 60);
 })
@@ -1191,26 +1238,9 @@ onReady(() => {
 	.shop-tab-text { font-size: 15px; color: #8C7C6F; }
 	.shop-tab-text-active { color: #E4572E; font-weight: bold; }
 	.shop-tab-underline { position: absolute; bottom: 0; width: 28px; height: 3px; border-radius: 2px; background-color: #E4572E; }
-	.shop-menu-content { flex: 1; min-height: 0; }
-	.shop-review-list { flex: 1; min-height: 0; background-color: #FDF6F0; }
-	.shop-review-content { padding: 16px; }
-	.shop-rating-card { flex-direction: row; align-items: center; padding: 20px; margin-bottom: 14px; border-radius: 16px; background-color: #FFFFFF; }
-	.shop-rating-value { font-size: 32px; font-weight: bold; color: #E4572E; }
-	.shop-rating-info { margin-left: 16px; }
-	.shop-rating-title { font-size: 15px; font-weight: bold; color: #211C18; }
-	.shop-rating-meta { margin-top: 4px; font-size: 12px; color: #8C7C6F; }
-	.shop-review-card { padding: 16px; margin-bottom: 10px; border-radius: 14px; background-color: #FFFFFF; }
-	.shop-review-head { flex-direction: row; justify-content: space-between; align-items: center; }
-	.shop-review-avatar { width: 32px; height: 32px; border-radius: 16px; overflow: hidden; flex-shrink: 0; margin-right: 8px; }
-	.shop-review-author { flex: 1; font-size: 14px; font-weight: bold; color: #211C18; }
-	.shop-review-score { font-size: 13px; font-weight: bold; color: #E4572E; }
-	.shop-review-date { margin-top: 4px; font-size: 11px; color: #A2968B; }
-	.shop-review-body { margin-top: 10px; font-size: 14px; line-height: 21px; color: #40352D; }
-	.shop-review-tags { flex-direction: row; flex-wrap: wrap; margin-top: 10px; }
-	.shop-review-tag { margin-right: 6px; margin-bottom: 4px; padding: 3px 8px; border-radius: 9px; font-size: 12px; color: #C2410C; background-color: #FFF1E8; }
-	.shop-review-images { flex-direction: row; flex-wrap: wrap; margin-top: 8px; }
-	.shop-review-image { width: 72px; height: 72px; margin-right: 6px; margin-bottom: 6px; border-radius: 8px; }
-	.shop-review-status { padding: 20px 4px; font-size: 13px; color: #8C7C6F; text-align: center; }
+	.shop-menu-content { flex: 1; min-height: 0; width: 100%; }
+	.catalog-placeholder { flex: 1; min-height: 0; width: 100%; }
+	.shop-review-panel { flex: 1; min-height: 0; width: 100%; background-color: #FDF6F0; }
 	.shop-search-icon { width: 13px; height: 13px; border-width: 2px; border-style: solid; border-color: #A2968B; border-radius: 7px; margin-right: 10px; }
 	.shop-search-input { flex: 1; min-width: 0; height: 40px; font-size: 14px; color: #211C18; }
 	.shop-search-clear { padding: 8px; }
@@ -1251,12 +1281,12 @@ onReady(() => {
 	}
 
 	.dish-stock {
-		margin-top: 4px;
+		margin-left: 8px;
 		font-size: 11px;
 		line-height: 16px;
 		color: #7A6C60;
 	}
-	.dish-rating { margin-top: 4px; font-size: 11px; line-height: 16px; color: #C2410C; }
+	.dish-rating { font-size: 11px; line-height: 16px; color: #C2410C; }
 
 	.step-disabled {
 		opacity: 0.4;
@@ -1271,13 +1301,23 @@ onReady(() => {
         min-height: 0;
         overflow: hidden;
 		flex: 1;
+		width: 100%;
 		flex-direction: row;
 		align-items: stretch;
+	}
+
+	/* 固定在最左侧，高度跟随菜单区；真正滚动的是内部 rail，避免 scroll-view 自己去抢横向位置。 */
+	.rail-shell {
+		width: 76px;
+		flex-shrink: 0;
+		height: 100%;
+		background-color: #F7EEE6;
 	}
 
 	/* 左侧分类栏：米色底与右侧菜品区形成层次，宽度固定不随内容撑开 */
 	.rail {
 		width: 76px;
+		height: 100%;
 		flex-shrink: 0;
 		background-color: #F7EEE6;
 	}
@@ -1322,6 +1362,7 @@ onReady(() => {
 	.dishes {
         min-width: 0;
 		flex: 1;
+		height: 100%;
 		background-color: #FFFFFF;
 	}
 
@@ -1408,7 +1449,7 @@ onReady(() => {
 	}
 
 	.group {
-		margin-top: 18px;
+		margin-top: 12px;
 	}
 
 	.group-head {
@@ -1436,15 +1477,14 @@ onReady(() => {
 	.dish {
 		position: relative;
 		flex-direction: row;
-		flex-wrap: wrap;
-		align-items: flex-start;
+		align-items: center;
 		background-color: #FFFFFF;
-		border-radius: 14px;
+		border-radius: 12px;
 		border-width: 1px;
 		border-style: solid;
 		border-color: #EFE1D6;
-		padding: 12px;
-		margin-bottom: 12px;
+		padding: 10px;
+		margin-bottom: 8px;
 		opacity: 1;
 		transform: translateY(0);
 		transition-property: opacity, transform;
@@ -1472,11 +1512,22 @@ onReady(() => {
 	}
 
 	/* 缩略区：右侧菜品区宽度有限，尺寸比首页卡片更克制 */
+	.dish-hit {
+		flex: 1;
+		min-width: 0;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.dish-hit-hover {
+		opacity: 0.82;
+	}
+
 	.dish-thumb {
-		width: 62px;
-		height: 62px;
+		width: 56px;
+		height: 56px;
 		flex-shrink: 0;
-		border-radius: 13px;
+		border-radius: 10px;
 		background-color: #FDF0E8;
 		align-items: center;
 		justify-content: center;
@@ -1496,37 +1547,42 @@ onReady(() => {
 
 	.dish-body {
 		flex: 1;
+		min-width: 0;
 		margin-left: 10px;
-		min-height: 62px;
 	}
 
 	.dish-name {
-		font-size: 15px;
-		line-height: 22px;
+		font-size: 14px;
+		line-height: 20px;
 		font-weight: bold;
 		color: #211C18;
 	}
 
+	.dish-meta {
+		flex-direction: row;
+		align-items: center;
+		margin-top: 2px;
+	}
+
 	.dish-desc {
-		margin-top: 4px;
-		font-size: 12px;
-		line-height: 18px;
+		margin-top: 2px;
+		font-size: 11px;
+		line-height: 16px;
 		color: #7A6C60;
-		/* 描述较长时省略，避免把卡片撑得过高 */
-		max-height: 36px;
 		overflow: hidden;
 	}
 
-	.dish-foot {
-		width: 100%;
-		flex-direction: row;
-		align-items: center;
-		margin-top: 12px;
+	.dish-buy {
+		flex-shrink: 0;
+		margin-left: 8px;
+		align-items: flex-end;
+		justify-content: center;
 	}
 
 	.dish-price {
-		flex: 1;
-		font-size: 16px;
+		margin-bottom: 6px;
+		font-size: 14px;
+		line-height: 18px;
 		font-weight: bold;
 		color: #E4572E;
 	}
@@ -1760,6 +1816,26 @@ onReady(() => {
 		transform: translateY(440px);
 	}
 
+	.review-sheet {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 1000;
+		overflow: hidden;
+		background-color: #FDF6F0;
+		border-top-left-radius: 22px;
+		border-top-right-radius: 22px;
+		transform: translateY(0);
+		transition-property: transform;
+		transition-duration: 0.3s;
+		transition-timing-function: cubic-bezier(0.22, 1.3, 0.36, 1);
+	}
+
+	.review-sheet-pre {
+		transform: translateY(760px);
+	}
+
 	/* 面板标题行：标题在左、清空在右 */
 	.sheet-head {
 		flex-direction: row;
@@ -1841,5 +1917,8 @@ onReady(() => {
 		color: #A2968B;
 	}
     .menu-state-scroll { flex: 1; min-height: 0; width: 100%; }
-    .menu-window-cover { height: 112px; margin: 8px 14px 12px 14px; border-radius: 14px; overflow: hidden; }
+    .menu-window-swiper { width: 100%; height: 112px; }
+    .menu-window-slide { width: 100%; height: 112px; }
+    .menu-window-counter { position: absolute; right: 8px; bottom: 8px; padding: 3px 8px; border-radius: 10px; background-color: rgba(33, 28, 24, 0.65); color: #FFFFFF; font-size: 11px; }
+    .menu-window-cover { position: relative; height: 112px; margin: 8px 14px 12px 14px; border-radius: 14px; overflow: hidden; }
 </style>

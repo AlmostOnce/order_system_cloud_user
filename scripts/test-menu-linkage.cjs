@@ -45,5 +45,6 @@ const rectangles = [
  assert.equal(vm.activeCategoryId, 0); assert.equal(vm.railAnchor, ''); assert.equal(vm.categoryOffsets.length, 0);
  assert.ok(!source.includes('visibleGroups()') && !source.includes('selectCategory(0)'));
  assert.ok(source.includes('@scroll="onDishesScroll"') && source.includes(':id="categorySectionId(group.categoryId)"'));
+ assert.ok(source.includes('class="rail-shell"') && source.includes('v-else-if="layoutReady"'), 'category rail waits for first layout and is not a bare flex scroll-view');
  console.log('Menu linkage checks passed: full grouped menu, category anchors, repeat clicks, bidirectional highlighting, uncategorized items, short final section, remeasurement and empty refresh.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
