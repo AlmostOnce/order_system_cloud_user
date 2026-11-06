@@ -1,0 +1,53 @@
+import { httpGet, httpPost, HttpResult } from '../common/http.uts'
+import { jsonArray, jsonBoolean, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
+export type ChatConversation = { conversationUuid: string, orderId: number, orderNo: string, windowName: string, preview: string, activityAt: string, lastSeq: number, unreadCount: number, canSend: boolean }
+export type ChatMessage = { messageUuid: string, seq: number, senderUuid: string, senderName: string, senderSide: string, clientMessageId: string, content: string, createdAt: string }
+export type ChatConversationPage = { items: Array<ChatConversation>, nextCursor: string, hasMore: boolean }
+export type ChatMessagePage = { items: Array<ChatMessage>, nextCursor: string, hasMore: boolean }
+/** 只提取成功响应中的统一data信封；失败返回null，由页面使用接口错误文案反馈。 */
+export function chatPayload(result: HttpResult): UTSJSONObject | null { return result.ok && result.data != null ? jsonObject(result.data, 'data') : null }
+/** 只有用户显式点击联系商家才调用；后端按订单唯一键幂等创建或返回已有会话。 */
+export function createOrderChat(orderId: number): Promise<HttpResult> { return httpPost('/chat/conversations', { orderId: orderId }, true) }
+/** 按游标加载20条会话摘要，游标由服务端返回，不使用客户端计算页码或加载全部记录。 */
+export function fetchChatConversations(cursor: string): Promise<HttpResult> { return httpGet('/chat/conversations?size=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : ''), true) }
+/** 读取实时沟通权限与订单摘要；canSend只用于界面状态，发送时后端仍会重新校验。 */
+export function fetchChatDetail(id: string): Promise<HttpResult> { return httpGet('/chat/conversations/' + encodeURIComponent(id), true) }
+/** 首屏取最近30条；before加载更早历史，after补拉断线后的增量，两种方向不会同时提交。 */
+export function fetchChatMessages(id: string, before: number = 0, after: number = -1): Promise<HttpResult> {
+    return httpGet('/chat/conversations/' + encodeURIComponent(id) + '/messages?size=30' + (before > 0 ? '&beforeSeq=' + before : (after >= 0 ? '&afterSeq=' + after : '')), true)
+}
+/** 提交当前用户阅读到的服务端序号，服务端保证水位单调递增并拒绝超过会话最大序号的值。 */
+export function readChat(id: string, seq: number): Promise<HttpResult> { return httpPost('/chat/conversations/' + encodeURIComponent(id) + '/read', { lastReadSeq: seq }, true) }
+/** 读取当前账号可见聊天的未读总量，与系统订单通知分别统计后汇总到Tab角标。 */
+export function fetchChatUnreadCount(): Promise<HttpResult> { return httpGet('/chat/unread-count', true) }
+/** 校验公开会话标识与订单ID，拒绝结构不完整的数据，避免错误导航到其他资源。 */
+export function parseChatConversation(row: UTSJSONObject | null): ChatConversation | null {
+    if (row == null) return null
+    const id = jsonString(row, 'conversationUuid') ?? ''; const orderId = jsonNumber(row, 'orderId') ?? 0
+    if (!/^[0-9a-f-]{36}$/.test(id) || !Number.isInteger(orderId) || orderId <= 0) return null
+    return { conversationUuid: id, orderId: orderId, orderNo: jsonString(row, 'orderNo') ?? '', windowName: jsonString(row, 'windowName') ?? '店铺', preview: jsonString(row, 'preview') ?? '', activityAt: jsonString(row, 'activityAt') ?? '', lastSeq: jsonNumber(row, 'lastSeq') ?? 0, unreadCount: jsonNumber(row, 'unreadCount') ?? 0, canSend: jsonBoolean(row, 'canSend') ?? false }
+}
+/** 校验消息UUID、正整数序号和正文；服务端序号是排序依据，不依赖设备时间。 */
+export function parseChatMessage(row: UTSJSONObject): ChatMessage | null {
+    const id = jsonString(row, 'messageUuid') ?? ''; const seq = jsonNumber(row, 'seq') ?? 0; const content = jsonString(row, 'content')
+    if (!/^[0-9a-f-]{36}$/.test(id) || !Number.isInteger(seq) || seq <= 0 || content == null) return null
+    return { messageUuid: id, seq: seq, senderUuid: jsonString(row, 'senderUuid') ?? '', senderName: jsonString(row, 'senderName') ?? '', senderSide: jsonString(row, 'senderSide') ?? '', clientMessageId: jsonString(row, 'clientMessageId') ?? '', content: content, createdAt: jsonString(row, 'createdAt') ?? '' }
+}
+/** 整页校验会话集合与后续游标；存在坏记录时整页失败，不用残缺页面推进分页位置。 */
+export function parseChatConversations(result: HttpResult): ChatConversationPage | null {
+    const data = chatPayload(result); if (data == null) return null
+    const rows = jsonArray(data, 'items'); const more = jsonBoolean(data, 'hasMore'); const cursor = jsonString(data, 'nextCursor') ?? ''
+    if (rows == null || more == null || (more && (rows.length == 0 || cursor.length == 0))) return null
+    const items: Array<ChatConversation> = []
+    for (let i = 0; i < rows.length; i++) { const row = rows[i]; if (row == null || typeof row != 'object' || Array.isArray(row)) return null; const item = parseChatConversation(row as UTSJSONObject); if (item == null) return null; items.push(item) }
+    return { items: items, nextCursor: cursor, hasMore: more }
+}
+/** 校验消息页和数值序号游标；有下一页时必须有有效游标，防止无限加载同一页。 */
+export function parseChatMessages(result: HttpResult): ChatMessagePage | null {
+    const data = chatPayload(result); if (data == null) return null
+    const rows = jsonArray(data, 'items'); const more = jsonBoolean(data, 'hasMore'); const cursor = jsonString(data, 'nextCursor') ?? ''
+    if (rows == null || more == null || (more && !/^[1-9][0-9]*$/.test(cursor))) return null
+    const items: Array<ChatMessage> = []
+    for (let i = 0; i < rows.length; i++) { const row = rows[i]; if (row == null || typeof row != 'object' || Array.isArray(row)) return null; const item = parseChatMessage(row as UTSJSONObject); if (item == null) return null; items.push(item) }
+    return { items: items, nextCursor: cursor, hasMore: more }
+}

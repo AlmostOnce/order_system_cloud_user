@@ -3,9 +3,10 @@ import { fetchUnreadNotificationCount, requestNotificationSocketTicket, parseNot
 import { API_BASE_URL } from '../common/config.uts'
 import { getAccessToken, isSessionClosing } from '../common/storage.uts'
 import { parseTokenPayload } from '../common/jwt.uts'
-import { jsonNumber } from '../common/json.uts'
+import { fetchChatUnreadCount } from '../api/chat.uts'
+import { jsonNumber, jsonString, parseJsonObject } from '../common/json.uts'
 
-export const notificationState = reactive({ unreadCount: 0 })
+export const notificationState = reactive({ unreadCount: 0, chatUnreadCount: 0 })
 let owner = ''
 let active = false
 let generation = 0
@@ -15,43 +16,85 @@ let retryTimer = 0
 let pollTimer = 0
 let refreshing = false
 const listeners: Array<() => void> = []
+const chatListeners: Array<() => void> = []
+type PendingChat = { id: string, timer: number, resolve: (frame: UTSJSONObject | null) => void }
+const pendingChats: Array<PendingChat> = []
+let socketReady = false
+/** 注册聊天变化监听并去重；系统订单通知与聊天分开分发，避免互相触发无关页面刷新。 */
+export function subscribeChat(listener: () => void): void { if (chatListeners.indexOf(listener) < 0) chatListeners.push(listener) }
+/** 移除当前页面的聊天监听，页面隐藏后不继续补拉或修改界面。 */
+export function unsubscribeChat(listener: () => void): void { const i = chatListeners.indexOf(listener); if (i >= 0) chatListeners.splice(i, 1) }
+/** 按请求幂等键完成一次等待并清理超时定时器；重复ACK或迟到结果不会重复完成Promise。 */
+function finishChat(id: string, frame: UTSJSONObject | null): void {
+    const index = pendingChats.findIndex((item: PendingChat): boolean => item.id == id)
+    if (index < 0) return
+    const item = pendingChats[index]; pendingChats.splice(index, 1); clearTimeout(item.timer); item.resolve(frame)
+}
+/** 连接断开或账号切换时终止全部等待；返回未确认而非假定失败，页面可用原键安全重试。 */
+function failChats(): void { while (pendingChats.length > 0) finishChat(pendingChats[0].id, null) }
+/** 只允许当前账号在已就绪的共享连接上发送；10秒无ACK视为结果未确认，禁止同一幂等键同时存在多个等待。 */
+export function sendChatMessage(id: string, clientId: string, content: string): Promise<UTSJSONObject | null> {
+    const task = socket
+    if (!active || !socketReady || task == null || identity() != owner || pendingChats.some((p: PendingChat): boolean => p.id == clientId)) return Promise.resolve(null)
+    return new Promise<UTSJSONObject | null>((resolve) => {
+        const timer = setTimeout(() => { finishChat(clientId, null) }, 10000)
+        pendingChats.push({ id: clientId, timer: timer, resolve: resolve })
+        task.send({ data: JSON.stringify({ type: 'chat.send', requestId: clientId, conversationUuid: id, clientMessageId: clientId, content: content }), fail: () => { finishChat(clientId, null) } })
+    })
+}
+/** 聊天变化仅通知聊天订阅者，同时更新消息总角标；正文由页面授权补拉。 */
+function chatChanged(): void { refreshNotificationCount(); for (let i = 0; i < chatListeners.length; i++) chatListeners[i]() }
 
+
+/** 登记系统订单通知监听，重复订阅不会重复触发页面回调。 */
 export function subscribeNotifications(listener: () => void): void {
     if (listeners.indexOf(listener) < 0) listeners.push(listener)
 }
+/** 页面离开时解除系统通知监听，避免隐藏页面继续处理状态变化。 */
 export function unsubscribeNotifications(listener: () => void): void {
     const index = listeners.indexOf(listener)
     if (index >= 0) listeners.splice(index, 1)
 }
+/** 读取当前账号公开标识，用于把连接与请求结果绑定到创建它们的登录会话。 */
 function identity(): string {
     if (isSessionClosing()) return ''
     return parseTokenPayload(getAccessToken())?.userUuid ?? ''
 }
+/** 合并系统通知与聊天未读量；系统通知会话行仍只展示自己的未读数。 */
 function renderBadge(): void {
-    if (notificationState.unreadCount > 0) uni.setTabBarBadge({ index: 2, text: notificationState.unreadCount > 99 ? '99+' : notificationState.unreadCount.toString() })
+    const total = notificationState.unreadCount + notificationState.chatUnreadCount
+    if (total > 0) uni.setTabBarBadge({ index: 2, text: total > 99 ? '99+' : total.toString() })
     else uni.removeTabBarBadge({ index: 2 })
 }
+/** 并行查询两类未读数；代次和账号校验阻止旧会话结果污染新账号，单类失败保留该类原值。 */
 export async function refreshNotificationCount(): Promise<void> {
     if (!active || refreshing) return
     refreshing = true
     const version = generation
     try {
-        const result = await fetchUnreadNotificationCount()
+        const results = await Promise.all([fetchUnreadNotificationCount(), fetchChatUnreadCount()])
+        const result = results[0]
         if (!active || version != generation) return
         if (identity() != owner) { stopNotificationSession(true); return }
         const count = result.ok && result.data != null ? jsonNumber(result.data, 'data') : null
-        if (count != null && count >= 0) { notificationState.unreadCount = count; renderBadge() }
+        if (count != null && count >= 0) notificationState.unreadCount = count
+        const chat = results[1]; const chatCount = chat.ok && chat.data != null ? jsonNumber(chat.data, 'data') : null
+        if (chatCount != null && chatCount >= 0) notificationState.chatUnreadCount = chatCount
+        renderBadge()
     } finally { if (version == generation) refreshing = false }
 }
+/** 系统通知变化触发未读统计及订单状态订阅，不把聊天消息误识别为订单状态变更。 */
 function changed(): void {
     refreshNotificationCount()
     for (let i = 0; i < listeners.length; i++) listeners[i]()
 }
+/** 按退避策略重连，代次校验保证退出登录后的旧连接不会自行恢复。 */
 function reconnect(version: number): void {
     if (!active || version != generation || retryTimer > 0) return
     const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(retry++, 5)))
     retryTimer = setTimeout(() => { retryTimer = 0; connect(version) }, delay)
 }
+/** 先获取短效一次性票据再建立共享Socket；事件回调检查连接代次，ACK按requestId匹配原发送任务。 */
 async function connect(version: number): Promise<void> {
     if (!active || version != generation) return
     if (identity() != owner) { stopNotificationSession(true); return }
@@ -68,13 +111,21 @@ async function connect(version: number): Promise<void> {
     const finish = () => {
         if (ended) return
         ended = true
-        if (version == generation) { socket = null; reconnect(version) }
+        if (version == generation) { socket = null; socketReady = false; failChats(); reconnect(version) }
     }
-    task.onOpen((_event) => { if (active && version == generation) { retry = 0; changed() } })
-    task.onMessage((_event) => { if (active && version == generation && identity() == owner) changed() })
+    task.onOpen((_event) => { if (active && version == generation) { retry = 0; socketReady = true; changed(); chatChanged() } })
+    task.onMessage((event) => {
+        if (!active || version != generation || identity() != owner || typeof event.data != 'string') return
+        const frame = parseJsonObject(event.data as string); if (frame == null) return
+        const type = jsonString(frame, 'type') ?? ''
+        if (type == 'notification.changed') changed()
+        else if (type == 'chat.changed') chatChanged()
+        else if (type == 'chat.ack' || type == 'chat.error') finishChat(jsonString(frame, 'requestId') ?? '', frame)
+    })
     task.onClose((_event) => { finish() })
     task.onError((_event) => { finish(); task.close({}) })
 }
+/** 幂等启动当前账号的通知连接及兜底轮询；账号变化时先清理旧连接，避免跨账号复用。 */
 export function startNotificationSession(): void {
     const user = identity()
     if (user.length == 0) { stopNotificationSession(true); return }
@@ -83,17 +134,20 @@ export function startNotificationSession(): void {
     owner = user; active = true
     refreshNotificationCount()
     connect(generation)
-    // The list remains recoverable if the push connection is unavailable.
+    // 即使实时推送断开也定期更新角标；ping维持代理空闲连接，聊天正文由可见页面补查。
     pollTimer = setInterval(() => {
         if (identity() != owner) { stopNotificationSession(true); return }
         refreshNotificationCount()
+        const task = socket
+        if (socketReady && task != null) task.send({ data: '{"type":"ping"}' })
     }, 30000)
 }
+/** 退出登录或暂停时取消重连、轮询、连接和消息等待；clear为true时同步清空账号与角标。 */
 export function stopNotificationSession(clear: boolean = false): void {
-    active = false; generation++; refreshing = false; retry = 0
+    socketReady = false; failChats(); active = false; generation++; refreshing = false; retry = 0
     if (retryTimer > 0) { clearTimeout(retryTimer); retryTimer = 0 }
     if (pollTimer > 0) { clearInterval(pollTimer); pollTimer = 0 }
     const current = socket; socket = null
     if (current != null) current.close({})
-    if (clear) { owner = ''; notificationState.unreadCount = 0; renderBadge() }
+    if (clear) { owner = ''; notificationState.unreadCount = 0; notificationState.chatUnreadCount = 0; renderBadge() }
 }

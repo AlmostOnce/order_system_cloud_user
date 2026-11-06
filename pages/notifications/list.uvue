@@ -2,7 +2,7 @@
     <view class="account-page conversation-page">
         <view class="account-status conversation-status" :style="'height:' + statusBarHeight + 'px'"></view>
         <view class="account-nav conversation-nav"><text class="conversation-page-title">消息</text></view>
-        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#F5F5F5" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#F5F5F5" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMoreChats">
             <view class="conversation-list">
                 <view class="conversation-entry" hover-class="conversation-entry-pressed" @click="openOrders">
                     <image class="conversation-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image>
@@ -16,6 +16,13 @@
                     </view>
                 </view>
                 <view class="conversation-divider"></view>
+                <view v-for="chat in chats" :key="chat.conversationUuid" class="conversation-entry" hover-class="conversation-entry-pressed" @click="openChat(chat.conversationUuid)">
+                    <business-image class="conversation-avatar" src="" kind="window" :preview="false"></business-image>
+                    <view class="conversation-copy"><text class="conversation-name" :max-lines="1">{{ chat.windowName }}</text><text class="conversation-preview" :max-lines="1">{{ chat.preview.length > 0 ? chat.preview : '暂无消息' }}</text><text class="conversation-time" :max-lines="1">订单 {{ chat.orderNo }}</text></view>
+                    <view class="conversation-meta"><text class="conversation-time">{{ chat.activityAt.substring(5,16).replace('T', ' ') }}</text><view v-if="chat.unreadCount > 0" class="conversation-badge"><text class="conversation-badge-text">{{ chat.unreadCount > 99 ? '99+' : chat.unreadCount }}</text></view></view>
+                </view>
+                <text v-if="chatLoading" class="conversation-error">正在获取商家会话…</text>
+                <text v-if="chatError.length > 0" class="conversation-error">{{ chatError }}</text>
                 <text v-if="errorText.length >0" class="conversation-error">
 {{ errorText }}</text>
             </view>
@@ -27,15 +34,17 @@
 </template>
 <script setup lang="uts">
 import { reactive, toRefs, computed } from 'vue'
+import BusinessImage from '../../components/business-image/business-image.uvue'
+import { ChatConversation, fetchChatConversations, parseChatConversations } from '../../api/chat.uts'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
 import { NotificationItem, fetchNotifications, parseNotificationPage } from '../../api/notifications.uts'
-import { notificationState, startNotificationSession, subscribeNotifications, unsubscribeNotifications, refreshNotificationCount } from '../../store/notifications.uts'
+import { notificationState, startNotificationSession, subscribeNotifications, unsubscribeNotifications, subscribeChat, unsubscribeChat, refreshNotificationCount } from '../../store/notifications.uts'
 import { currentUser } from '../../store/auth.uts'
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 import { accountDate } from '../../common/account.uts'
 
-const state = reactive({ statusBarHeight: 0, userUuid: '', version: 0, loading: false, loaded: false, refreshing: false, currentRefreshTime: '', errorText: '', latest: null as NotificationItem | null })
-const { statusBarHeight, loading, refreshing, currentRefreshTime, errorText, latest } = toRefs(state)
+const state = reactive({ chats: [] as Array<ChatConversation>, chatCursor: '', chatMore: false, chatLoading: false, chatError: '', statusBarHeight: 0, userUuid: '', version: 0, loading: false, loaded: false, refreshing: false, currentRefreshTime: '', errorText: '', latest: null as NotificationItem | null })
+const { chats, chatLoading, chatError, statusBarHeight, loading, refreshing, currentRefreshTime, errorText, latest } = toRefs(state)
 const unreadCount = computed((): number => notificationState.unreadCount)
 const preview = computed((): string => {
     const item = state.latest
@@ -47,6 +56,7 @@ const latestTime = computed((): string => {
 })
 let visible = false
 let pending = false
+let chatQueued = false
 async function load(): Promise<void> {
     if (state.loading) { pending = true; return }
     state.loading = true; state.errorText = ''
@@ -69,21 +79,39 @@ function refreshPage(): void {
     if (state.loading || state.refreshing) return
     state.refreshing = true
     const start = Date.now(); state.currentRefreshTime = refreshTimeLabel(start)
-    Promise.all([load(), refreshNotificationCount()]).finally(() => {
+    Promise.all([load(), loadChats(true), refreshNotificationCount()]).finally(() => {
         finishPullRefresh(start, state.errorText.length == 0, (_time: string) => { state.refreshing = false })
     })
 }
+/** 按服务端游标加载会话并按UUID去重；并发变化合并排队处理，避免加载期间漏掉新消息摘要。 */
+async function loadChats(reset: boolean = true): Promise<void> {
+    if (state.chatLoading) { if (reset) chatQueued = true; return }
+    const version = state.version; const owner = state.userUuid; state.chatLoading = true; state.chatError = ''
+    try {
+        const result = await fetchChatConversations(reset ? '' : state.chatCursor)
+        if (version != state.version || currentUser()?.userUuid != owner) return
+        const page = parseChatConversations(result)
+        if (page == null) { if (result.statusCode != 404) state.chatError = '商家会话暂时不可用，请下拉重试'; return }
+        const merged = reset ? [] as Array<ChatConversation> : state.chats.slice()
+        for (let i = 0; i < page.items.length; i++) { const row = page.items[i]; const index = merged.findIndex((item: ChatConversation): boolean => item.conversationUuid == row.conversationUuid); if (index >= 0) merged[index] = row; else merged.push(row) }
+        state.chats = merged; state.chatCursor = page.nextCursor; state.chatMore = page.hasMore
+    } finally { if (version == state.version) { state.chatLoading = false; if (chatQueued && visible) { chatQueued = false; loadChats(true) } } }
+}
+/** 滚动到底部继续加载下一页，禁止加载中或已无更多数据时重复发起。 */
+function loadMoreChats(): void { if (state.chatMore && !state.chatLoading) loadChats(false) }
+function chatsChanged(): void { if (visible) loadChats(true) }
+function openChat(uuid: string): void { uni.navigateTo({ url: '/pages/notifications/chat?conversationUuid=' + uuid }) }
 function changed(): void { if (visible) load() }
 function openOrders(): void { uni.navigateTo({ url: '/pages/notifications/orders' }) }
 onPageShow(() => {
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight
     const user = currentUser()
     if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
-    if (user.userUuid != state.userUuid) { state.version++; state.userUuid = user.userUuid; state.latest = null; state.loaded = false; state.loading = false; state.errorText = '' }
-    visible = true; subscribeNotifications(changed); startNotificationSession(); load()
+    if (user.userUuid != state.userUuid) { state.version++; state.userUuid = user.userUuid; state.chats = []; state.chatCursor = ''; state.chatMore = false; state.chatLoading = false; state.latest = null; state.loaded = false; state.loading = false; state.errorText = '' }
+    visible = true; subscribeNotifications(changed); subscribeChat(chatsChanged); startNotificationSession(); load(); loadChats(true)
 })
-onPageHide(() => { visible = false; pending = false; unsubscribeNotifications(changed) })
-onUnload(() => { visible = false; state.version++; unsubscribeNotifications(changed) })
+onPageHide(() => { visible = false; pending = false; chatQueued = false; unsubscribeNotifications(changed); unsubscribeChat(chatsChanged) })
+onUnload(() => { visible = false; state.version++; unsubscribeNotifications(changed); unsubscribeChat(chatsChanged) })
 </script>
 <style>
 @import '../../styles/account.css';

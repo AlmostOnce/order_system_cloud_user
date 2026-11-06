@@ -1,0 +1,163 @@
+<template>
+    <view class="chat-page" :style="'height:' + availableHeight + 'px'">
+        <view :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="chat-nav"><view class="chat-back" @click="goBack"><view class="account-back-icon"></view></view><text class="chat-title" :max-lines="1">{{ title }}</text><view class="chat-spacer"></view></view>
+        <view class="chat-order" @click="openOrder"><text class="chat-order-text" :max-lines="1">订单 {{ orderNo }}</text><text class="chat-order-link">查看订单</text></view>
+        <scroll-view class="chat-messages" direction="vertical" :scroll-into-view="scrollTarget" @scrolltoupper="older" @scroll="scrolled" @scrolltolower="reachedBottom">
+            <text v-if="loadingOlder" class="chat-tip">正在加载更早消息…</text>
+            <text v-if="errorText.length > 0" class="chat-tip">{{ errorText }}</text>
+            <text v-if="items.length == 0 && !loading" class="chat-tip">可以在这里与商家沟通订单</text>
+            <view v-for="item in items" :key="item.messageUuid" :id="'message-' + item.messageUuid" class="chat-row" :class="item.senderUuid == userUuid ? 'chat-row-self' : ''">
+                <business-image class="chat-avatar" :src="item.senderUuid == userUuid ? avatarUrl : ''" :kind="item.senderUuid == userUuid ? 'avatar' : 'window'" :preview="false"></business-image>
+                <view class="chat-message-copy"><text class="chat-sender">{{ item.senderUuid == userUuid ? '我' : item.senderName }}</text><view class="chat-bubble" :class="item.senderUuid == userUuid ? 'chat-bubble-self' : ''"><text class="chat-content">{{ item.content }}</text></view><text class="chat-time">{{ item.createdAt.substring(5,16).replace('T', ' ') }}</text></view>
+            </view>
+            <view v-for="item in pending" :key="item.id" class="chat-pending"><text class="chat-content">{{ item.content }}</text><text class="chat-time">{{ item.sending ? '发送中…' : '发送未确认' }}</text><button v-if="!item.sending" class="chat-retry button-text button-text-42" :disabled="sending || !canSend" @click="retry(item.id)">重试发送</button></view>
+            <view id="chat-bottom" class="chat-bottom"></view>
+        </scroll-view>
+        <text v-if="!canSend && ready" class="chat-readonly">沟通期限已结束，可查看历史消息</text>
+        <view v-else class="chat-composer"><textarea class="chat-input" v-model="draft" :maxlength="500" :disabled="!ready" :adjust-position="false" placeholder="输入消息…" @keyboardheightchange="keyboardChanged" /><button class="chat-send button-text button-text-46" :disabled="sending || !ready || draft.trim().length == 0" @click="send">发送</button></view>
+    </view>
+</template>
+<script setup lang="uts">
+import { reactive, toRefs, computed, nextTick } from 'vue'
+import BusinessImage from '../../components/business-image/business-image.uvue'
+import { ChatMessage, fetchChatDetail, fetchChatMessages, parseChatConversation, parseChatMessage, parseChatMessages, chatPayload, readChat } from '../../api/chat.uts'
+import { sendChatMessage, subscribeChat, unsubscribeChat, startNotificationSession, refreshNotificationCount } from '../../store/notifications.uts'
+import { jsonObject, jsonString } from '../../common/json.uts'
+import { currentUser } from '../../store/auth.uts'
+import { newCommentKey } from '../../common/comments.uts'
+import { fetchMyProfile, walletPayload } from '../../api/wallet.uts'
+import { toast } from '../../common/feedback.uts'
+type PendingMessage = { id: string, content: string, sending: boolean }
+// syncedSeq是HTTP补拉水位，不能用ACK中的较大序号代替，否则会跳过尚未补齐的中间消息。
+// lastReadSeq是本页已提交的阅读水位，与已同步序号分离，避免“收到”被误认为“已读”。
+const state = reactive({ conversationUuid: '', userUuid: '', avatarUrl: '', title: '联系商家', orderId: 0, orderNo: '', items: [] as Array<ChatMessage>, pending: [] as Array<PendingMessage>, draft: '', sending: false, ready: false, canSend: false, loading: false, loadingOlder: false, hasOlder: false, olderSeq: 0, syncedSeq: 0, lastReadSeq: 0, statusBarHeight: 0, windowHeight: 0, keyboardHeight: 0, scrollTarget: '', errorText: '' })
+const { userUuid, avatarUrl, title, orderNo, items, pending, draft, sending, ready, canSend, loading, loadingOlder, statusBarHeight, scrollTarget, errorText } = toRefs(state)
+const availableHeight = computed((): number => Math.max(0, state.windowHeight - state.keyboardHeight))
+let visible = false; let version = 0; let queued = false; let timer = 0; let atBottom = true
+/** 验证页面仍可见、请求代次未变化且登录账号未切换，阻止迟到响应把旧账号消息写入当前界面。 */
+function alive(v: number): boolean { return visible && version == v && currentUser()?.userUuid == state.userUuid }
+/** 按服务端消息UUID去重并按会话序号排序；用本人幂等键移除待确认消息，兼容ACK与补拉先后到达。 */
+function merge(rows: Array<ChatMessage>): void {
+    const result = state.items.slice()
+    for (let i = 0; i < rows.length; i++) { const row = rows[i]; if (!result.some((m: ChatMessage): boolean => m.messageUuid == row.messageUuid)) result.push(row) }
+    result.sort((a: ChatMessage, b: ChatMessage): number => a.seq - b.seq); state.items = result
+    state.pending = state.pending.filter((p: PendingMessage): boolean => !result.some((m: ChatMessage): boolean => m.clientMessageId == p.id && m.senderUuid == state.userUuid))
+}
+/** 先清空滚动目标再等待视图更新，使连续收到消息时仍能触发滚动到底部。 */
+function bottom(): void { state.scrollTarget = ''; nextTick(() => { if (visible) state.scrollTarget = 'chat-bottom' }) }
+/** 仅在页面可见且用户位于底部时推进阅读水位；提前记录本次序号，避免已读推送再次触发相同请求。失败允许下次重试。 */
+function markRead(): void {
+    if (!visible || !atBottom || state.items.length == 0) return
+    const v = version; const seq = state.items[state.items.length - 1].seq
+    if (seq <= state.lastReadSeq) return
+    state.lastReadSeq = seq // 在发请求前占住水位，防止已读事件回流造成重复提交。
+    readChat(state.conversationUuid, seq).then((result) => { if (!alive(v)) return; if (!result.ok) state.lastReadSeq = 0; else refreshNotificationCount() })
+}
+/** 用户到达底部后才确认最新消息已读，不把查看较早历史当作阅读全部消息。 */
+function reachedBottom(): void { atBottom = true; markRead() }
+/** 滚动期间暂停自动已读；到达底部由scrolltolower事件重新启用，避免阅读历史时被新消息打断。 */
+function scrolled(): void { atBottom = false }
+/** 串行查询会话权限和消息增量；推送只是变化提示，正文以HTTP补拉为准。加载期间的新提示合并为一次后续补查。 */
+async function sync(): Promise<void> {
+    if (!visible) return
+    if (state.loading) { queued = true; return }
+    const v = version; state.loading = true; state.errorText = ''
+    try {
+        const detail = await fetchChatDetail(state.conversationUuid); if (!alive(v)) return
+        const chat = parseChatConversation(chatPayload(detail))
+        if (chat == null) { state.ready = false; state.errorText = detail.message.length > 0 ? detail.message : '会话暂时不可用'; return }
+        state.title = chat.windowName; state.orderId = chat.orderId; state.orderNo = chat.orderNo; state.canSend = chat.canSend; state.ready = true
+        let more = true
+        while (more && alive(v)) {
+            const initial = state.syncedSeq == 0
+            const result = await fetchChatMessages(state.conversationUuid, 0, initial ? -1 : state.syncedSeq); if (!alive(v)) return
+            const page = parseChatMessages(result); if (page == null) { state.errorText = result.message.length > 0 ? result.message : '消息暂时无法获取'; return }
+            merge(page.items)
+            if (initial) { state.hasOlder = page.hasMore; state.olderSeq = state.items.length > 0 ? state.items[0].seq : 0 }
+            const high = page.items.reduce((value: number, m: ChatMessage): number => Math.max(value, m.seq), state.syncedSeq)
+            if (high == state.syncedSeq) break
+            // 仅HTTP连续补拉推进同步水位；发送ACK只合并消息，不推进此值。
+            state.syncedSeq = high; more = !initial && page.hasMore
+        }
+        if (atBottom) { bottom(); nextTick(() => { if (alive(v)) markRead() }) }
+    } finally { if (version == v) { state.loading = false; if (queued && visible) { queued = false; sync() } } }
+}
+/** 向上触顶时按最早序号查询历史页，并保持原首条消息为滚动锚点，避免插入历史后视图跳到底部。 */
+async function older(): Promise<void> {
+    if (state.loadingOlder || state.loading || !state.hasOlder || state.olderSeq <= 0) return
+    atBottom = false; const v = version; state.loadingOlder = true
+    try { const result = await fetchChatMessages(state.conversationUuid, state.olderSeq); if (!alive(v)) return
+        const page = parseChatMessages(result); if (page == null) { toast('更早消息加载失败，请重试'); return }
+        const anchor = state.items.length > 0 ? 'message-' + state.items[0].messageUuid : ''
+        merge(page.items); state.hasOlder = page.hasMore; state.olderSeq = state.items.length > 0 ? state.items[0].seq : 0
+        state.scrollTarget = ''; nextTick(() => { if (alive(v)) state.scrollTarget = anchor })
+    } finally { if (version == v) state.loadingOlder = false }
+}
+/** 通过共享Socket发送并等待落库ACK；超时保留原文及幂等键，重试不会生成第二条消息。页面离开后忽略迟到结果。 */
+async function transmit(item: PendingMessage): Promise<void> {
+    if (state.sending || !state.ready || !state.canSend) return
+    const v = version; state.sending = true; item.sending = true
+    try { const frame = await sendChatMessage(state.conversationUuid, item.id, item.content); if (!alive(v)) return
+        if (frame == null || jsonString(frame, 'type') != 'chat.ack') { item.sending = false; toast(frame == null ? '发送未确认，可重试原消息' : (jsonString(frame, 'message') ?? '发送失败')); return }
+        const row = jsonObject(frame, 'message'); const message = row == null ? null : parseChatMessage(row)
+        if (message == null) { item.sending = false; toast('发送结果未确认，请重试'); return }
+        merge([message]); atBottom = true; bottom(); sync()
+    } finally { if (version == v) { state.sending = false; item.sending = false } }
+}
+/** 为一次用户发送生成唯一幂等键并暂存原文；清空输入框后通过待确认区域展示发送结果。 */
+function send(): void {
+    if (state.sending || !state.ready || !state.canSend || state.draft.trim().length == 0) return
+    const item: PendingMessage = { id: newCommentKey(), content: state.draft, sending: false }; state.pending.push(item); state.draft = ''; transmit(state.pending[state.pending.length - 1])
+}
+/** 沿用首次发送的内容和幂等键；不能生成新键，否则ACK丢失时会造成重复落库。 */
+function retry(id: string): void { const item = state.pending.find((p: PendingMessage): boolean => p.id == id); if (item != null) transmit(item) }
+/** 手动扣除键盘高度，配合adjustNothing保持输入区可见，避免系统与页面同时挤压布局。 */
+function keyboardChanged(event: UniInputKeyboardHeightChangeEvent): void { state.keyboardHeight = Math.max(0, event.detail.height); if (atBottom) bottom() }
+/** 返回消息列表；连接由会话仓库共享管理，页面返回不主动关闭其他页面使用的Socket。 */
+function goBack(): void { uni.navigateBack() }
+/** 从会话进入对应订单详情，订单ID只用于导航，真正的数据权限仍由后端校验。 */
+function openOrder(): void { if (state.orderId > 0) uni.navigateTo({ url: '/pages/order/detail?orderId=' + state.orderId }) }
+onLoad((options: OnLoadOptions) => { state.conversationUuid = options['conversationUuid'] ?? '' })
+// 学生端只接入CUSTOMER；商家工作台由独立Vue管理端后续实现。
+onPageShow(() => {
+    const user = currentUser(); if (user == null || user.roleCode != 'CUSTOMER') { uni.reLaunch({ url: '/pages/login/login' }); return }
+    if (state.userUuid.length > 0 && state.userUuid != user.userUuid) { state.items = []; state.pending = []; state.draft = ''; state.ready = false; uni.navigateBack(); return }
+    state.userUuid = user.userUuid; const avatarVersion = version; fetchMyProfile().then((result) => { if (!alive(avatarVersion)) return; const data = walletPayload(result); if (data != null) state.avatarUrl = jsonString(data, 'avatarUrl') ?? '' }); const info = uni.getWindowInfo(); state.windowHeight = info.windowHeight; state.statusBarHeight = info.statusBarHeight
+    visible = true; subscribeChat(sync); startNotificationSession(); sync(); if (timer == 0) timer = setInterval(() => { sync() }, 30000)
+})
+/** 页面隐藏或销毁时注销订阅、清理轮询并使请求失效；待确认消息保留为可重试状态，销毁时再清除。 */
+function leave(): void { visible = false; version++; queued = false; state.loading = false; state.loadingOlder = false; state.sending = false; state.keyboardHeight = 0; for (let i = 0; i < state.pending.length; i++) state.pending[i].sending = false; unsubscribeChat(sync); if (timer > 0) { clearInterval(timer); timer = 0 } }
+onPageHide(() => { leave() })
+onUnload(() => { leave(); state.draft = ''; state.pending = [] })
+</script>
+<style>
+@import '../../styles/account.css';
+.chat-page { background-color: #F1F1F1; flex-direction: column; }
+.chat-nav { height: 52px; flex-direction: row; align-items: center; background-color: #F5F5F5; }
+.chat-back { width: 48px; height: 48px; align-items: center; justify-content: center; }
+.chat-title { flex: 1; font-size: 17px; line-height: 24px; font-weight: bold; text-align: center; color: #252525; }
+.chat-spacer { width: 48px; }
+.chat-order { padding: 9px 16px; background-color: #FFFFFF; flex-direction: row; align-items: center; }
+.chat-order-text { flex: 1; font-size: 12px; color: #888888; }
+.chat-order-link { font-size: 12px; color: #C2410C; }
+.chat-messages { flex: 1; min-height: 0; }
+.chat-row { margin: 12px 14px; flex-direction: row; align-items: flex-start; }
+.chat-row-self { flex-direction: row-reverse; }
+.chat-avatar { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; }
+.chat-message-copy { flex-shrink: 1; margin: 0 9px; }
+.chat-sender { font-size: 11px; line-height: 17px; color: #999999; margin-bottom: 3px; }
+.chat-bubble { padding: 10px 12px; background-color: #FFFFFF; border-radius: 10px; }
+.chat-bubble-self { background-color: #FBE3D5; }
+.chat-content { font-size: 14px; line-height: 22px; color: #2B2724; }
+.chat-time { margin-top: 4px; font-size: 10px; line-height: 16px; color: #999999; }
+.chat-tip { padding: 12px 16px; font-size: 12px; line-height: 19px; color: #888888; text-align: center; }
+.chat-pending { margin: 8px 16px 8px 62px; padding: 10px 12px; border-radius: 10px; background-color: #FBE3D5; }
+.chat-retry { height: 42px; line-height: 42px; margin: 4px 0 0 0; padding: 0; background-color: transparent; border-width: 0; font-size: 12px; color: #C2410C; }
+.chat-bottom { height: 10px; }
+/* 输入区固定占据底部布局，页面整体随键盘缩高；不把输入框插入可滚动历史中。 */
+.chat-composer { flex-direction: row; align-items: flex-end; padding: 9px 12px 18px; background-color: #F8F8F8; }
+.chat-input { flex: 1; height: 46px; padding: 10px; border-radius: 9px; background-color: #FFFFFF; font-size: 14px; color: #252525; }
+.chat-send { width: 66px; height: 46px; line-height: 46px; padding: 0; margin: 0 0 0 9px; border-width: 0; border-radius: 9px; font-size: 14px; color: #FFFFFF; background-color: #E4572E; }
+.chat-readonly { padding: 16px; font-size: 12px; line-height: 20px; color: #888888; text-align: center; background-color: #F8F8F8; }
+</style>
