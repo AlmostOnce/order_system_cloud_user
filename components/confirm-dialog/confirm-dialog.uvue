@@ -4,6 +4,8 @@
             <view class="confirm-accent"></view>
             <text class="confirm-title">{{ title }}</text>
             <text class="confirm-message">{{ message }}</text>
+            <!-- 简短输入表单由调用页提供；外壳及操作按钮仍统一，避免各页另写弹窗样式。 -->
+            <slot></slot>
             <view class="confirm-actions">
                 <button class="confirm-cancel button-text button-text-46" :disabled="busy" @click="dismiss">{{ cancelText }}</button>
                 <button class="confirm-submit button-text button-text-46" :disabled="busy" @click="submit">{{ busy ? busyText : confirmText }}</button>
