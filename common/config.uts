@@ -14,9 +14,11 @@
 let apiBaseUrl = 'http://localhost:8088/api'
 
 // #ifdef APP-ANDROID
-// Android 本地调试通过 adb reverse tcp:8088 tcp:8088 访问电脑 Nginx。
-// 真机与模拟器均使用此转发；重新连接设备后需重新设置，发布时改为正式 HTTPS 地址。
-apiBaseUrl = 'http://127.0.0.1:8088/api'
+// Android 真机通过局域网直接访问电脑 Nginx，避免无线调试重连后丢失 ADB 转发而请求失败。
+// 手机与电脑须处于可互访的局域网，电脑须开放并监听 8088；连接失败时由统一请求层提示错误。
+// 此地址当前由 DHCP 分配，长期使用需在路由器保留 192.168.0.14；换网络或电脑地址变化时同步修改。
+// 仅用于本地开发，发布前必须替换为正式 HTTPS 域名；接口、图片和 WebSocket 共用该入口。
+apiBaseUrl = 'http://192.168.0.14:8088/api'
 // #endif
 
 /**
@@ -24,7 +26,7 @@ apiBaseUrl = 'http://127.0.0.1:8088/api'
  *
  * - 微信小程序：开发者工具运行在开发机上，保持 localhost 即可，
  *   但需在开发者工具中勾选「不校验合法域名」。
- * - Android 本地调试：使用 ADB 反向端口转发。
+ * - Android 本地调试：直接访问电脑局域网地址，不依赖 ADB 连接或端口转发。
  */
 // 固化为常量对外导出，页面与业务层只读该常量，不得再用可变量 apiBaseUrl。
 export const API_BASE_URL: string = apiBaseUrl
