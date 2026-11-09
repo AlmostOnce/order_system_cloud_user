@@ -1294,31 +1294,34 @@ onReady(() => {
 
 	/* ---------- 分类栏与菜品区 ---------- */
 
-	/* 主体：左侧固定宽度分类导航 + 右侧连续菜品区。
-	   显式声明 align-items: stretch，让两个滚动区自动撑满剩余高度，
-	   否则 scroll-view 高度收缩为内容高度，无法滚动 */
+    /* 主体预留分类栏宽度，右侧滚动区占余下宽高；左栏绝对定位锚定左侧，
+       避免原生首次布局将分类栏排到右侧且百分比高度归零。 */
 	.catalog {
+        position: relative;
         min-height: 0;
         overflow: hidden;
-		flex: 1;
-		width: 100%;
-		flex-direction: row;
-		align-items: stretch;
+        flex: 1;
+        width: 100%;
+        padding-left: 76px;
+        flex-direction: column;
 	}
 
 	/* 固定在最左侧，高度跟随菜单区；真正滚动的是内部 rail，避免 scroll-view 自己去抢横向位置。 */
+    /* 分类栏固定左侧，主体明确预留76px；不让原生横向flex和百分比高度共同决定栏位。 */
 	.rail-shell {
-		width: 76px;
-		flex-shrink: 0;
-		height: 100%;
-		background-color: #F7EEE6;
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 76px;
+        background-color: #F7EEE6;
 	}
 
 	/* 左侧分类栏：米色底与右侧菜品区形成层次，宽度固定不随内容撑开 */
 	.rail {
-		width: 76px;
-		height: 100%;
-		flex-shrink: 0;
+        width: 76px;
+        flex: 1;
+        min-height: 0;
 		background-color: #F7EEE6;
 	}
 
@@ -1361,8 +1364,9 @@ onReady(() => {
 	/* 右侧菜品区：白底，底部留出购物车栏高度，最后一张卡片不被遮挡 */
 	.dishes {
         min-width: 0;
-		flex: 1;
-		height: 100%;
+        min-height: 0;
+        width: 100%;
+        flex: 1;
 		background-color: #FFFFFF;
 	}
 
