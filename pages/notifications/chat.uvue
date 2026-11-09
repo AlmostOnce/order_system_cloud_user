@@ -1,46 +1,84 @@
 <template>
-    <view class="chat-page" :style="'height:' + availableHeight + 'px'">
-        <view :style="'height:' + statusBarHeight + 'px'"></view>
+    <view class="chat-page" :style="'padding-bottom:' + keyboardHeight + 'px'">
+        <view class="chat-status-fill" :style="'height:' + statusBarHeight + 'px'"></view>
         <view class="chat-nav"><view class="chat-back" @click="goBack"><view class="account-back-icon"></view></view><text class="chat-title" :max-lines="1">{{ title }}</text><view class="chat-spacer"></view></view>
-        <view class="chat-order" @click="openOrder"><text class="chat-order-text" :max-lines="1">订单 {{ orderNo }}</text><text class="chat-order-link">查看订单</text></view>
+        <view id="chat-order-anchor" class="chat-order" @click="openOrder"><text class="chat-order-text" :max-lines="1">订单 {{ orderNo }}</text><text class="chat-order-link">{{ orderExpanded ? '收起订单' : '查看订单' }}</text></view>
         <scroll-view class="chat-messages" direction="vertical" :scroll-into-view="scrollTarget" @scrolltoupper="older" @scroll="scrolled" @scrolltolower="reachedBottom">
             <text v-if="loadingOlder" class="chat-tip">正在加载更早消息…</text>
             <text v-if="errorText.length > 0" class="chat-tip">{{ errorText }}</text>
             <text v-if="items.length == 0 && !loading" class="chat-tip">可以在这里与商家沟通订单</text>
-            <view v-for="item in items" :key="item.messageUuid" :id="'message-' + item.messageUuid" class="chat-row" :class="item.senderUuid == userUuid ? 'chat-row-self' : ''">
-                <business-image class="chat-avatar" :src="item.senderUuid == userUuid ? avatarUrl : ''" :kind="item.senderUuid == userUuid ? 'avatar' : 'window'" :preview="false"></business-image>
-                <view class="chat-message-copy"><text class="chat-sender">{{ item.senderUuid == userUuid ? '我' : item.senderName }}</text><view class="chat-bubble" :class="item.senderUuid == userUuid ? 'chat-bubble-self' : ''"><text class="chat-content">{{ item.content }}</text></view><text class="chat-time">{{ item.createdAt.substring(5,16).replace('T', ' ') }}</text></view>
+            <view v-for="item in visibleItems" :key="item.messageUuid" :id="'message-' + item.messageUuid" class="chat-row" :class="item.senderUuid == userUuid ? 'chat-row-self' : ''">
+                <view class="chat-avatar"><business-image :src="item.senderUuid == userUuid ? avatarUrl : ''" :kind="item.senderUuid == userUuid ? 'avatar' : 'window'" :preview="false"></business-image></view>
+                <view class="chat-message-copy" :style="'max-width:' + messageMaxWidth + 'px'" :class="item.senderUuid == userUuid ? 'chat-message-copy-self' : '' "><text v-if="item.senderUuid != userUuid" class="chat-sender">{{ item.senderUuid == userUuid ? '我' : item.senderName }}</text><view :id="'bubble-' + item.messageUuid" class="chat-bubble" @longpress="messageActions(item)" :class="item.senderUuid == userUuid ? 'chat-bubble-self' : ''"><text class="chat-content">{{ item.revokedAt.length > 0 ? '该消息已撤回' : item.content }}</text></view><view class="chat-message-meta"><text class="chat-time">{{ item.createdAt.substring(5,16).replace('T', ' ') }}</text><text v-if="item.senderUuid == userUuid && item.revokedAt.length == 0 && peerReadSeq >= 0" class="chat-receipt" :class="item.seq <= peerReadSeq ? 'chat-receipt-read' : ''">{{ item.seq <= peerReadSeq ? '已读' : '未读' }}</text></view></view>
             </view>
-            <view v-for="item in pending" :key="item.id" class="chat-pending"><text class="chat-content">{{ item.content }}</text><text class="chat-time">{{ item.sending ? '发送中…' : '发送未确认' }}</text><button v-if="!item.sending" class="chat-retry button-text button-text-42" :disabled="sending || !canSend" @click="retry(item.id)">重试发送</button></view>
+            <!-- 待确认消息与已发送消息使用相同头像和气泡，重试入口不再撑成独立大卡片。 -->
+            <view v-for="item in pending" :key="item.id" class="chat-row chat-row-self">
+                <view class="chat-avatar"><business-image :src="avatarUrl" kind="avatar" :preview="false"></business-image></view>
+                <view class="chat-message-copy chat-message-copy-self" :style="'max-width:' + messageMaxWidth + 'px'"><view :id="'pending-bubble-' + item.id" class="chat-bubble chat-bubble-self" @longpress="pendingActions(item)"><text class="chat-content">{{ item.content }}</text></view><view class="chat-send-state"><text class="chat-time">{{ item.sending ? '发送中…' : '发送未确认' }}</text><view v-if="!item.sending && !sending && canSend" class="chat-retry" @click="retry(item.id)"><text class="chat-retry-text">重试</text></view></view></view>
+            </view>
             <view id="chat-bottom" class="chat-bottom"></view>
         </scroll-view>
         <text v-if="!canSend && ready" class="chat-readonly">沟通期限已结束，可查看历史消息</text>
-        <view v-else class="chat-composer"><textarea class="chat-input" v-model="draft" :maxlength="500" :disabled="!ready" :adjust-position="false" placeholder="输入消息…" @keyboardheightchange="keyboardChanged" /><button class="chat-send button-text button-text-46" :disabled="sending || !ready || draft.trim().length == 0" @click="send">发送</button></view>
+        <view v-else class="chat-composer"><view class="chat-input-box"><textarea class="chat-input" v-model="draft" :maxlength="500" :disabled="!ready" :adjust-position="false" :auto-height="true" placeholder="输入消息…" placeholder-style="font-size:14px;color:#999999;" @keyboardheightchange="keyboardChanged" /></view><button class="chat-send button-text button-text-44" :disabled="sending || !ready || draft.trim().length == 0" @click="send">发送</button></view>
+        <!-- 订单详情独立悬浮，不占聊天列表高度；点击空白或关闭收起，保留原滚动位置。 -->
+        <view v-if="orderExpanded" class="chat-order-mask" @click="closeOrderSummary">
+            <view class="chat-order-summary" :style="'top:' + orderPanelTop + 'px'" @click.stop="ignoreMenuClick">
+                <view class="chat-summary-toolbar"><text class="chat-summary-name">订单信息</text><view class="chat-summary-close" @click.stop="closeOrderSummary"><text class="chat-order-link">关闭</text></view></view>
+            <text v-if="orderLoading" class="chat-order-note">正在加载订单…</text>
+            <view v-else-if="orderSummary != null">
+                <view class="chat-summary-head"><text class="chat-summary-name" :max-lines="1">{{ title }}</text><text class="chat-summary-status">{{ orderSummary!.status }}</text></view>
+                <scroll-view class="chat-order-lines" :style="'height:' + Math.min(3, orderSummary!.items.length) * 26 + 'px'" direction="vertical">
+                    <view v-for="line in orderSummary!.items" :key="line.productId" class="chat-summary-line"><text class="chat-summary-product" :max-lines="1">{{ line.productName }}</text><text class="chat-summary-quantity">×{{ line.quantity }}</text><text class="chat-summary-price">¥{{ line.lineAmount.toFixed(2) }}</text></view>
+                </scroll-view>
+                <view class="chat-summary-total"><text class="chat-order-note">订单金额</text><text class="chat-summary-amount">¥{{ orderSummary!.totalAmount.toFixed(2) }}</text></view>
+            </view>
+            <view v-else class="chat-order-reload" @click="loadOrderSummary"><text class="chat-order-link">订单加载失败，点击重试</text></view>
+        </view>
+            </view>
+        <!-- 透明遮罩只承接关闭操作；菜单绝对定位，不挤压消息，也不遮暗整个聊天页。 -->
+        <view v-if="menuVisible" class="chat-menu-mask" @click="closeMessageMenu">
+            <view class="chat-context-menu" :style="'left:' + menuLeft + 'px;top:' + menuTop + 'px;width:' + menuWidth + 'px'" @click.stop="ignoreMenuClick">
+                <view class="chat-menu-actions"><view v-for="action in menuActions" :key="action" class="chat-menu-action" @click.stop="chooseMessageAction(action)"><text class="chat-menu-label">{{ action }}</text></view></view>
+                <view class="chat-menu-arrow" :style="'left:' + menuArrowLeft + 'px'" :class="menuBelow ? 'chat-menu-arrow-top' : 'chat-menu-arrow-bottom'"></view>
+            </view>
+        </view>
     </view>
 </template>
 <script setup lang="uts">
-import { reactive, toRefs, computed, nextTick } from 'vue'
+import { reactive, toRefs, computed, nextTick, getCurrentInstance } from 'vue'
 import BusinessImage from '../../components/business-image/business-image.uvue'
-import { ChatMessage, fetchChatDetail, fetchChatMessages, parseChatConversation, parseChatMessage, parseChatMessages, chatPayload, readChat } from '../../api/chat.uts'
+import { ChatMessage, revokeChatMessage, fetchRevokedChatMessages, fetchChatDetail, fetchChatMessages, parseChatConversation, parseChatMessage, parseChatMessages, parseRevokedMessages, chatPayload, readChat } from '../../api/chat.uts'
 import { sendChatMessage, subscribeChat, unsubscribeChat, startNotificationSession, refreshNotificationCount } from '../../store/notifications.uts'
 import { jsonObject, jsonString } from '../../common/json.uts'
 import { currentUser } from '../../store/auth.uts'
 import { newCommentKey } from '../../common/comments.uts'
 import { fetchMyProfile, walletPayload } from '../../api/wallet.uts'
+import { CustomerOrder, fetchOrder, orderPayload, parseOrder } from '../../api/order.uts'
+import { hiddenChatMessages, hideChatMessage } from '../../common/chat-local.uts'
 import { toast } from '../../common/feedback.uts'
 type PendingMessage = { id: string, content: string, sending: boolean }
 // syncedSeq是HTTP补拉水位，不能用ACK中的较大序号代替，否则会跳过尚未补齐的中间消息。
 // lastReadSeq是本页已提交的阅读水位，与已同步序号分离，避免“收到”被误认为“已读”。
-const state = reactive({ conversationUuid: '', userUuid: '', avatarUrl: '', title: '联系商家', orderId: 0, orderNo: '', items: [] as Array<ChatMessage>, pending: [] as Array<PendingMessage>, draft: '', sending: false, ready: false, canSend: false, loading: false, loadingOlder: false, hasOlder: false, olderSeq: 0, syncedSeq: 0, lastReadSeq: 0, statusBarHeight: 0, windowHeight: 0, keyboardHeight: 0, scrollTarget: '', errorText: '' })
-const { userUuid, avatarUrl, title, orderNo, items, pending, draft, sending, ready, canSend, loading, loadingOlder, statusBarHeight, scrollTarget, errorText } = toRefs(state)
+// 订单摘要仅在用户展开时加载，不改变聊天同步游标或占用另一页面。
+const state = reactive({ menuVisible: false, menuArrowLeft: 24, menuLeft: 0, menuTop: 0, menuWidth: 0, menuBelow: false, menuActions: [] as Array<string>, windowWidth: 0, hiddenIds: [] as Array<string>, peerReadSeq: -1, messageMaxWidth: 240, orderPanelTop: 100, orderExpanded: false, orderLoading: false, orderSummary: null as CustomerOrder | null, conversationUuid: '', userUuid: '', avatarUrl: '', title: '联系商家', orderId: 0, orderNo: '', items: [] as Array<ChatMessage>, pending: [] as Array<PendingMessage>, draft: '', sending: false, ready: false, canSend: false, loading: false, loadingOlder: false, hasOlder: false, olderSeq: 0, syncedSeq: 0, lastReadSeq: 0, statusBarHeight: 0, windowHeight: 0, keyboardHeight: 0, scrollTarget: '', errorText: '' })
+const { orderPanelTop, keyboardHeight, menuArrowLeft, menuVisible, menuLeft, menuTop, menuWidth, menuBelow, menuActions, peerReadSeq, messageMaxWidth, orderExpanded, orderLoading, orderSummary, userUuid, avatarUrl, title, orderNo, items, pending, draft, sending, ready, canSend, loading, loadingOlder, statusBarHeight, scrollTarget, errorText } = toRefs(state)
+// 删除只影响渲染，原序号仍参与同步和已读水位，避免翻页重复加载已删除消息。
+const visibleItems = computed((): Array<ChatMessage> => state.items.filter((m: ChatMessage): boolean => !state.hiddenIds.includes(m.messageUuid) && !state.hiddenIds.includes(m.clientMessageId)))
+// 窗口尺寸只用于浮层防越界，页面占位由原生flex容器决定，避免读取上一Tab的旧高度。
 const availableHeight = computed((): number => Math.max(0, state.windowHeight - state.keyboardHeight))
+const chatInstance = getCurrentInstance()
+// 菜单只保存资源标识，执行时从当前状态重新取消息，避免异步撤回后仍复制旧正文。
+let menuMessageId = ''; let menuPendingId = ''; let menuGeneration = 0
 let visible = false; let version = 0; let queued = false; let timer = 0; let atBottom = true
 /** 验证页面仍可见、请求代次未变化且登录账号未切换，阻止迟到响应把旧账号消息写入当前界面。 */
 function alive(v: number): boolean { return visible && version == v && currentUser()?.userUuid == state.userUuid }
 /** 按服务端消息UUID去重并按会话序号排序；用本人幂等键移除待确认消息，兼容ACK与补拉先后到达。 */
 function merge(rows: Array<ChatMessage>): void {
     const result = state.items.slice()
-    for (let i = 0; i < rows.length; i++) { const row = rows[i]; if (!result.some((m: ChatMessage): boolean => m.messageUuid == row.messageUuid)) result.push(row) }
+    for (let i = 0; i < rows.length; i++) { const row = rows[i]; const index = result.findIndex((m: ChatMessage): boolean => m.messageUuid == row.messageUuid)
+        // 撤回是同一序号的状态变化，不能仅因UUID已存在就跳过；撤回状态不可被迟到旧快照覆盖。
+        if (index < 0) result.push(row); else if (result[index].revokedAt.length == 0 || row.revokedAt.length > 0) result[index] = row
+    }
     result.sort((a: ChatMessage, b: ChatMessage): number => a.seq - b.seq); state.items = result
     state.pending = state.pending.filter((p: PendingMessage): boolean => !result.some((m: ChatMessage): boolean => m.clientMessageId == p.id && m.senderUuid == state.userUuid))
 }
@@ -57,7 +95,7 @@ function markRead(): void {
 /** 用户到达底部后才确认最新消息已读，不把查看较早历史当作阅读全部消息。 */
 function reachedBottom(): void { atBottom = true; markRead() }
 /** 滚动期间暂停自动已读；到达底部由scrolltolower事件重新启用，避免阅读历史时被新消息打断。 */
-function scrolled(): void { atBottom = false }
+function scrolled(): void { atBottom = false; closeMessageMenu() }
 /** 串行查询会话权限和消息增量；推送只是变化提示，正文以HTTP补拉为准。加载期间的新提示合并为一次后续补查。 */
 async function sync(): Promise<void> {
     if (!visible) return
@@ -67,7 +105,9 @@ async function sync(): Promise<void> {
         const detail = await fetchChatDetail(state.conversationUuid); if (!alive(v)) return
         const chat = parseChatConversation(chatPayload(detail))
         if (chat == null) { state.ready = false; state.errorText = detail.message.length > 0 ? detail.message : '会话暂时不可用'; return }
-        state.title = chat.windowName; state.orderId = chat.orderId; state.orderNo = chat.orderNo; state.canSend = chat.canSend; state.ready = true
+        state.title = chat.windowName; state.orderId = chat.orderId; state.orderNo = chat.orderNo; state.canSend = chat.canSend;
+        // 阅读回执跟随会话变化补查；同一会话水位只前进，不因迟到响应从已读退回未读。
+        state.peerReadSeq = Math.max(state.peerReadSeq, chat.peerReadSeq); state.ready = true
         let more = true
         while (more && alive(v)) {
             const initial = state.syncedSeq == 0
@@ -79,6 +119,14 @@ async function sync(): Promise<void> {
             if (high == state.syncedSeq) break
             // 仅HTTP连续补拉推进同步水位；发送ACK只合并消息，不推进此值。
             state.syncedSeq = high; more = !initial && page.hasMore
+        }
+        // 撤回不增加消息序号；分批补查已加载UUID，才能更新首屏以外的旧消息。
+        const ids = state.items.filter((m: ChatMessage): boolean => m.revokedAt.length == 0).map((m: ChatMessage): string => m.messageUuid)
+        for (let offset = 0; offset < ids.length; offset += 50) {
+            const result = await fetchRevokedChatMessages(state.conversationUuid, ids.slice(offset, offset + 50)); if (!alive(v)) return
+            // 接口统一data为消息数组，使用下方独立解析器，失败保留现有状态，后续事件/轮询重试。
+            const updates = parseRevokedMessages(result)
+            if (updates != null) merge(updates)
         }
         if (atBottom) { bottom(); nextTick(() => { if (alive(v)) markRead() }) }
     } finally { if (version == v) { state.loading = false; if (queued && visible) { queued = false; sync() } } }
@@ -101,7 +149,8 @@ async function transmit(item: PendingMessage): Promise<void> {
     try { const frame = await sendChatMessage(state.conversationUuid, item.id, item.content); if (!alive(v)) return
         if (frame == null || jsonString(frame, 'type') != 'chat.ack') { item.sending = false; toast(frame == null ? '发送未确认，可重试原消息' : (jsonString(frame, 'message') ?? '发送失败')); return }
         const row = jsonObject(frame, 'message'); const message = row == null ? null : parseChatMessage(row)
-        if (message == null) { item.sending = false; toast('发送结果未确认，请重试'); return }
+        // ACK必须同时属于当前会话、当前账号和本次幂等消息，不能仅凭一帧成功类型清除待确认内容。
+        if (message == null || jsonString(frame, 'conversationUuid') != state.conversationUuid || message.clientMessageId != item.id || message.senderUuid != state.userUuid) { item.sending = false; toast('发送结果未确认，请重试'); return }
         merge([message]); atBottom = true; bottom(); sync()
     } finally { if (version == v) { state.sending = false; item.sending = false } }
 }
@@ -112,52 +161,195 @@ function send(): void {
 }
 /** 沿用首次发送的内容和幂等键；不能生成新键，否则ACK丢失时会造成重复落库。 */
 function retry(id: string): void { const item = state.pending.find((p: PendingMessage): boolean => p.id == id); if (item != null) transmit(item) }
+/** 复制完整消息正文，保留换行；不复制头像、时间、操作按钮或HTML标签。 */
+function copyMessage(content: string): void { uni.setClipboardData({ data: content, success: () => { toast('已复制') }, fail: () => { toast('复制失败，请重试') } }) }
+/** 客户端期限仅用于菜单展示，真实十分钟期限始终由服务端校验。 */
+function canRevoke(item: ChatMessage): boolean {
+    const created = Date.parse(item.createdAt.replace(' ', 'T') + (/[Zz]|[+-][0-9]{2}:[0-9]{2}$/.test(item.createdAt) ? '' : '+08:00'))
+    const age = Date.now() - created
+    return item.senderUuid == state.userUuid && item.revokedAt.length == 0 && age >= 0 && age <= 600000
+}
+/** 本机删除先保存UUID，再过滤渲染；不发送服务端删除请求，不影响对方。 */
+function deleteLocal(item: ChatMessage): void {
+    if (!hideChatMessage(state.userUuid, state.conversationUuid, item.messageUuid)) { toast('删除失败，请重试'); return }
+    state.hiddenIds = hiddenChatMessages(state.userUuid, state.conversationUuid)
+}
+/** 点击空白、滚动或离页均关闭；代次使迟到的测量结果不能重新打开旧菜单。 */
+function closeMessageMenu(): void { state.menuVisible = false; menuGeneration++; menuMessageId = ''; menuPendingId = '' }
+/** 菜单内部空白不冒泡到遮罩；具体按钮单独执行，防止点一次被当成关闭。 */
+function ignoreMenuClick(): void {}
+/** 固定每项64px、总高48px；优先放气泡上方，顶部不足时放下方，左右约束在屏幕内。 */
+function positionMessageMenu(left: number, top: number, width: number, height: number): void {
+    state.menuWidth = state.menuActions.length * 64
+    state.menuLeft = Math.max(12, Math.min(left + width / 2 - state.menuWidth / 2, state.windowWidth - state.menuWidth - 12))
+    state.menuArrowLeft = Math.max(12, Math.min(left + width / 2 - state.menuLeft - 5, state.menuWidth - 22))
+    state.menuBelow = top - 58 < state.statusBarHeight + 52
+    state.menuTop = Math.max(state.statusBarHeight + 52, Math.min(state.menuBelow ? top + height + 10 : top - 58, availableHeight.value - 60))
+    state.menuVisible = true
+}
+/** 测量气泡而非手指位置，长消息和左右双方消息均贴近自身；测量失败不弹出错误位置的菜单。 */
+function showMessageMenu(anchor: string, actions: Array<string>): void {
+    const generation = ++menuGeneration
+    state.menuActions = actions
+    if (chatInstance == null) return
+    uni.createSelectorQuery().in(chatInstance.proxy).select('#' + anchor).boundingClientRect((rect: any) => {
+        if (!visible || generation != menuGeneration || rect == null) return
+        positionMessageMenu(rect.left as number, rect.top as number, rect.width as number, rect.height as number)
+    }).exec()
+}
+/** 只在气泡长按时显示操作；撤回保留本人十分钟限制，本地删除不影响对方。 */
+function messageActions(item: ChatMessage): void {
+    closeMessageMenu(); menuMessageId = item.messageUuid
+    const actions: Array<string> = []; if (item.revokedAt.length == 0) actions.push('复制')
+    if (canRevoke(item)) actions.push('撤回'); actions.push('删除')
+    showMessageMenu('bubble-' + item.messageUuid, actions)
+}
+/** 点击后先关闭浮层，再执行既有操作；重新核验当前消息状态，不依赖打开菜单时的旧快照。 */
+function chooseMessageAction(action: string): void {
+    const messageId = menuMessageId; const pendingId = menuPendingId; closeMessageMenu()
+    const item = state.items.find((m: ChatMessage): boolean => m.messageUuid == messageId)
+    if (item != null) {
+        if (action == '复制' && item.revokedAt.length == 0) copyMessage(item.content)
+        else if (action == '撤回') { if (canRevoke(item)) revokeMessage(item); else toast('消息已超过十分钟或已撤回') }
+        else if (action == '删除') deleteLocal(item)
+        return
+    }
+    const pending = state.pending.find((p: PendingMessage): boolean => p.id == pendingId)
+    if (pending == null) return
+    if (action == '复制') copyMessage(pending.content)
+    else if (action == '删除') {
+        if (pending.sending) { toast('消息正在发送，请稍后操作'); return }
+        if (!hideChatMessage(state.userUuid, state.conversationUuid, pending.id)) { toast('删除失败，请重试'); return }
+        state.hiddenIds = hiddenChatMessages(state.userUuid, state.conversationUuid)
+        state.pending = state.pending.filter((p: PendingMessage): boolean => p.id != pending.id)
+    }
+}
+/** 撤回成功以服务端快照替换原消息；网络失败不提前抹除，允许同一消息安全重试。 */
+async function revokeMessage(item: ChatMessage): Promise<void> {
+    const v = version; const result = await revokeChatMessage(state.conversationUuid, item.messageUuid); if (!alive(v)) return
+    const data = chatPayload(result); const row = data == null ? null : parseChatMessage(data)
+    if (row == null) { toast(result.message.length > 0 ? result.message : '撤回未确认，请重试'); return }
+    merge([row]); toast('已撤回')
+}
+/** 未确认消息使用相同气泡菜单，不能提供假撤回；发送中不显示删除入口。 */
+function pendingActions(item: PendingMessage): void {
+    closeMessageMenu(); menuPendingId = item.id
+    showMessageMenu('pending-bubble-' + item.id, item.sending ? ['复制'] : ['复制', '删除'])
+}
 /** 手动扣除键盘高度，配合adjustNothing保持输入区可见，避免系统与页面同时挤压布局。 */
-function keyboardChanged(event: UniInputKeyboardHeightChangeEvent): void { state.keyboardHeight = Math.max(0, event.detail.height); if (atBottom) bottom() }
+function keyboardChanged(event: UniInputKeyboardHeightChangeEvent): void { closeMessageMenu(); state.keyboardHeight = Math.max(0, event.detail.height); if (atBottom) bottom() }
 /** 返回消息列表；连接由会话仓库共享管理，页面返回不主动关闭其他页面使用的Socket。 */
 function goBack(): void { uni.navigateBack() }
-/** 从会话进入对应订单详情，订单ID只用于导航，真正的数据权限仍由后端校验。 */
-function openOrder(): void { if (state.orderId > 0) uni.navigateTo({ url: '/pages/order/detail?orderId=' + state.orderId }) }
+/** 关闭订单覆盖层只影响浮层，不重排消息、不修改消息滚动目标。 */
+function closeOrderSummary(): void { state.orderExpanded = false }
+/** 在订单栏下方悬浮展示；每次打开重新查询真实订单，失败保留就地重试入口。 */
+async function openOrder(): Promise<void> {
+    closeMessageMenu(); state.orderExpanded = !state.orderExpanded
+    if (state.orderExpanded) {
+        state.orderPanelTop = state.statusBarHeight + 90
+        const v = version
+        if (chatInstance != null) uni.createSelectorQuery().in(chatInstance.proxy).select('#chat-order-anchor').boundingClientRect((rect: any) => {
+            if (alive(v) && state.orderExpanded && rect != null) state.orderPanelTop = (rect.bottom as number) + 8
+        }).exec()
+        await loadOrderSummary()
+    }
+}
+/** 复用本人订单接口，限制并发；页面隐藏或账号变化后丢弃响应，失败保留就地重试入口。 */
+async function loadOrderSummary(): Promise<void> {
+    if (state.orderId <= 0 || state.orderLoading || !visible) return
+    const v = version; state.orderLoading = true; state.orderSummary = null
+    try {
+        const result = await fetchOrder(state.orderId); if (!alive(v)) return
+        const data = orderPayload(result); const order = data == null ? null : parseOrder(data)
+        if (order == null || order.orderId != state.orderId) { toast('订单暂时无法加载，请重试'); return }
+        state.orderSummary = order
+    } catch (_error) { if (alive(v)) toast('订单暂时无法加载，请重试') }
+    finally { if (version == v) state.orderLoading = false }
+}
+/** 首帧完成及窗口变化后更新测量值；不再用这些快照固定页面高度。 */
+function updateChatWindow(): void {
+    const info = uni.getWindowInfo()
+    state.windowWidth = info.windowWidth; state.windowHeight = info.windowHeight
+    state.messageMaxWidth = Math.max(120, info.windowWidth - 100); state.statusBarHeight = info.statusBarHeight
+    closeMessageMenu()
+}
+onReady(() => { updateChatWindow() })
+onResize(() => { updateChatWindow() })
 onLoad((options: OnLoadOptions) => { state.conversationUuid = options['conversationUuid'] ?? '' })
 // 学生端只接入CUSTOMER；商家工作台由独立Vue管理端后续实现。
 onPageShow(() => {
     const user = currentUser(); if (user == null || user.roleCode != 'CUSTOMER') { uni.reLaunch({ url: '/pages/login/login' }); return }
     if (state.userUuid.length > 0 && state.userUuid != user.userUuid) { state.items = []; state.pending = []; state.draft = ''; state.ready = false; uni.navigateBack(); return }
-    state.userUuid = user.userUuid; const avatarVersion = version; fetchMyProfile().then((result) => { if (!alive(avatarVersion)) return; const data = walletPayload(result); if (data != null) state.avatarUrl = jsonString(data, 'avatarUrl') ?? '' }); const info = uni.getWindowInfo(); state.windowHeight = info.windowHeight; state.statusBarHeight = info.statusBarHeight
+    state.userUuid = user.userUuid; state.hiddenIds = hiddenChatMessages(state.userUuid, state.conversationUuid); const avatarVersion = version; fetchMyProfile().then((result) => { if (!alive(avatarVersion)) return; const data = walletPayload(result); if (data != null) state.avatarUrl = jsonString(data, 'avatarUrl') ?? '' }); updateChatWindow()
     visible = true; subscribeChat(sync); startNotificationSession(); sync(); if (timer == 0) timer = setInterval(() => { sync() }, 30000)
 })
 /** 页面隐藏或销毁时注销订阅、清理轮询并使请求失效；待确认消息保留为可重试状态，销毁时再清除。 */
-function leave(): void { visible = false; version++; queued = false; state.loading = false; state.loadingOlder = false; state.sending = false; state.keyboardHeight = 0; for (let i = 0; i < state.pending.length; i++) state.pending[i].sending = false; unsubscribeChat(sync); if (timer > 0) { clearInterval(timer); timer = 0 } }
+function leave(): void { closeOrderSummary(); closeMessageMenu(); visible = false; version++; queued = false; state.loading = false; state.loadingOlder = false; state.orderLoading = false; state.sending = false; state.keyboardHeight = 0; for (let i = 0; i < state.pending.length; i++) state.pending[i].sending = false; unsubscribeChat(sync); if (timer > 0) { clearInterval(timer); timer = 0 } }
 onPageHide(() => { leave() })
 onUnload(() => { leave(); state.draft = ''; state.pending = [] })
 </script>
 <style>
 @import '../../styles/account.css';
-.chat-page { background-color: #F1F1F1; flex-direction: column; }
-.chat-nav { height: 52px; flex-direction: row; align-items: center; background-color: #F5F5F5; }
+/* 页面由原生容器分配整屏高度；只有消息区伸缩，导航和输入区保持实际高度。 */
+.chat-page { flex: 1; min-height: 0; position: relative; background-color: #F1F1F1; flex-direction: column; }
+.chat-status-fill { flex-shrink: 0; }
+.chat-nav { flex-shrink: 0; height: 52px; flex-direction: row; align-items: center; background-color: #F5F5F5; }
 .chat-back { width: 48px; height: 48px; align-items: center; justify-content: center; }
 .chat-title { flex: 1; font-size: 17px; line-height: 24px; font-weight: bold; text-align: center; color: #252525; }
 .chat-spacer { width: 48px; }
-.chat-order { padding: 9px 16px; background-color: #FFFFFF; flex-direction: row; align-items: center; }
+.chat-order { flex-shrink: 0; padding: 9px 16px; background-color: #FFFFFF; flex-direction: row; align-items: center; }
 .chat-order-text { flex: 1; font-size: 12px; color: #888888; }
 .chat-order-link { font-size: 12px; color: #C2410C; }
+.chat-order-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 90; background-color: rgba(0, 0, 0, 0.12); }
+.chat-order-summary { position: absolute; left: 12px; right: 12px; padding: 12px 14px; border-radius: 12px; background-color: #FFFFFF; border-top-width: 1px; border-top-color: #F1F1F1; }
+.chat-summary-toolbar { flex-direction: row; align-items: center; margin-bottom: 8px; }
+.chat-summary-close { min-width: 44px; height: 36px; align-items: center; justify-content: center; }
+.chat-summary-head { flex-direction: row; align-items: center; margin-bottom: 6px; }
+.chat-summary-name { flex: 1; font-size: 13px; line-height: 20px; color: #333333; font-weight: bold; }
+.chat-summary-status { font-size: 12px; color: #C2410C; }
+.chat-order-lines { flex-shrink: 0; }
+.chat-summary-line { flex-direction: row; align-items: center; padding: 3px 0; }
+.chat-summary-product { flex: 1; font-size: 12px; line-height: 20px; color: #555555; }
+.chat-summary-quantity { width: 36px; font-size: 12px; color: #888888; text-align: right; }
+.chat-summary-price { width: 66px; font-size: 12px; color: #555555; text-align: right; }
+.chat-summary-total { flex-direction: row; align-items: center; justify-content: space-between; margin-top: 6px; }
+.chat-summary-amount { font-size: 14px; line-height: 22px; color: #C2410C; font-weight: bold; }
+.chat-order-note { font-size: 12px; line-height: 20px; color: #888888; }
+.chat-order-reload { min-height: 40px; justify-content: center; }
 .chat-messages { flex: 1; min-height: 0; }
 .chat-row { margin: 12px 14px; flex-direction: row; align-items: flex-start; }
 .chat-row-self { flex-direction: row-reverse; }
-.chat-avatar { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; }
-.chat-message-copy { flex-shrink: 1; margin: 0 9px; }
+.chat-avatar { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; overflow: hidden; }
+.chat-message-copy { flex-shrink: 1; margin: 0 9px; align-items: flex-start; }
+.chat-message-copy-self { align-items: flex-end; }
 .chat-sender { font-size: 11px; line-height: 17px; color: #999999; margin-bottom: 3px; }
 .chat-bubble { padding: 10px 12px; background-color: #FFFFFF; border-radius: 10px; }
 .chat-bubble-self { background-color: #FBE3D5; }
 .chat-content { font-size: 14px; line-height: 22px; color: #2B2724; }
+.chat-message-meta { flex-direction: row; align-items: center; }
+.chat-receipt { margin-top: 4px; margin-left: 6px; font-size: 10px; line-height: 16px; color: #999999; }
+.chat-receipt-read { color: #4B8062; }
 .chat-time { margin-top: 4px; font-size: 10px; line-height: 16px; color: #999999; }
 .chat-tip { padding: 12px 16px; font-size: 12px; line-height: 19px; color: #888888; text-align: center; }
-.chat-pending { margin: 8px 16px 8px 62px; padding: 10px 12px; border-radius: 10px; background-color: #FBE3D5; }
-.chat-retry { height: 42px; line-height: 42px; margin: 4px 0 0 0; padding: 0; background-color: transparent; border-width: 0; font-size: 12px; color: #C2410C; }
+.chat-send-state { flex-direction: row; align-items: center; }
+.chat-retry { min-height: 32px; padding: 0 8px; margin-left: 4px; align-items: center; justify-content: center; }
+.chat-retry-text { font-size: 12px; line-height: 18px; color: #C2410C; }
 .chat-bottom { height: 10px; }
 /* 输入区固定占据底部布局，页面整体随键盘缩高；不把输入框插入可滚动历史中。 */
-.chat-composer { flex-direction: row; align-items: flex-end; padding: 9px 12px 18px; background-color: #F8F8F8; }
-.chat-input { flex: 1; height: 46px; padding: 10px; border-radius: 9px; background-color: #FFFFFF; font-size: 14px; color: #252525; }
-.chat-send { width: 66px; height: 46px; line-height: 46px; padding: 0; margin: 0 0 0 9px; border-width: 0; border-radius: 9px; font-size: 14px; color: #FFFFFF; background-color: #E4572E; }
-.chat-readonly { padding: 16px; font-size: 12px; line-height: 20px; color: #888888; text-align: center; background-color: #F8F8F8; }
+.chat-composer { flex-shrink: 0; flex-direction: row; align-items: flex-end; padding: 8px 12px 14px; background-color: #F8F8F8; }
+/* 外框占据发送按钮以外的固定可用宽度；文字换行后自动增高，最多五行，随后框内滚动。
+   不按文字长度扩大横向宽度，避免将发送按钮挤出屏幕。 */
+.chat-input-box { flex: 1; min-height: 44px; max-height: 120px; padding: 10px; justify-content: center; border-radius: 9px; background-color: #FFFFFF; }
+.chat-input { width: 100%; min-height: 24px; max-height: 100px; padding: 0; font-size: 14px; line-height: 20px; color: #252525; }
+.chat-send { width: 60px; height: 44px; line-height: 44px; padding: 0; margin: 0 0 0 9px; border-width: 0; border-radius: 9px; font-size: 14px; color: #FFFFFF; background-color: #E4572E; }
+.chat-readonly { flex-shrink: 0; padding: 16px; font-size: 12px; line-height: 20px; color: #888888; text-align: center; background-color: #F8F8F8; }
+/* 原生view/text构建贴近气泡的深色菜单，不依赖伪元素、滤镜或网页定位接口。 */
+.chat-menu-mask { position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 100; }
+.chat-context-menu { position: absolute; height: 48px; border-radius: 9px; background-color: #333333; }
+.chat-menu-actions { flex-direction: row; height: 48px; }
+.chat-menu-action { width: 64px; height: 48px; align-items: center; justify-content: center; }
+.chat-menu-label { font-size: 14px; line-height: 20px; color: #FFFFFF; }
+.chat-menu-arrow { position: absolute; width: 10px; height: 10px; background-color: #333333; transform: rotate(45deg); }
+.chat-menu-arrow-top { top: -5px; }
+.chat-menu-arrow-bottom { bottom: -5px; }
 </style>

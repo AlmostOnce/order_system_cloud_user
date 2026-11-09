@@ -1,7 +1,7 @@
 import { httpGet, httpPost, HttpResult } from '../common/http.uts'
 import { jsonArray, jsonBoolean, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
-export type ChatConversation = { conversationUuid: string, orderId: number, orderNo: string, windowName: string, preview: string, activityAt: string, lastSeq: number, unreadCount: number, canSend: boolean }
-export type ChatMessage = { messageUuid: string, seq: number, senderUuid: string, senderName: string, senderSide: string, clientMessageId: string, content: string, createdAt: string }
+export type ChatConversation = { conversationUuid: string, orderId: number, orderNo: string, windowName: string, preview: string, activityAt: string, lastSeq: number, unreadCount: number, canSend: boolean, peerReadSeq: number }
+export type ChatMessage = { messageUuid: string, seq: number, senderUuid: string, senderName: string, senderSide: string, clientMessageId: string, content: string, createdAt: string, revokedAt: string }
 export type ChatConversationPage = { items: Array<ChatConversation>, nextCursor: string, hasMore: boolean }
 export type ChatMessagePage = { items: Array<ChatMessage>, nextCursor: string, hasMore: boolean }
 /** 只提取成功响应中的统一data信封；失败返回null，由页面使用接口错误文案反馈。 */
@@ -20,18 +20,18 @@ export function fetchChatMessages(id: string, before: number = 0, after: number 
 export function readChat(id: string, seq: number): Promise<HttpResult> { return httpPost('/chat/conversations/' + encodeURIComponent(id) + '/read', { lastReadSeq: seq }, true) }
 /** 读取当前账号可见聊天的未读总量，与系统订单通知分别统计后汇总到Tab角标。 */
 export function fetchChatUnreadCount(): Promise<HttpResult> { return httpGet('/chat/unread-count', true) }
-/** 校验公开会话标识与订单ID，拒绝结构不完整的数据，避免错误导航到其他资源。 */
+/** 校验公开会话标识与订单ID；peerReadSeq缺失用-1表示未知，兼容旧服务时不能误报未读。 */
 export function parseChatConversation(row: UTSJSONObject | null): ChatConversation | null {
     if (row == null) return null
     const id = jsonString(row, 'conversationUuid') ?? ''; const orderId = jsonNumber(row, 'orderId') ?? 0
     if (!/^[0-9a-f-]{36}$/.test(id) || !Number.isInteger(orderId) || orderId <= 0) return null
-    return { conversationUuid: id, orderId: orderId, orderNo: jsonString(row, 'orderNo') ?? '', windowName: jsonString(row, 'windowName') ?? '店铺', preview: jsonString(row, 'preview') ?? '', activityAt: jsonString(row, 'activityAt') ?? '', lastSeq: jsonNumber(row, 'lastSeq') ?? 0, unreadCount: jsonNumber(row, 'unreadCount') ?? 0, canSend: jsonBoolean(row, 'canSend') ?? false }
+    return { conversationUuid: id, orderId: orderId, orderNo: jsonString(row, 'orderNo') ?? '', windowName: jsonString(row, 'windowName') ?? '店铺', preview: jsonString(row, 'preview') ?? '', activityAt: jsonString(row, 'activityAt') ?? '', lastSeq: jsonNumber(row, 'lastSeq') ?? 0, unreadCount: jsonNumber(row, 'unreadCount') ?? 0, canSend: jsonBoolean(row, 'canSend') ?? false, peerReadSeq: jsonNumber(row, 'peerReadSeq') ?? -1 }
 }
 /** 校验消息UUID、正整数序号和正文；服务端序号是排序依据，不依赖设备时间。 */
 export function parseChatMessage(row: UTSJSONObject): ChatMessage | null {
     const id = jsonString(row, 'messageUuid') ?? ''; const seq = jsonNumber(row, 'seq') ?? 0; const content = jsonString(row, 'content')
     if (!/^[0-9a-f-]{36}$/.test(id) || !Number.isInteger(seq) || seq <= 0 || content == null) return null
-    return { messageUuid: id, seq: seq, senderUuid: jsonString(row, 'senderUuid') ?? '', senderName: jsonString(row, 'senderName') ?? '', senderSide: jsonString(row, 'senderSide') ?? '', clientMessageId: jsonString(row, 'clientMessageId') ?? '', content: content, createdAt: jsonString(row, 'createdAt') ?? '' }
+    return { messageUuid: id, seq: seq, senderUuid: jsonString(row, 'senderUuid') ?? '', senderName: jsonString(row, 'senderName') ?? '', senderSide: jsonString(row, 'senderSide') ?? '', clientMessageId: jsonString(row, 'clientMessageId') ?? '', content: content, createdAt: jsonString(row, 'createdAt') ?? '', revokedAt: jsonString(row, 'revokedAt') ?? '' }
 }
 /** 整页校验会话集合与后续游标；存在坏记录时整页失败，不用残缺页面推进分页位置。 */
 export function parseChatConversations(result: HttpResult): ChatConversationPage | null {
@@ -50,4 +50,22 @@ export function parseChatMessages(result: HttpResult): ChatMessagePage | null {
     const items: Array<ChatMessage> = []
     for (let i = 0; i < rows.length; i++) { const row = rows[i]; if (row == null || typeof row != 'object' || Array.isArray(row)) return null; const item = parseChatMessage(row as UTSJSONObject); if (item == null) return null; items.push(item) }
     return { items: items, nextCursor: cursor, hasMore: more }
+}
+
+/** 仅服务端校验本人消息及十分钟期限；返回脱敏后的消息快照。 */
+export function revokeChatMessage(id: string, messageUuid: string): Promise<HttpResult> {
+    return httpPost('/chat/conversations/' + encodeURIComponent(id) + '/messages/' + encodeURIComponent(messageUuid) + '/revoke', null, true)
+}
+/** 每批最多50条，只补查当前已加载消息，不全量拉历史；授权仍由服务端执行。 */
+export function fetchRevokedChatMessages(id: string, ids: Array<string>): Promise<HttpResult> {
+    return httpPost('/chat/conversations/' + encodeURIComponent(id) + '/messages/revoked', { messageUuids: ids }, true)
+}
+
+/** 撤回补查返回数组；任一快照不完整时整批丢弃，后续补查重试。 */
+export function parseRevokedMessages(result: HttpResult): Array<ChatMessage> | null {
+    const rows = result.ok && result.data != null ? jsonArray(result.data, 'data') : null
+    if (rows == null) return null
+    const items: Array<ChatMessage> = []
+    for (let i = 0; i < rows.length; i++) { const row = rows[i]; if (row == null || typeof row != 'object' || Array.isArray(row)) return null; const message = parseChatMessage(row as UTSJSONObject); if (message == null || message.revokedAt.length == 0) return null; items.push(message) }
+    return items
 }

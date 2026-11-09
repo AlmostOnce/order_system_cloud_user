@@ -1,0 +1,25 @@
+/** 本机删除标记按账号与会话隔离，只存消息UUID，不存聊天正文。 */
+function key(user: string, conversation: string): string { return 'chat_hidden_' + user + '_' + conversation }
+/** 存储损坏按无删除记录处理，不跨账号读取；不删除服务端聊天或影响对方。 */
+export function hiddenChatMessages(user: string, conversation: string): Array<string> {
+    if (user.length == 0 || conversation.length == 0) return []
+    try {
+        const raw = uni.getStorageSync(key(user, conversation))
+        if (typeof raw != 'string') return []
+        // 真机首次读取不存在的Key返回空串；先判断，不能用JSON.parse抛异常作为空记录分支。
+        const text = (raw as string).trim()
+        if (text.length == 0) return []
+        const rows = JSON.parse(text)
+        if (!Array.isArray(rows)) return []
+        return (rows as Array<any>).filter((id: any): boolean => typeof id == 'string' && /^[0-9a-f-]{36}$/.test(id as string)) as Array<string>
+    } catch (_error) { return [] }
+}
+/** 先落盘再隐藏，写入失败不能假装删除成功；刷新与重进会话继续过滤这些消息。 */
+export function hideChatMessage(user: string, conversation: string, id: string): boolean {
+    if (user.length == 0 || conversation.length == 0) return false
+    try {
+        const ids = hiddenChatMessages(user, conversation)
+        if (!ids.includes(id)) ids.push(id)
+        uni.setStorageSync(key(user, conversation), JSON.stringify(ids)); return true
+    } catch (_error) { return false }
+}
