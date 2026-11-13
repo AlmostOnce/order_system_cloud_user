@@ -109,6 +109,7 @@
 							<view class="dish-body">
 								<text class="dish-name" :max-lines="1">{{ product.productName }}</text>
 								<view class="dish-meta"><text class="dish-rating">{{ cardRatingText(productRatings, product.productId) }}</text><text class="dish-stock">{{ stockHint(product.productId) }}</text></view>
+								<text class="dish-month-sales">月售 {{ monthlyProductSalesText(product.productId) }}</text>
 								<text v-if="product.description.length > 0" class="dish-desc" :max-lines="1">{{ product.description }}</text>
 							</view>
 							</view>
@@ -232,6 +233,7 @@ import { isLoggedIn } from '../../store/auth.uts';
 import { fetchWindowMenu, MenuProduct, WindowMenuResult } from '../../api/menu.uts';
 import { fetchWindowStocks, ProductStock, StockListResult } from '../../api/stock.uts';
 import { CardRating, fetchCardRatings, cardRatingText } from '../../api/comments.uts';
+import { fetchMonthlyProductSales, MonthlyProductSalesItem } from '../../api/statistics.uts';
 import { imageSource } from '../../common/images.uts';
 // 导入购物车接口与类型：数量增减与金额汇总。
 import { fetchCart, addToCart, setCartItemQuantity, removeCartItem, clearCartWindow, CartItem, CartWindow, CartResult, CartActionResult } from '../../api/cart.uts';
@@ -301,6 +303,7 @@ const initialEmptyCartItems: Array<CartItem> = [];
 const initialEmptyStocks: Array<ProductStock> = [];
 const initialCategoryOffsets: Array<CategoryOffset> = [];
 const initialProductRatings: Array<CardRating> = [];
+const initialMonthlyProductSales: Array<MonthlyProductSalesItem> = [];
 const menuInstance = getCurrentInstance();
 let measurementScheduled = false;
 let layoutVersion = 0;
@@ -321,6 +324,9 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     highlightedProductId: 0,
     shopKeyword: '',
     productRatings: initialProductRatings,
+    // 每个窗口只查询一次的本月菜品销量汇总；请求失败时以“--”表示未知。
+    monthlyProductSales: initialMonthlyProductSales,
+    monthlyProductSalesReady: false,
     shopTab: 'menu',
     // 菜品评价抽屉只在点卡片时打开；与购物车面板互斥。内容交给共用评价列表，这里只保存当前菜编号。
     productReviewVisible: false, productReviewReady: false, productReviewId: 0, productReviewName: '',
@@ -453,6 +459,8 @@ function goBack() {
 function loadMenu(): Promise<void> {
     if (menuDisposed) return Promise.resolve();
     const requestVersion = ++menuRequestVersion;
+    state.monthlyProductSales = [];
+    state.monthlyProductSalesReady = false;
     // 使页面上次查询失效，避免返回页面时旧请求覆盖新库存。
     state.stockRequestVersion = state.stockRequestVersion + 1;
     state.stockLoading = false;
@@ -522,6 +530,14 @@ function loadMenu(): Promise<void> {
         }
         // 写回分组列表，驱动页面渲染。
         state.groups = converted;
+        // 统计查询与菜单评分、库存查询彼此独立；失败只影响销量数字，不阻止菜单使用。
+        fetchMonthlyProductSales(menu.windowId).then((salesResult) => {
+            if (menuDisposed || requestVersion != menuRequestVersion) return;
+            if (salesResult.ok) {
+                state.monthlyProductSales = salesResult.products;
+                state.monthlyProductSalesReady = true;
+            }
+        });
         const ratingVersion = ++productRatingVersion;
         state.productRatings = [];
         const productIds: Array<number> = [];
@@ -595,6 +611,17 @@ function stockHint(productId: number): string {
         }
     }
     return '暂未备货';
+}
+
+/** 按产品 ID 读取本月销量；服务尚未返回或失败时明确展示未知值。 */
+function monthlyProductSalesText(productId: number): string {
+    if (!state.monthlyProductSalesReady) return '--';
+    for (let i = 0; i < state.monthlyProductSales.length; i++) {
+        const item = state.monthlyProductSales[i];
+        if (item.productId == productId) return '' + item.sales;
+    }
+    // 已成功的窗口汇总未包含该菜品时，本月销量为零。
+    return '0';
 }
 
 function loadCart(): Promise<void> {
@@ -1287,6 +1314,7 @@ onReady(() => {
 		color: #7A6C60;
 	}
 	.dish-rating { font-size: 11px; line-height: 16px; color: #C2410C; }
+	.dish-month-sales { margin-top: 2px; font-size: 11px; line-height: 16px; color: #A2968B; }
 
 	.step-disabled {
 		opacity: 0.4;

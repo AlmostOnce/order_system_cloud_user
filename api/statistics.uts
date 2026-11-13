@@ -1,0 +1,80 @@
+import { httpGet, HttpResult } from '../common/http.uts'
+import { jsonArray, jsonNumber, jsonObject } from '../common/json.uts'
+
+/** 首页统计接口返回的单个窗口本月已支付菜品份数。 */
+export type MonthlyWindowSalesItem = { windowId: number, sales: number }
+
+/** 点餐页统计接口返回的单个菜品本月已支付份数。 */
+export type MonthlyProductSalesItem = { productId: number, sales: number }
+
+/** 批量窗口月售的解析结果；失败与成功但暂无销量分开表达。 */
+export type MonthlyWindowSalesResult = { ok: boolean, message: string, items: Array<MonthlyWindowSalesItem> }
+
+/** 当前窗口月售的解析结果；windowSales 是窗口总份数，products 是分菜品明细。 */
+export type MonthlyProductSalesResult = {
+	ok: boolean,
+	message: string,
+	windowSales: number,
+	products: Array<MonthlyProductSalesItem>
+}
+
+/**
+ * 一次性读取当前启用窗口的本月销量汇总，首页按 windowId 合并显示。
+ * 统计服务不可用时返回失败结果，调用页保留商品服务返回的窗口列表并显示占位符。
+ */
+export function fetchMonthlyWindowSales(): Promise<MonthlyWindowSalesResult> {
+	return httpGet('/statistics/windows/monthly-sales', true).then((result: HttpResult): MonthlyWindowSalesResult => {
+		const empty: Array<MonthlyWindowSalesItem> = []
+		if (!result.ok || result.data == null) return { ok: false, message: result.message, items: empty }
+		const data = jsonObject(result.data, 'data')
+		const rows = data == null ? null : jsonArray(data, 'items')
+		if (rows == null) return { ok: false, message: '窗口月售数据格式异常', items: empty }
+
+		const items: Array<MonthlyWindowSalesItem> = []
+		for (let i = 0; i < rows.length; i++) {
+			if (rows[i] == null) return { ok: false, message: '窗口月售数据格式异常', items: empty }
+			const row = rows[i] as UTSJSONObject
+			const windowId = jsonNumber(row, 'windowId') ?? 0
+			const sales = jsonNumber(row, 'sales') ?? -1
+			if (windowId <= 0 || windowId % 1 != 0 || sales < 0 || sales % 1 != 0) {
+				return { ok: false, message: '窗口月售数据格式异常', items: empty }
+			}
+			items.push({ windowId: windowId, sales: sales })
+		}
+		return { ok: true, message: '', items: items }
+	})
+}
+
+/**
+ * 读取某个窗口的本月总销量及菜品分项，供点餐页一次请求后映射到菜单。
+ * 非正数窗口 ID 在发请求前拒绝，避免把无效路由参数交给服务端。
+ */
+export function fetchMonthlyProductSales(windowId: number): Promise<MonthlyProductSalesResult> {
+	const empty: Array<MonthlyProductSalesItem> = []
+	if (windowId <= 0 || windowId % 1 != 0) {
+		return Promise.resolve({ ok: false, message: '窗口编号无效', windowSales: 0, products: empty })
+	}
+	return httpGet('/statistics/windows/' + windowId + '/monthly-sales', true).then((result: HttpResult): MonthlyProductSalesResult => {
+		if (!result.ok || result.data == null) return { ok: false, message: result.message, windowSales: 0, products: empty }
+		const data = jsonObject(result.data, 'data')
+		const rows = data == null ? null : jsonArray(data, 'products')
+		const returnedWindowId = data == null ? 0 : (jsonNumber(data, 'windowId') ?? 0)
+		const windowSales = data == null ? -1 : (jsonNumber(data, 'sales') ?? -1)
+		if (rows == null || returnedWindowId != windowId || windowSales < 0 || windowSales % 1 != 0) {
+			return { ok: false, message: '窗口菜品月售数据格式异常', windowSales: 0, products: empty }
+		}
+
+		const products: Array<MonthlyProductSalesItem> = []
+		for (let i = 0; i < rows.length; i++) {
+			if (rows[i] == null) return { ok: false, message: '窗口菜品月售数据格式异常', windowSales: 0, products: empty }
+			const row = rows[i] as UTSJSONObject
+			const productId = jsonNumber(row, 'productId') ?? 0
+			const sales = jsonNumber(row, 'sales') ?? -1
+			if (productId <= 0 || productId % 1 != 0 || sales < 0 || sales % 1 != 0) {
+				return { ok: false, message: '窗口菜品月售数据格式异常', windowSales: 0, products: empty }
+			}
+			products.push({ productId: productId, sales: sales })
+		}
+		return { ok: true, message: '', windowSales: windowSales, products: products }
+	})
+}

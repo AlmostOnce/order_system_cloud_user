@@ -76,7 +76,10 @@
 					<view class="stall-body">
 						<text class="stall-name">{{ item.windowName }}</text>
 						<text class="stall-meta">{{ stallMeta(item) }}</text>
-						<text class="stall-rating">{{ cardRatingText(windowRatings, item.windowId) }}</text>
+						<view class="stall-metrics">
+							<text class="stall-rating">{{ cardRatingText(windowRatings, item.windowId) }}</text>
+							<text class="stall-month-sales">月售 {{ monthlyWindowSalesText(item.windowId) }} 份</text>
+						</view>
 					</view>
 					<text class="stall-arrow">›</text>
 				</view>
@@ -141,10 +144,12 @@ import { isLoggedIn, currentUser } from '../../store/auth.uts';
 // 导入商品查询与结果类型：档口列表、餐厅列表及其返回结构。
 import { listActiveWindows, listActiveRestaurants, WindowItem, WindowListResult, RestaurantItem, RestaurantListResult } from '../../api/product.uts';
 import { CardRating, fetchCardRatings, cardRatingText } from '../../api/comments.uts';
+import { fetchMonthlyWindowSales, MonthlyWindowSalesItem } from '../../api/statistics.uts';
 /** 表示「全部餐厅」的哨兵值，与任何真实餐厅 ID 都不会冲突。 */
 const ALL_RESTAURANTS: number = 0;
 /** 「全部餐厅」的展示名称。 */
 const ALL_RESTAURANTS_NAME: string = '全部餐厅';
+const initialMonthlyWindowSales: Array<MonthlyWindowSalesItem> = [];
 /**
  * 按当前时刻生成问候语。
  *
@@ -195,6 +200,7 @@ function shortenName(name: string): string {
 const initialEmptyWindows: Array<WindowItem> = [];
 const initialWindowRatings: Array<CardRating> = [];
 let windowRatingVersion = 0;
+let windowSalesVersion = 0;
 let catalogOwner = '';
 // 餐厅列表的初始空数组。
 const initialEmptyRestaurants: Array<RestaurantItem> = [];
@@ -210,6 +216,9 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     // 后端返回的档口全量列表。
     windows: initialEmptyWindows,
     windowRatings: initialWindowRatings,
+    // 与档口列表分开读取的月售汇总；统计服务失败不会影响档口浏览。
+    monthlyWindowSales: initialMonthlyWindowSales,
+    monthlyWindowSalesReady: false,
     // 按当前选中餐厅筛选后、供页面渲染的档口列表。
     visibleWindows: initialEmptyWindows,
     // 后端返回的餐厅列表，供选择面板渲染。
@@ -347,6 +356,9 @@ function loadProfile() {
         state.visibleWindows = [];
         state.restaurants = [];
         state.windowRatings = [];
+        windowSalesVersion++;
+        state.monthlyWindowSales = [];
+        state.monthlyWindowSalesReady = false;
         state.selectedRestaurantId = ALL_RESTAURANTS;
         state.selectedRestaurantName = ALL_RESTAURANTS_NAME;
         loadCatalog();
@@ -386,9 +398,20 @@ function loadCatalog(): Promise<void> {
             state.windows = windowResult.items;
             const version = ++windowRatingVersion;
             state.windowRatings = [];
+            const salesVersion = ++windowSalesVersion;
+            state.monthlyWindowSales = [];
+            state.monthlyWindowSalesReady = false;
             const ids: Array<number> = [];
             for (let i = 0; i < state.windows.length; i++) if (state.windows[i].windowId > 0) ids.push(state.windows[i].windowId);
             fetchCardRatings('windows', ids).then((ratings: Array<CardRating>) => { if (version == windowRatingVersion) state.windowRatings = ratings; });
+            // 月售是独立的可选展示数据：失败显示“--”，不改变档口列表的成功状态。
+            fetchMonthlyWindowSales().then((salesResult) => {
+                if (salesVersion != windowSalesVersion) return;
+                if (salesResult.ok) {
+                    state.monthlyWindowSales = salesResult.items;
+                    state.monthlyWindowSalesReady = true;
+                }
+            });
             // 按当前选中餐厅算出可见档口。
             buildVisibleWindows();
             // 列表渲染完成后再切到「已入场」，卡片才会依次浮入。
@@ -397,6 +420,17 @@ function loadCatalog(): Promise<void> {
             }, 60);
         });
     });
+}
+
+/** 把批量月售结果按窗口编号映射成卡片文案；服务失败时明确显示占位符。 */
+function monthlyWindowSalesText(windowId: number): string {
+    if (!state.monthlyWindowSalesReady) return '--';
+    for (let i = 0; i < state.monthlyWindowSales.length; i++) {
+        const item = state.monthlyWindowSales[i];
+        if (item.windowId == windowId) return '' + item.sales;
+    }
+    // 成功响应未列出的窗口本月销量为零，不把服务失败伪装成零销量。
+    return '0';
 }
 
 function buildVisibleWindows() {
@@ -908,7 +942,9 @@ onReady(() => {
 		color: #211C18;
 	}
 
-	.stall-rating { margin-top: 4px; font-size: 12px; color: #C2410C; }
+	.stall-metrics { margin-top: 4px; flex-direction: row; align-items: center; }
+	.stall-rating { font-size: 12px; color: #C2410C; }
+	.stall-month-sales { margin-left: 8px; font-size: 11px; color: #7A6C60; }
 	.stall-meta {
 		margin-top: 5px;
 		font-size: 11px;

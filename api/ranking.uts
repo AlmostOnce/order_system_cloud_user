@@ -5,7 +5,7 @@ export type SalesRankItem = { rank: number, productId: number, windowId: number,
 export type SalesRankResult = { ok: boolean, message: string, items: SalesRankItem[] }
 
 export function fetchSalesRanking(): Promise<SalesRankResult> {
-    return httpGet('/orders/rankings/sales?limit=50', true).then((result: HttpResult): SalesRankResult => {
+	return httpGet('/statistics/rankings/sales?limit=50', true).then((result: HttpResult): SalesRankResult => {
         const empty: SalesRankItem[] = []
         if (!result.ok || result.data == null) return { ok: false, message: result.message, items: empty }
         const data = jsonObject(result.data, 'data')

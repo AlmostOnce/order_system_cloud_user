@@ -25,7 +25,7 @@ function load(file){
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 (async()=>{
  const api=load('api/ranking.uts');
- assert.equal((await api.fetchSalesRanking()).items[0].sales,14);assert.deepEqual(requests[0],{url:'/orders/rankings/sales?limit=50',auth:true});
+ assert.equal((await api.fetchSalesRanking()).items[0].sales,14);assert.deepEqual(requests[0],{url:'/statistics/rankings/sales?limit=50',auth:true});
  response={ok:true,data:{data:{items:[]}}};assert.deepEqual((await api.fetchSalesRanking()).items,[]);
  response={ok:true,data:{data:{}}};assert.equal((await api.fetchSalesRanking()).ok,false);
  response={ok:false,message:'暂不可用',data:null};assert.equal((await api.fetchSalesRanking()).message,'暂不可用');
