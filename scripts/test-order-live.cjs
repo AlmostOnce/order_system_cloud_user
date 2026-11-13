@@ -32,7 +32,10 @@ function advance(){const batch=[...timers.values()];timers.clear();for(const fn 
   }).create();
   let reloads=0;vm.load=async()=>{reloads++};vm.refresh=async()=>{reloads++};vm.retryCleanup=()=>{};
   owner='student-a';vm.$hooks.onPageShow();assert.ok(subscription);await subscription.reload();assert.equal(reloads,2);
-  if(name==='detail'){vm.paying=true;assert.equal(subscription.busy(),true);vm.paying=false;}
+  if(name==='detail'){
+   vm.paying=true;assert.equal(subscription.busy(),true);vm.paying=false;
+   vm.paymentExpanded=true;assert.equal(subscription.busy(),true,'支付密码弹层期间应推迟实时状态刷新');vm.paymentExpanded=false;
+  }
   owner='student-b';await subscription.reload();assert.equal(reloads,2,'account change rejects old page update');
   vm.$hooks.onPageHide();assert.equal(subscription,null);
   owner='student-a';vm.$hooks.onPageShow();assert.ok(subscription);vm.$hooks.onUnload();assert.equal(subscription,null);
@@ -43,7 +46,8 @@ function advance(){const batch=[...timers.values()];timers.clear();for(const fn 
  for(const name of ['list','detail']){
   status='制作中';owner='student-a';
   const source=fs.readFileSync('pages/order/'+name+'.uvue','utf8');
-  const row=()=>({orderId:18,windowId:1,status,items:[],createdAt:'2026-11-05T10:00:00+08:00'});
+  // 订单仍有一份可履约菜品时，详情页才应加载并展示取餐码。
+  const row=()=>({orderId:18,windowId:1,status,items:[{productId:7,fulfillableQuantity:1}],createdAt:'2026-11-05T10:00:00+08:00'});
   const vm=require('./setup-harness.cjs').loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1],p=>{
    if(p.includes('order-live'))return mod.exports;
    if(p.includes('store/auth'))return{currentUser:()=>({userUuid:owner,roleCode:'CUSTOMER'})};

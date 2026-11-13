@@ -408,7 +408,8 @@ onPageShow(() => {
     stopLiveOrders = startOrderLiveRefresh((): Promise<void> => {
         if (!pickupPageVisible || currentUser()?.userUuid != liveOwner) return Promise.resolve();
         return refresh();
-    }, (): boolean => state.loading || state.paying || state.cancelling || state.refreshing || state.balanceLoading || state.cleanupLoading);
+    // 支付密码弹层打开期间暂缓状态重查，避免后台刷新与当前支付确认并发。
+    }, (): boolean => state.loading || state.paying || state.cancelling || state.refreshing || state.balanceLoading || state.cleanupLoading || state.paymentExpanded);
 })
 
 onPageHide(() => {
