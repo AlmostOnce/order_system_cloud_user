@@ -16,7 +16,7 @@ function Get-CimInstance {
 # 模拟查询和终止操作，只记录脚本实际选中的 PID。
 function Get-Process { param($Id) [pscustomobject]@{ Id = $Id } }
 function Stop-Process {
-    param([Parameter(ValueFromPipeline)]$InputObject, [switch]$Force)
+    param([Parameter(ValueFromPipeline)]$InputObject, [switch]$Force, [switch]$Confirm)
     process { $global:androidWaitStopped += $InputObject.Id }
 }
 & "$PSScriptRoot/stop-android-waits.ps1" -WhatIf
