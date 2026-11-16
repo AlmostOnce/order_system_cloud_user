@@ -41,6 +41,11 @@
 			}
 		},
         {
+            // 学生本人可查看和管理已收藏的店铺窗口与菜品。
+            "path": "pages/favorites/list",
+            "style": { "navigationStyle": "custom" }
+        },
+        {
             "path": "pages/wallet/payment-password",
             "style": { "navigationStyle": "custom", "disableScroll": true }
         },

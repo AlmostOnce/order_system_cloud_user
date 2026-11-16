@@ -41,7 +41,7 @@
 			<view v-if="shopSearchResults.length == 0" class="shop-search-empty"><text class="shop-search-empty-text">没有找到相关菜品，换个关键词试试</text></view>
 			<view v-for="product in shopSearchResults" :key="product.productId" class="shop-result" hover-class="shop-result-hover" @click="openShopResult(product)">
 				<view class="shop-result-image"><business-image :src="product.imageUrl" kind="product"></business-image></view>
-				<view class="shop-result-body"><text class="shop-result-name">{{ product.productName }}</text><text v-if="product.description.length > 0" class="shop-result-description" :max-lines="1">{{ product.description }}</text><text class="shop-result-price">¥{{ formatPrice(product.price) }}</text></view>
+				<view class="shop-result-body"><view class="shop-result-title-line"><text class="shop-result-name" :max-lines="1">{{ product.productName }}</text><!-- 蒸汽模式原生 view 不支持 aria-label；心形图标提供可见收藏提示。 --><view v-if="favoriteEnabled" class="product-favorite product-favorite-small" @click.stop="toggleProductFavorite(product)"><image class="product-favorite-heart" :src="isProductFavorite(product.productId) ? '/static/favorites/heart-filled.svg' : '/static/favorites/heart-outline.svg'"></image></view></view><text v-if="product.description.length > 0" class="shop-result-description" :max-lines="1">{{ product.description }}</text><text class="shop-result-price">¥{{ formatPrice(product.price) }}</text></view>
 				<text class="shop-result-arrow">›</text>
 			</view>
 		</scroll-view>
@@ -107,7 +107,8 @@
 								<business-image :src="product.imageUrl" kind="product"></business-image>
 							</view>
 							<view class="dish-body">
-								<text class="dish-name" :max-lines="1">{{ product.productName }}</text>
+								<!-- 蒸汽模式原生 view 不支持 aria-label；心形图标提供可见收藏提示。 -->
+								<view class="dish-name-line"><text class="dish-name" :max-lines="1">{{ product.productName }}</text><view v-if="favoriteEnabled" class="product-favorite" @click.stop="toggleProductFavorite(product)"><image class="product-favorite-heart" :src="isProductFavorite(product.productId) ? '/static/favorites/heart-filled.svg' : '/static/favorites/heart-outline.svg'"></image></view></view>
 								<view class="dish-meta"><text class="dish-rating">{{ cardRatingText(productRatings, product.productId) }}</text><text class="dish-stock">{{ stockHint(product.productId) }}</text></view>
 								<text class="dish-month-sales">月售 {{ monthlyProductSalesText(product.productId) }}</text>
 								<text v-if="product.description.length > 0" class="dish-desc" :max-lines="1">{{ product.description }}</text>
@@ -228,7 +229,8 @@ import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 // 导入轻量提示：购物车操作反馈。
 import { toast } from '../../common/feedback.uts';
 // 导入登录态：令牌失效时回到登录页，避免带失效凭据反复请求。
-import { isLoggedIn } from '../../store/auth.uts';
+import { currentUser, isLoggedIn } from '../../store/auth.uts';
+import { addFavorite, fetchFavoriteTargetIds, FavoriteTargetType, removeFavorite } from '../../api/favorites.uts';
 // 导入菜单接口与类型：档口菜单快照。
 import { fetchWindowMenu, MenuProduct, WindowMenuResult } from '../../api/menu.uts';
 import { fetchWindowStocks, ProductStock, StockListResult } from '../../api/stock.uts';
@@ -315,6 +317,9 @@ let cartRequestVersion = 0;
 let locationVersion = 0;
 let productRatingVersion = 0;
 let productReviewVersion = 0;
+let productFavoriteVersion = 0;
+// 记录状态快照所属学生，切换账号时必须丢弃旧人的收藏图标和待处理按钮状态。
+let productFavoriteOwner = '';
 const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTime: '', cartLoading: false,
     // 状态栏高度（px），用于顶部占位。
     statusBarHeight: 0,
@@ -324,6 +329,12 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     highlightedProductId: 0,
     shopKeyword: '',
     productRatings: initialProductRatings,
+    // 收藏状态是当前学生对本窗口菜品的服务端快照，不写入商品目录或购物车数据。
+    productFavoriteIds: [] as Array<number>,
+    // 正在提交收藏操作的菜品 ID，用来阻止同一条目在请求期间重复写入。
+    productFavoriteBusyIds: [] as Array<number>,
+    // 只有普通学生可以使用收藏；管理功能由独立 Vue 管理端承载。
+    favoriteEnabled: false,
     // 每个窗口只查询一次的本月菜品销量汇总；请求失败时以“--”表示未知。
     monthlyProductSales: initialMonthlyProductSales,
     monthlyProductSalesReady: false,
@@ -374,6 +385,7 @@ const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHei
 const { shopTab } = toRefs(state)
 const { productReviewVisible, productReviewReady, productReviewId, productReviewName } = toRefs(state)
 const { productRatings } = toRefs(state)
+const { favoriteEnabled } = toRefs(state)
 
 const shopSearchResults = computed((): Array<MenuProduct> => {
     const keyword = state.shopKeyword.trim().toLowerCase();
@@ -390,6 +402,89 @@ const shopSearchResults = computed((): Array<MenuProduct> => {
 });
 
 function clearShopSearch() { state.shopKeyword = ''; }
+
+/**
+ * 判断菜品是否在当前学生的服务端收藏状态快照中。
+ *
+ * @param productId 当前菜单中的商品 ID
+ * @return 当前快照中是否已收藏
+ */
+function isProductFavorite(productId: number): boolean {
+    return state.productFavoriteIds.includes(productId);
+}
+
+/**
+ * 批量读取菜单中可见菜品状态；版本号避免迟到响应覆盖新菜单或后续操作。
+ *
+ * @param productIds 当前加载菜单中去重后的菜品 ID
+ */
+function refreshProductFavoriteStates(productIds: Array<number>): void {
+    const version = ++productFavoriteVersion;
+    if (!state.favoriteEnabled || productIds.length == 0) {
+        state.productFavoriteIds = [];
+        return;
+    }
+    // 只保留当前菜单中已有的确认状态；批量查询失败时不把已知爱心状态清空。
+    state.productFavoriteIds = state.productFavoriteIds.filter((id: number): boolean => productIds.includes(id));
+    fetchFavoriteTargetIds('PRODUCT' as FavoriteTargetType, productIds).then((favoriteIds: Array<number> | null) => {
+        if (menuDisposed || version != productFavoriteVersion || favoriteIds == null) return;
+        state.productFavoriteIds = favoriteIds;
+    });
+}
+
+/**
+ * 菜品收藏在服务端确认后才更新图标；失败时保留当前状态并提示顾客。
+ *
+ * @param product 当前菜单或店内搜索中的菜品；点击入口会阻止父级导航冒泡
+ */
+function toggleProductFavorite(product: MenuProduct): void {
+    const productId = product.productId;
+    if (!state.favoriteEnabled || productId <= 0 || state.productFavoriteBusyIds.includes(productId)) return;
+    const owner = productFavoriteOwner;
+    const shouldAdd = !isProductFavorite(productId);
+    state.productFavoriteBusyIds = state.productFavoriteBusyIds.concat([productId]);
+    // 写请求发出后使先前的批量查询失效，避免旧快照反向覆盖已确认的操作。
+    productFavoriteVersion++;
+    const request = shouldAdd
+        ? addFavorite('PRODUCT' as FavoriteTargetType, productId)
+        : removeFavorite('PRODUCT' as FavoriteTargetType, productId);
+    request.then((result) => {
+        // 账号切换后，旧账号写请求的迟到响应不能清理或改写新账号页面状态。
+        if (menuDisposed || owner != productFavoriteOwner || currentUser()?.userUuid != owner) return;
+        state.productFavoriteBusyIds = state.productFavoriteBusyIds.filter((id: number): boolean => id != productId);
+        if (!result.ok) {
+            toast(result.message.length > 0 ? result.message : '收藏操作失败，请稍后重试');
+            // 若旧状态查询已因本次写操作作废，重查当前菜单的全部收藏状态。
+            refreshProductFavoriteStates(currentMenuProductIds());
+            return;
+        }
+        const ids = state.productFavoriteIds.filter((id: number): boolean => id != productId);
+        if (shouldAdd) ids.push(productId);
+        state.productFavoriteIds = ids;
+        toast(shouldAdd ? '已收藏菜品' : '已取消收藏');
+        // 写入完成后重查当前菜单，修复初次批量状态读取与点击写入并发时的其他菜品状态。
+        refreshProductFavoriteStates(currentMenuProductIds());
+    }).catch(() => {
+        // 请求异常同样只允许影响发起请求的原账号状态。
+        if (menuDisposed || owner != productFavoriteOwner || currentUser()?.userUuid != owner) return;
+        state.productFavoriteBusyIds = state.productFavoriteBusyIds.filter((id: number): boolean => id != productId);
+        toast('网络连接失败，请稍后重试');
+        // 请求超时不能断定服务端是否已提交，重新读取服务端状态对齐图标。
+        refreshProductFavoriteStates(currentMenuProductIds());
+    });
+}
+
+/** 收集当前已加载菜单的菜品 ID，供单次收藏写入后恢复整页状态。 */
+function currentMenuProductIds(): Array<number> {
+    const ids: Array<number> = [];
+    for (let i = 0; i < state.groups.length; i++) {
+        for (let j = 0; j < state.groups[i].products.length; j++) {
+            const productId = state.groups[i].products[j].productId;
+            if (productId > 0 && !ids.includes(productId)) ids.push(productId);
+        }
+    }
+    return ids;
+}
 
 /** 菜品/评价切换。评价标签直接挂共用列表，不在这里再拉一套店铺评论。 */
 function selectShopTab(tab: string) {
@@ -540,11 +635,9 @@ function loadMenu(): Promise<void> {
         });
         const ratingVersion = ++productRatingVersion;
         state.productRatings = [];
-        const productIds: Array<number> = [];
-        for (let i = 0; i < converted.length; i++) for (let j = 0; j < converted[i].products.length; j++) {
-            const id = converted[i].products[j].productId;
-            if (id > 0 && !productIds.includes(id)) productIds.push(id);
-        }
+        const productIds = currentMenuProductIds();
+        // 收藏状态与目录、库存请求分开读取；收藏服务异常时仍可浏览菜单和下单。
+        refreshProductFavoriteStates(productIds);
         fetchCardRatings('products', productIds).then((ratings: Array<CardRating>) => {
             if (!menuDisposed && ratingVersion == productRatingVersion) state.productRatings = ratings;
         });
@@ -1102,6 +1195,20 @@ onPageShow(() => {
         uni.reLaunch({ url: '/pages/login/login' });
         return;
     }
+    const profile = currentUser();
+    const favoriteOwner = profile == null ? '' : profile.userUuid;
+    if (favoriteOwner != productFavoriteOwner) {
+        productFavoriteOwner = favoriteOwner;
+        productFavoriteVersion++;
+        state.productFavoriteIds = [];
+        state.productFavoriteBusyIds = [];
+    }
+    state.favoriteEnabled = profile != null && profile.roleCode == 'CUSTOMER';
+    if (!state.favoriteEnabled) {
+        productFavoriteVersion++;
+        state.productFavoriteIds = [];
+        state.productFavoriteBusyIds = [];
+    }
     // 每次进入页面都重新拉取菜单与购物车，保证价格与可售状态是新的。
     loadMenu();
 })
@@ -1282,10 +1389,15 @@ onReady(() => {
 	.shop-result-hover { background-color: #FFF1E8; }
 	.shop-result-image { width: 62px; height: 62px; border-radius: 12px; overflow: hidden; flex-shrink: 0; }
 	.shop-result-body { flex: 1; min-width: 0; margin-left: 12px; }
-	.shop-result-name { font-size: 15px; font-weight: bold; color: #211C18; }
+	.shop-result-title-line { flex-direction: row; align-items: center; }
+	.shop-result-name { flex: 1; min-width: 0; font-size: 15px; font-weight: bold; color: #211C18; }
 	.shop-result-description { margin-top: 3px; font-size: 12px; color: #7A6C60; text-overflow: ellipsis; }
 	.shop-result-price { margin-top: 4px; font-size: 14px; font-weight: bold; color: #E4572E; }
 	.shop-result-arrow { margin-left: 8px; font-size: 22px; color: #B7A79B; }
+	/* 收藏图标放在菜名行末，点击范围独立，不占用菜品图片或购物车步进器。 */
+	.product-favorite { display: flex; flex-shrink: 0; width: 34px; height: 34px; margin-left: 4px; border-radius: 17px; align-items: center; justify-content: center; }
+	.product-favorite-small { width: 30px; height: 30px; }
+	.product-favorite-heart { width: 20px; height: 20px; }
 
 	.stock-status {
 		margin: 0;
@@ -1582,6 +1694,10 @@ onReady(() => {
 		min-width: 0;
 		margin-left: 10px;
 	}
+
+	/* 只压缩菜名可用宽度；收藏触控区保持稳定，不会挤动价格和加减数量。 */
+	.dish-name-line { flex-direction: row; align-items: center; min-width: 0; }
+	.dish-name { flex: 1; min-width: 0; }
 
 	.dish-name {
 		font-size: 14px;

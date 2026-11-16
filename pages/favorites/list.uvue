@@ -1,0 +1,453 @@
+<template>
+    <view class="account-page account-secondary favorite-page">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <!-- 蒸汽模式原生 view 不支持 aria-label；返回箭头作为可见操作提示。 -->
+            <view class="account-back vapor-account-secondary--account-back" @click="goBack">
+                <view class="account-back-icon"></view>
+            </view>
+            <text class="account-title">我的收藏</text>
+        </view>
+        <view class="favorite-banner">
+            <view class="favorite-banner-copy">
+                <text class="favorite-kicker">收藏清单</text>
+                <text class="favorite-banner-title">喜欢的店铺与菜品</text>
+                <text class="favorite-banner-note">随时回到熟悉的味道</text>
+            </view>
+            <view class="favorite-banner-mark">
+                <image class="favorite-banner-heart" src="/static/favorites/heart-filled.svg" mode="aspectFit"></image>
+            </view>
+        </view>
+        <view class="favorite-tabs vapor-account-secondary--favorite-tabs">
+            <view class="favorite-tab vapor-account-secondary--favorite-tab" :class="targetType == 'WINDOW' ? 'favorite-tab-on vapor-account-secondary--favorite-tab-on' : ''" @click="selectType('WINDOW')">
+                <text class="favorite-tab-text" :class="targetType == 'WINDOW' ? 'favorite-tab-text-on vapor-account-secondary--favorite-tab-text-on' : ''">店铺</text>
+            </view>
+            <view class="favorite-tab favorite-tab-last vapor-account-secondary--favorite-tab" :class="targetType == 'PRODUCT' ? 'favorite-tab-on vapor-account-secondary--favorite-tab-on' : ''" @click="selectType('PRODUCT')">
+                <text class="favorite-tab-text" :class="targetType == 'PRODUCT' ? 'favorite-tab-text-on vapor-account-secondary--favorite-tab-text-on' : ''">菜品</text>
+            </view>
+        </view>
+        <scroll-view class="account-scroll favorite-scroll" direction="vertical"
+            :refresher-enabled="refreshing || (!loading && !loadingMore)"
+            :refresher-triggered="refreshing"
+            refresher-background="#FDF6F0"
+            refresher-default-style="none"
+            :refresher-threshold="72"
+            @refresherrefresh="refreshPage"
+            @scrolltolower="loadMore">
+            <view class="account-content vapor-account-secondary--account-content favorite-content">
+                <text class="favorite-intro">{{ targetType == 'WINDOW' ? '收藏的店铺' : '收藏的菜品' }}</text>
+                <view v-if="loading && favoriteItems.length == 0" class="account-card vapor-account-secondary--account-card favorite-state">
+                    <text class="account-muted">正在加载收藏…</text>
+                </view>
+                <view v-else-if="!loading && favoriteItems.length == 0 && errorText.length == 0" class="account-card vapor-account-secondary--account-card favorite-state">
+                    <text class="account-heading">这里还空着</text>
+                    <text class="account-note">{{ targetType == 'WINDOW' ? '在首页点亮店铺旁的爱心，就能收藏常去的店铺。' : '在点餐页点亮菜品旁的爱心，就能收藏喜欢的菜。' }}</text>
+                </view>
+                <view v-for="item in favoriteItems" :key="item.favoriteId" class="favorite-card vapor-account-secondary--favorite-card">
+                    <view class="favorite-card-main" hover-class="favorite-card-pressed" @click="openFavorite(item)">
+                        <view class="favorite-image">
+                            <business-image :src="item.imageUrl" :kind="targetType == 'WINDOW' ? 'window' : 'product'" :preview="false"></business-image>
+                        </view>
+                        <view class="favorite-copy">
+                            <text class="favorite-name" :max-lines="1">{{ item.available ? item.title : (targetType == 'WINDOW' ? '店铺暂不可用' : '菜品暂不可用') }}</text>
+                            <text class="favorite-detail" :max-lines="2">{{ item.available ? item.subtitle : '该内容当前未在营业目录中，收藏仍会保留，可随时移除。' }}</text>
+                        </view>
+                        <view v-if="item.available" class="account-arrow"></view>
+                    </view>
+                    <view class="favorite-card-bottom">
+                        <text class="favorite-status" :class="item.available ? 'favorite-status-available' : 'favorite-status-unavailable'">{{ item.available ? (targetType == 'WINDOW' ? '进入店铺' : '查看菜品') : '暂不可用' }}</text>
+                        <!-- 按钮内“移除收藏”文字已提供可见提示，不给原生 view 添加不支持的 aria-label。 -->
+                        <view class="favorite-remove" hover-class="favorite-remove-pressed" @click="removeItem(item)">
+                            <text class="favorite-remove-text">移除收藏</text>
+                        </view>
+                    </view>
+                </view>
+                <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
+                <view v-if="errorText.length > 0" class="favorite-retry" hover-class="favorite-remove-pressed" @click="loadPage(true)">
+                    <text class="favorite-retry-text">重新加载</text>
+                </view>
+                <view v-if="loadingMore" class="favorite-page-hint"><text class="account-muted">正在加载更多…</text></view>
+                <view v-else-if="hasMore" class="favorite-page-hint" @click="loadMore"><text class="account-muted">上滑加载更多</text></view>
+                <view v-else-if="favoriteItems.length > 0 && errorText.length == 0" class="favorite-page-hint"><text class="account-muted">已显示全部收藏</text></view>
+            </view>
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            </view>
+        </scroll-view>
+    </view>
+</template>
+
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import BusinessImage from '../../components/business-image/business-image.uvue'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
+import { backToAccount } from '../../common/account.uts'
+import { toast } from '../../common/feedback.uts'
+import { currentUser, isLoggedIn } from '../../store/auth.uts'
+import { FavoriteItem, FavoriteTargetType, fetchFavoritePage, FavoritePageResult, removeFavorite } from '../../api/favorites.uts'
+import { fetchProductImages, listActiveWindows, ProductImage, ProductImageListResult, WindowItem, WindowListResult } from '../../api/product.uts'
+import { fetchWindowMenu, MenuProduct, WindowMenu, WindowMenuResult } from '../../api/menu.uts'
+
+/** 列表视图把收藏关系与当前可用目录详情合并；目标缺失时仍保留关系供用户移除。 */
+type FavoriteDisplayItem = {
+    /** user-service 收藏关系主键，用于列表稳定复用节点及防止同一条目重复删除。 */
+    favoriteId: number
+    /** 被收藏的窗口或菜品 ID；只用于调用收藏接口和定位，不作为展示文案。 */
+    targetId: number
+    /** 当前商品目录能否提供有效详情；为 false 时保留收藏并给出移除入口。 */
+    available: boolean
+    /** 当前窗口名称或菜品名称。 */
+    title: string
+    /** 窗口位置，或菜品所属窗口与当前价格。 */
+    subtitle: string
+    /** 当前商品目录返回的展示图地址，空值由 business-image 使用默认图。 */
+    imageUrl: string
+    /** 菜品对应窗口；店铺收藏时等于窗口目标 ID。 */
+    windowId: number
+}
+
+const emptyItems: Array<FavoriteDisplayItem> = []
+/** 页面只保存当前目标类型已经加载的关系页和目录展示快照，服务端仍是收藏事实来源。 */
+const state = reactive({
+    // 状态栏安全区高度；页面生命周期中读取，避免预渲染阶段访问设备信息。
+    statusBarHeight: 0,
+    // 当前收藏类别；首屏默认展示店铺，切换后从对应类型的第一页重新查询。
+    targetType: 'WINDOW' as FavoriteTargetType,
+    // 已从关系服务读取并补齐目录详情的展示条目。
+    favoriteItems: emptyItems,
+    // 首屏或下拉刷新的加载状态，和追加下一页的状态分开管理。
+    loading: true,
+    // 当前游标页追加加载状态，用于阻止 scrolltolower 并发请求。
+    loadingMore: false,
+    // 原生下拉刷新的动画状态。
+    refreshing: false,
+    // 本次下拉刷新开始时间，仅由 refresher 插槽临时展示。
+    currentRefreshTime: '',
+    // 最近一次关系或目录请求失败的文案；非空时显示重试入口。
+    errorText: '',
+    // 下一页游标；0 表示尚无下一页位置或已经到末页。
+    nextCursor: 0,
+    // 由服务端返回的后续页标记，不根据当前页条数猜测。
+    hasMore: false
+})
+const { statusBarHeight, targetType, favoriteItems, loading, loadingMore, refreshing, currentRefreshTime, errorText, hasMore } = toRefs(state)
+
+// 页面离开后设为 false，阻止仍在飞行中的 HTTP 响应修改隐藏页面。
+let pageVisible = false
+// 每次从第一页加载、切换账号/类别或离页都会递增，旧版本结果自动丢弃。
+let requestVersion = 0
+// 当前列表快照所属的学生 UUID；跨账号复用页面时必须先清除前一人的收藏。
+let listOwner = ''
+// 页面内正在取消的收藏关系 ID，防止重复删除请求。
+let removingFavoriteIds: Array<number> = []
+
+/**
+ * 判断本次异步响应是否仍属于可见页面、当前账号和当前收藏类别。
+ *
+ * @param version 发起查询时捕获的请求序号
+ * @param owner 发起查询时捕获的用户 UUID
+ * @param type 发起查询时捕获的收藏类别
+ * @return 页面上下文仍匹配时为 true
+ */
+function isRequestCurrent(version: number, owner: string, type: FavoriteTargetType): boolean {
+    return pageVisible && requestVersion == version && state.targetType == type && currentUser()?.userUuid == owner
+}
+
+/** 返回个人中心，复用账户二级页统一的返回栈处理。 */
+function goBack() {
+    backToAccount()
+}
+
+/**
+ * 切换收藏类别后清空旧类别数据，并从新类别第一页重新读取。
+ *
+ * @param type 目标收藏类别，WINDOW 表示店铺，PRODUCT 表示菜品
+ */
+function selectType(type: FavoriteTargetType) {
+    if (state.targetType == type) return
+    state.targetType = type
+    state.favoriteItems = []
+    state.nextCursor = 0
+    state.hasMore = false
+    loadPage(true)
+}
+
+/** 仅响应原生下拉手势；保留当前列表直到服务端的新第一页成功返回。 */
+function refreshPage() {
+    if (state.refreshing || state.loading || state.loadingMore) return
+    state.refreshing = true
+    const startedAt = Date.now()
+    state.currentRefreshTime = refreshTimeLabel(startedAt)
+    loadPage(true).then(() => {
+        finishPullRefresh(startedAt, state.errorText.length == 0, (time: string) => {
+            if (time.length > 0) state.currentRefreshTime = time
+            state.refreshing = false
+        })
+    }).catch(() => {
+        finishPullRefresh(startedAt, false, (_time: string) => { state.refreshing = false })
+    })
+}
+
+/** 有下一页且当前无刷新/请求时才使用游标追加，防止重复触底请求。 */
+function loadMore() {
+    if (!state.hasMore || state.loading || state.loadingMore || state.refreshing) return
+    loadPage(false)
+}
+
+/**
+ * 先读收藏关系分页，再仅为当前页补充商品目录；每页目录请求数量固定，
+ * 不随用户累计收藏量扩大，目录失败时保留现有内容并显示可重试错误。
+ *
+ * @param reset true 表示从首屏刷新，false 表示使用 nextCursor 追加
+ * @return 当前分页与目录详情加载完成的 Promise
+ */
+function loadPage(reset: boolean): Promise<void> {
+    const user = currentUser()
+    if (user == null || user.roleCode != 'CUSTOMER') return Promise.resolve()
+    if (reset) {
+        requestVersion++
+        state.loading = true
+        state.loadingMore = false
+        state.errorText = ''
+        state.nextCursor = 0
+        state.hasMore = false
+    } else {
+        state.loadingMore = true
+        state.errorText = ''
+    }
+    const version = requestVersion
+    const owner = user.userUuid
+    const type = state.targetType
+    const cursor = reset ? 0 : state.nextCursor
+    return fetchFavoritePage(type, cursor, 20).then((result: FavoritePageResult) => {
+        if (!isRequestCurrent(version, owner, type)) return
+        if (!result.ok || result.page == null) {
+            state.errorText = result.message.length > 0 ? result.message : '收藏列表暂时无法获取'
+            return
+        }
+        const page = result.page!
+        return resolveFavoriteItems(page.items, type).then((resolved: Array<FavoriteDisplayItem>) => {
+            if (!isRequestCurrent(version, owner, type)) return
+            if (reset) state.favoriteItems = resolved
+            else for (let i = 0; i < resolved.length; i++) state.favoriteItems.push(resolved[i])
+            state.nextCursor = page.nextCursor
+            state.hasMore = page.hasMore
+        })
+    }).catch(() => {
+        if (isRequestCurrent(version, owner, type)) state.errorText = '收藏列表暂时无法获取，请稍后重试'
+    }).finally(() => {
+        if (isRequestCurrent(version, owner, type)) {
+            state.loading = false
+            state.loadingMore = false
+        }
+    })
+}
+
+/**
+ * 按收藏目标类型补充当前有效目录详情，不查询跨服务数据库。
+ *
+ * @param items 当前服务端返回的关系页
+ * @param type 关系页对应的目标类型
+ * @return 与关系页顺序一致的展示条目
+ */
+function resolveFavoriteItems(items: Array<FavoriteItem>, type: FavoriteTargetType): Promise<Array<FavoriteDisplayItem>> {
+    if (items.length == 0) return Promise.resolve([])
+    if (type == 'WINDOW') return resolveWindowItems(items)
+    return resolveProductItems(items)
+}
+
+/**
+ * 通过商品服务当前营业窗口目录映射窗口名称、位置和图片。
+ *
+ * @param items 当前页窗口收藏关系
+ * @return 与关系顺序一致的窗口展示项；目录不可用时以异常交给页面错误态处理
+ */
+function resolveWindowItems(items: Array<FavoriteItem>): Promise<Array<FavoriteDisplayItem>> {
+    return listActiveWindows().then((result: WindowListResult): Array<FavoriteDisplayItem> => {
+        // 商品目录请求失败不能被误报成“收藏目标已下架”，应保留旧列表并显示可重试错误。
+        if (!result.ok) throw new Error(result.message)
+        const rows: Array<FavoriteDisplayItem> = []
+        for (let i = 0; i < items.length; i++) {
+            const favorite = items[i]
+            const window = findWindow(result.items, favorite.targetId)
+            rows.push({ favoriteId: favorite.favoriteId, targetId: favorite.targetId,
+                available: window != null, title: window == null ? '' : window.windowName,
+                subtitle: window == null ? '' : window.location, imageUrl: window == null ? '' : window.imageUrl,
+                windowId: window == null ? 0 : window.windowId })
+        }
+        return rows
+    })
+}
+
+/**
+ * 菜品按目标 ID 批量取得图片/所属窗口，再按不同窗口合并菜单请求；
+ * 请求失败会回到整页重试状态，只有成功目录中缺少目标才标记为暂不可用。
+ *
+ * @param items 当前页菜品收藏关系
+ * @return 与关系顺序一致的菜品展示项
+ */
+function resolveProductItems(items: Array<FavoriteItem>): Promise<Array<FavoriteDisplayItem>> {
+    const ids: Array<number> = []
+    for (let i = 0; i < items.length; i++) ids.push(items[i].targetId)
+    return fetchProductImages(ids).then((imageResult: ProductImageListResult) => {
+        // 请求失败必须让列表进入可重试错误态；只有成功目录结果中缺少目标，才表示暂不可用。
+        if (!imageResult.ok) throw new Error(imageResult.message)
+        const images = imageResult.items
+        const windowIds: Array<number> = []
+        for (let i = 0; i < images.length; i++) {
+            if (!windowIds.includes(images[i].windowId)) windowIds.push(images[i].windowId)
+        }
+        const requests: Array<Promise<WindowMenuResult>> = []
+        for (let i = 0; i < windowIds.length; i++) requests.push(fetchWindowMenu(windowIds[i]))
+        return Promise.all(requests).then((menus: Array<WindowMenuResult>): Array<FavoriteDisplayItem> => {
+            for (let menuIndex = 0; menuIndex < menus.length; menuIndex++) {
+                if (!menus[menuIndex].ok) throw new Error(menus[menuIndex].message)
+            }
+            const rows: Array<FavoriteDisplayItem> = []
+            for (let i = 0; i < items.length; i++) {
+                const favorite = items[i]
+                const image = findProductImage(images, favorite.targetId)
+                const menu = image == null ? null : findMenu(menus, image.windowId)
+                const product = menu == null || image == null ? null : findProduct(menu, favorite.targetId)
+                rows.push({ favoriteId: favorite.favoriteId, targetId: favorite.targetId,
+                    available: product != null && menu != null, title: product == null ? '' : product.productName,
+                    subtitle: product == null || menu == null ? '' : menu.windowName + ' · ¥' + product.price.toFixed(2),
+                    imageUrl: product == null ? (image == null ? '' : image.imageUrl) : product.imageUrl,
+                    windowId: menu == null ? 0 : menu.windowId })
+            }
+            return rows
+        })
+    })
+}
+
+/**
+ * 从当前启用窗口列表中按主键匹配店铺详情；不存在时返回 null。
+ *
+ * @param windows 商品服务当前启用的窗口列表
+ * @param id 要匹配的窗口 ID
+ * @return 匹配项；目录中不存在时返回 null
+ */
+function findWindow(windows: Array<WindowItem>, id: number): WindowItem | null {
+    for (let i = 0; i < windows.length; i++) if (windows[i].windowId == id) return windows[i]
+    return null
+}
+
+/**
+ * 从批量图片查询结果中查找目标菜品所属窗口和图片。
+ *
+ * @param images 商品服务对当前页菜品返回的映射
+ * @param id 要匹配的菜品 ID
+ * @return 图片及所属窗口映射；目录中不存在时返回 null
+ */
+function findProductImage(images: Array<ProductImage>, id: number): ProductImage | null {
+    for (let i = 0; i < images.length; i++) if (images[i].productId == id) return images[i]
+    return null
+}
+
+/**
+ * 只返回成功且窗口 ID 匹配的菜单，其他菜单结果不用于定位菜品。
+ *
+ * @param menus 本页涉及窗口的菜单请求结果
+ * @param windowId 菜品映射所属的窗口 ID
+ * @return 对应成功菜单；缺失或请求失败时返回 null
+ */
+function findMenu(menus: Array<WindowMenuResult>, windowId: number): WindowMenu | null {
+    for (let i = 0; i < menus.length; i++) {
+        if (menus[i].ok && menus[i].menu != null && menus[i].menu!.windowId == windowId) return menus[i].menu
+    }
+    return null
+}
+
+/**
+ * 在当前窗口的分类及未归类区查找菜品；已下架菜品会返回 null。
+ *
+ * @param menu 已成功加载的窗口菜单
+ * @param productId 要定位的菜品 ID
+ * @return 当前菜单中的菜品；找不到时返回 null
+ */
+function findProduct(menu: WindowMenu, productId: number): MenuProduct | null {
+    for (let i = 0; i < menu.categories.length; i++) {
+        for (let j = 0; j < menu.categories[i].products.length; j++) {
+            if (menu.categories[i].products[j].productId == productId) return menu.categories[i].products[j]
+        }
+    }
+    for (let i = 0; i < menu.uncategorizedProducts.length; i++) {
+        if (menu.uncategorizedProducts[i].productId == productId) return menu.uncategorizedProducts[i]
+    }
+    return null
+}
+
+/** 进入窗口菜单；菜品收藏额外携带 productId，复用已有页面内定位逻辑。 */
+function openFavorite(item: FavoriteDisplayItem) {
+    if (!item.available) return
+    let url = '/pages/menu/menu?windowId=' + item.windowId
+    if (state.targetType == 'PRODUCT') url += '&productId=' + item.targetId
+    uni.navigateTo({ url: url })
+}
+
+/** 删除成功后才从本地列表移除，避免网络失败造成收藏状态与服务端不一致。 */
+function removeItem(item: FavoriteDisplayItem) {
+    if (state.loading || state.loadingMore || state.refreshing || removingFavoriteIds.includes(item.favoriteId)) return
+    const user = currentUser()
+    if (user == null || user.roleCode != 'CUSTOMER') return
+    const version = requestVersion
+    const owner = user.userUuid
+    const type = state.targetType
+    removingFavoriteIds.push(item.favoriteId)
+    removeFavorite(type, item.targetId).then((result) => {
+        // 页面隐藏、切换分类或切换账号后，旧请求只能结束自身状态，不能提示或改写新页面。
+        if (!isRequestCurrent(version, owner, type)) return
+        if (!result.ok) {
+            toast(result.message.length > 0 ? result.message : '移除收藏失败，请稍后重试')
+            return
+        }
+        for (let i = state.favoriteItems.length - 1; i >= 0; i--) {
+            if (state.favoriteItems[i].favoriteId == item.favoriteId) state.favoriteItems.splice(i, 1)
+        }
+        toast('已移除收藏')
+        if (state.favoriteItems.length == 0 && state.hasMore) loadMore()
+    }).catch(() => {
+        if (isRequestCurrent(version, owner, type)) toast('网络连接失败，请稍后重试')
+    }).finally(() => {
+        const index = removingFavoriteIds.indexOf(item.favoriteId)
+        if (index >= 0) removingFavoriteIds.splice(index, 1)
+    })
+}
+
+/** 每次页面重新可见都重读第一页，并在进入前再次校验学生角色。 */
+onPageShow(() => {
+    pageVisible = true
+    const statusBarHeight = uni.getWindowInfo().statusBarHeight
+    state.statusBarHeight = statusBarHeight > 0 ? statusBarHeight : 24
+    if (!isLoggedIn()) {
+        uni.reLaunch({ url: '/pages/login/login' })
+        return
+    }
+    const user = currentUser()
+    if (user == null || user.roleCode != 'CUSTOMER') {
+        uni.switchTab({ url: '/pages/mine/mine' })
+        return
+    }
+    if (listOwner != user.userUuid) {
+        // 即便页面栈未因登录切换而销毁，也不让新账号在加载期间看见前一账号的列表。
+        listOwner = user.userUuid
+        requestVersion++
+        state.favoriteItems = []
+        state.nextCursor = 0
+        state.hasMore = false
+        state.errorText = ''
+    }
+    loadPage(true)
+})
+
+/** 页面隐藏后使在途请求失效，避免旧响应改写离页状态。 */
+onPageHide(() => {
+    pageVisible = false
+    requestVersion++
+})
+</script>
+
+<style>
+    @import '../../styles/account.css';
+</style>

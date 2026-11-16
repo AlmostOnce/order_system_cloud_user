@@ -207,13 +207,30 @@ export function listActiveRestaurants(): Promise<RestaurantListResult> {
 
 export type ProductImage = { productId: number, windowId: number, imageUrl: string }
 
-export function listProductImages(productIds: number[]): Promise<ProductImage[]> {
-    if (productIds.length == 0) return Promise.resolve([]);
-    return httpGet('/products/images?productIds=' + productIds.join(','), true).then((result: HttpResult): ProductImage[] => {
+/** 菜品图片批量查询结果可区分“目录中不存在”与“本次请求失败”。 */
+export type ProductImageListResult = {
+	/** HTTP 请求和响应结构是否有效；成功空数组表示当前目录没有匹配菜品。 */
+	ok: boolean
+	/** 请求失败时的可重试提示；目标未上架不属于请求错误。 */
+	message: string
+	/** 成功时当前目录可查到的菜品图片映射。 */
+	items: ProductImage[]
+}
+
+/**
+ * 批量读取在售菜品图片和所属窗口，并保留请求失败状态供收藏页重试。
+ *
+ * @param productIds 当前收藏页内的菜品 ID，调用方应限制为小批量
+ * @return 成功时返回当前目录可见菜品；下架菜品会被正常省略，失败时 ok 为 false
+ */
+export function fetchProductImages(productIds: number[]): Promise<ProductImageListResult> {
+    if (productIds.length == 0) return Promise.resolve({ ok: true, message: '', items: [] });
+    return httpGet('/products/images?productIds=' + productIds.join(','), true).then((result: HttpResult): ProductImageListResult => {
         const items: ProductImage[] = [];
-        if (!result.ok || result.data == null) return items;
+        if (!result.ok) return { ok: false, message: result.message, items: items };
+        if (result.data == null) return { ok: false, message: '菜品图片响应异常，请稍后重试', items: items };
         const data = jsonArray(result.data!, 'data');
-        if (data == null) return items;
+        if (data == null) return { ok: false, message: '菜品图片响应异常，请稍后重试', items: items };
         for (let i = 0; i < data.length; i++) {
             if (data[i] == null) continue;
             const row = data[i] as UTSJSONObject;
@@ -221,6 +238,14 @@ export function listProductImages(productIds: number[]): Promise<ProductImage[]>
             const windowId = jsonNumber(row, 'windowId') ?? 0;
             if (id > 0 && windowId > 0) items.push({ productId: id, windowId: windowId, imageUrl: jsonString(row, 'imageUrl') ?? '' });
         }
-        return items;
-    }).catch((): ProductImage[] => []);
+        return { ok: true, message: '', items: items };
+    }).catch((): ProductImageListResult => ({ ok: false, message: '网络连接失败，请检查网络后重试', items: [] }));
+}
+
+/**
+ * 兼容排行榜、评价列表等只需要图片数组的既有调用；维持原有失败回退语义。
+ * 收藏页使用 fetchProductImages 以区分网络失败和确实不在启用目录中的菜品。
+ */
+export function listProductImages(productIds: number[]): Promise<ProductImage[]> {
+    return fetchProductImages(productIds).then((result: ProductImageListResult): ProductImage[] => result.items);
 }

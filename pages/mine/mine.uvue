@@ -45,6 +45,10 @@
                     <view class="account-entry" @click="openReviews">
                         <view class="account-entry-icon"><image class="review-entry-icon" src="/static/review/star-outline.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的评价</text><text class="account-entry-note">回顾用餐感受，查看已发布评价</text></view><view class="account-arrow"></view>
                     </view>
+                    <view class="entry-divider"></view>
+                    <view class="account-entry" @click="openFavorites">
+                        <view class="account-entry-icon"><image class="review-entry-icon" src="/static/favorites/heart-filled.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的收藏</text><text class="account-entry-note">查看收藏的店铺与菜品</text></view><view class="account-arrow"></view>
+                    </view>
                 </view>
                 <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">我的钱包</text>
 				<view v-if="roleCode == 'CUSTOMER'" class="entry-group">
@@ -170,6 +174,11 @@ function loadBalance(): Promise<void> {
 }
 
 function openReviews() { uni.navigateTo({ url: '/pages/review/list' }); }
+/** 收藏列表是学生端入口；角色二次判断避免其他临时调试身份进入学生收藏页。 */
+function openFavorites() {
+    if (state.roleCode != 'CUSTOMER') return;
+    uni.navigateTo({ url: '/pages/favorites/list' });
+}
 function loadUnreadCount(): Promise<void> {
     startNotificationSession();
     return refreshNotificationCount();

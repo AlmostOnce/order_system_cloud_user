@@ -1,0 +1,167 @@
+import { jsonArray, jsonBoolean, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
+import { httpDelete, httpGet, httpPost, httpPut, HttpResult } from '../common/http.uts'
+
+/** 收藏目标类型与 user-service 的枚举代码一一对应，客户端不传其他分类。 */
+export type FavoriteTargetType = 'WINDOW' | 'PRODUCT'
+
+/** 收藏列表仅包含用户服务负责的关系元数据，目录详情由商品 API 提供。 */
+export type FavoriteItem = {
+    /** user-service 中单条关系的分页主键。 */
+    favoriteId: number
+    /** 与当前查询类别一致的窗口或菜品类型。 */
+    targetType: FavoriteTargetType
+    /** 商品服务目录中的窗口 ID 或菜品 ID。 */
+    targetId: number
+    /** 服务端保存关系的创建时刻，列表排序仍由 favoriteId 游标决定。 */
+    createdAt: string
+}
+
+/** 游标分页结果；nextCursor 为0表示已到末页。 */
+export type FavoritePage = {
+    /** 当前页按收藏创建顺序从新到旧返回的关系项。 */
+    items: Array<FavoriteItem>
+    /** 服务端返回的下一页游标；0 表示已到末页。 */
+    nextCursor: number
+    /** 服务端是否还能按当前游标查询更早的收藏。 */
+    hasMore: boolean
+}
+
+/** 查询结果保留失败文案与成功空页的区别，页面据此展示错误或空态。 */
+export type FavoritePageResult = {
+    /** 请求及响应契约是否有效；空收藏列表仍属于成功。 */
+    ok: boolean
+    /** 请求失败或响应异常时用于页面提示的文案。 */
+    message: string
+    /** 成功时的分页数据；失败时为 null。 */
+    page: FavoritePage | null
+}
+
+/**
+ * 收藏窗口或菜品。
+ *
+ * @param targetType 目标类型
+ * @param targetId 窗口或菜品 ID
+ * @return 服务端确认结果；重复收藏由后端幂等处理
+ */
+export function addFavorite(targetType: FavoriteTargetType, targetId: number): Promise<HttpResult> {
+    return httpPut('/users/me/favorites/' + targetType + '/' + targetId, null, true)
+}
+
+/**
+ * 取消窗口或菜品收藏。
+ *
+ * @param targetType 目标类型
+ * @param targetId 窗口或菜品 ID
+ * @return 服务端确认结果；目标已不存在时后端仍返回成功
+ */
+export function removeFavorite(targetType: FavoriteTargetType, targetId: number): Promise<HttpResult> {
+    return httpDelete('/users/me/favorites/' + targetType + '/' + targetId, true)
+}
+
+/**
+ * 批量查询当前页面可见目标的收藏状态，避免对每张卡片分别发请求。
+ *
+ * @param targetType 目标类型
+ * @param targetIds 当前页面目标 ID，服务端最多接收100个
+ * @return 成功时返回已收藏 ID；响应失败或格式错误时返回 null
+ */
+export function fetchFavoriteTargetIds(
+    targetType: FavoriteTargetType,
+    targetIds: Array<number>
+): Promise<Array<number> | null> {
+    if (targetIds.length == 0) return Promise.resolve([])
+    // 服务端为状态查询设置了100个ID的硬上限；超出时拆成小批次，确保所有条目都有状态。
+    const batches: Array<Array<number>> = []
+    for (let start = 0; start < targetIds.length; start += 100) {
+        const batch: Array<number> = []
+        const end = Math.min(start + 100, targetIds.length)
+        for (let index = start; index < end; index++) batch.push(targetIds[index])
+        batches.push(batch)
+    }
+    const requests: Array<Promise<Array<number> | null>> = []
+    for (let index = 0; index < batches.length; index++) {
+        requests.push(fetchFavoriteTargetIdBatch(targetType, batches[index]))
+    }
+    return Promise.all(requests).then((results: Array<Array<number> | null>): Array<number> | null => {
+        const ids: Array<number> = []
+        for (let index = 0; index < results.length; index++) {
+            if (results[index] == null) return null
+            const batchIds = results[index] as Array<number>
+            for (let idIndex = 0; idIndex < batchIds.length; idIndex++) ids.push(batchIds[idIndex])
+        }
+        return ids
+    }).catch((): Array<number> | null => null)
+}
+
+/**
+ * 查询单批目标；调用方保证批次不超过 user-service 的100项上限。
+ * 响应若包含重复、非法或未请求的 ID，则整批判为无效，避免错误状态污染图标。
+ *
+ * @param targetType 目标类型
+ * @param targetIds 当前批次目标 ID
+ * @return 已收藏 ID；失败或响应结构异常时返回 null
+ */
+function fetchFavoriteTargetIdBatch(
+    targetType: FavoriteTargetType,
+    targetIds: Array<number>
+): Promise<Array<number> | null> {
+    const body: UTSJSONObject = { targetType: targetType, targetIds: targetIds }
+    return httpPost('/users/me/favorites/status', body, true).then((result: HttpResult): Array<number> | null => {
+        if (!result.ok || result.data == null) return null
+        const data = jsonObject(result.data, 'data')
+        if (data == null) return null
+        const rawIds = jsonArray(data, 'targetIds')
+        if (rawIds == null) return null
+        const ids: Array<number> = []
+        for (let i = 0; i < rawIds.length; i++) {
+            const id = rawIds[i]
+            if (typeof id != 'number' || !Number.isInteger(id) || id <= 0 || !targetIds.includes(id) || ids.includes(id)) return null
+            ids.push(id)
+        }
+        return ids
+    }).catch((): Array<number> | null => null)
+}
+
+/**
+ * 读取当前用户某一类型的收藏页，并严格校验分页游标契约。
+ *
+ * @param targetType WINDOW 或 PRODUCT
+ * @param beforeId 上一页末条 favoriteId；首屏传0
+ * @param limit 请求数量，服务端还会再次限制最大值
+ * @return 区分成功空页、失败和格式异常的结果
+ */
+export function fetchFavoritePage(
+    targetType: FavoriteTargetType,
+    beforeId: number,
+    limit: number = 20
+): Promise<FavoritePageResult> {
+    let path = '/users/me/favorites?targetType=' + targetType + '&limit=' + limit
+    if (beforeId > 0) path += '&beforeId=' + beforeId
+    return httpGet(path, true).then((result: HttpResult): FavoritePageResult => {
+        if (!result.ok || result.data == null) return { ok: false, message: result.message, page: null }
+        const data = jsonObject(result.data, 'data')
+        if (data == null) return { ok: false, message: '收藏列表响应异常，请稍后重试', page: null }
+        const rawItems = jsonArray(data, 'items')
+        const hasMore = jsonBoolean(data, 'hasMore')
+        const nextCursor = jsonNumber(data, 'nextCursor') ?? 0
+        if (rawItems == null || hasMore == null || (hasMore && (rawItems.length == 0 || nextCursor <= 0))) {
+            return { ok: false, message: '收藏列表响应异常，请稍后重试', page: null }
+        }
+        const items: Array<FavoriteItem> = []
+        for (let i = 0; i < rawItems.length; i++) {
+            if (rawItems[i] == null || typeof rawItems[i] != 'object' || Array.isArray(rawItems[i])) {
+                return { ok: false, message: '收藏列表响应异常，请稍后重试', page: null }
+            }
+            const raw = rawItems[i] as UTSJSONObject
+            const favoriteId = jsonNumber(raw, 'favoriteId') ?? 0
+            const itemType = jsonString(raw, 'targetType') ?? ''
+            const targetId = jsonNumber(raw, 'targetId') ?? 0
+            if (favoriteId <= 0 || targetId <= 0 || itemType != targetType) {
+                return { ok: false, message: '收藏列表响应异常，请稍后重试', page: null }
+            }
+            items.push({ favoriteId: favoriteId, targetType: targetType, targetId: targetId,
+                createdAt: jsonString(raw, 'createdAt') ?? '' })
+        }
+        return { ok: true, message: '', page: { items: items, nextCursor: nextCursor, hasMore: hasMore } }
+    }).catch((): FavoritePageResult => ({ ok: false, message: '网络连接失败，请检查网络后重试', page: null }))
+}

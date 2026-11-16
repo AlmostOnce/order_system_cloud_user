@@ -81,6 +81,11 @@
 							<text class="stall-month-sales">月售 {{ monthlyWindowSalesText(item.windowId) }} 份</text>
 						</view>
 					</view>
+					<!-- 收藏入口与整张卡片导航分离；原生 view 不支持 aria-label，心形图标提供可见提示。 -->
+					<view class="stall-favorite" hover-class="stall-favorite-hover"
+						@click.stop="toggleWindowFavorite(item)">
+						<image class="stall-favorite-heart" :src="isWindowFavorite(item.windowId) ? '/static/favorites/heart-filled.svg' : '/static/favorites/heart-outline.svg'"></image>
+					</view>
 					<text class="stall-arrow">›</text>
 				</view>
 			</view>
@@ -145,6 +150,8 @@ import { isLoggedIn, currentUser } from '../../store/auth.uts';
 import { listActiveWindows, listActiveRestaurants, WindowItem, WindowListResult, RestaurantItem, RestaurantListResult } from '../../api/product.uts';
 import { CardRating, fetchCardRatings, cardRatingText } from '../../api/comments.uts';
 import { fetchMonthlyWindowSales, MonthlyWindowSalesItem } from '../../api/statistics.uts';
+import { addFavorite, fetchFavoriteTargetIds, FavoriteTargetType, removeFavorite } from '../../api/favorites.uts';
+import { toast } from '../../common/feedback.uts';
 /** 表示「全部餐厅」的哨兵值，与任何真实餐厅 ID 都不会冲突。 */
 const ALL_RESTAURANTS: number = 0;
 /** 「全部餐厅」的展示名称。 */
@@ -201,6 +208,7 @@ const initialEmptyWindows: Array<WindowItem> = [];
 const initialWindowRatings: Array<CardRating> = [];
 let windowRatingVersion = 0;
 let windowSalesVersion = 0;
+let windowFavoriteVersion = 0;
 let catalogOwner = '';
 // 餐厅列表的初始空数组。
 const initialEmptyRestaurants: Array<RestaurantItem> = [];
@@ -215,6 +223,10 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     roleCode: '',
     // 后端返回的档口全量列表。
     windows: initialEmptyWindows,
+    // 当前登录学生已收藏的窗口 ID；本地只是服务端状态的页面副本，不作为持久化事实。
+    windowFavoriteIds: [] as Array<number>,
+    // 正在写入收藏的窗口 ID，避免同一卡片重复提交。
+    windowFavoriteBusyIds: [] as Array<number>,
     windowRatings: initialWindowRatings,
     // 与档口列表分开读取的月售汇总；统计服务失败不会影响档口浏览。
     monthlyWindowSales: initialMonthlyWindowSales,
@@ -349,10 +361,20 @@ function loadProfile() {
     state.greeting = buildGreeting();
     // 仅顾客角色需要拉取档口与餐厅数据。
     if (state.roleCode == 'CUSTOMER') {
-        if (catalogOwner == profile.userUuid) return;
+        if (catalogOwner == profile.userUuid) {
+            // 返回首页时只更新易变化的月售统计，保持窗口目录、筛选和卡片动画不动。
+            refreshMonthlyWindowSales();
+            // 首页是缓存 tab；从收藏页返回时只校准窗口收藏状态，不重新拉商品目录。
+            refreshWindowFavoriteStates();
+            return;
+        }
         catalogOwner = profile.userUuid;
         windowRatingVersion++;
+        // 切换登录账号时作废旧账号的收藏状态查询，再加载新账号自己的关系。
+        windowFavoriteVersion++;
         state.windows = [];
+        state.windowFavoriteIds = [];
+        state.windowFavoriteBusyIds = [];
         state.visibleWindows = [];
         state.restaurants = [];
         state.windowRatings = [];
@@ -396,22 +418,18 @@ function loadCatalog(): Promise<void> {
             }
             // 写入档口全量数据。
             state.windows = windowResult.items;
+            // 收藏状态是独立请求，失败时不阻塞窗口目录和点餐入口。
+            refreshWindowFavoriteStates();
             const version = ++windowRatingVersion;
             state.windowRatings = [];
-            const salesVersion = ++windowSalesVersion;
+            // 窗口目录刷新后重新取月售；此时清空旧汇总，避免新旧目录混用旧销量。
             state.monthlyWindowSales = [];
             state.monthlyWindowSalesReady = false;
             const ids: Array<number> = [];
             for (let i = 0; i < state.windows.length; i++) if (state.windows[i].windowId > 0) ids.push(state.windows[i].windowId);
             fetchCardRatings('windows', ids).then((ratings: Array<CardRating>) => { if (version == windowRatingVersion) state.windowRatings = ratings; });
             // 月售是独立的可选展示数据：失败显示“--”，不改变档口列表的成功状态。
-            fetchMonthlyWindowSales().then((salesResult) => {
-                if (salesVersion != windowSalesVersion) return;
-                if (salesResult.ok) {
-                    state.monthlyWindowSales = salesResult.items;
-                    state.monthlyWindowSalesReady = true;
-                }
-            });
+            refreshMonthlyWindowSales();
             // 按当前选中餐厅算出可见档口。
             buildVisibleWindows();
             // 列表渲染完成后再切到「已入场」，卡片才会依次浮入。
@@ -419,6 +437,97 @@ function loadCatalog(): Promise<void> {
                 state.listReady = true;
             }, 60);
         });
+    });
+}
+
+/**
+ * 判断指定窗口在本页服务端状态快照中是否已收藏。
+ *
+ * @param windowId 商品服务的窗口 ID
+ * @return 本地状态快照中是否有该用户的收藏关系
+ */
+function isWindowFavorite(windowId: number): boolean {
+    return state.windowFavoriteIds.includes(windowId);
+}
+
+/**
+ * 刷新当前活动窗口的收藏状态；请求序号阻止切账号或新一轮刷新后的迟到响应覆盖页面。
+ */
+function refreshWindowFavoriteStates(): void {
+    const version = ++windowFavoriteVersion;
+    const ids: Array<number> = [];
+    for (let i = 0; i < state.windows.length; i++) {
+        const id = state.windows[i].windowId;
+        if (id > 0 && !ids.includes(id)) ids.push(id);
+    }
+    if (ids.length == 0) {
+        state.windowFavoriteIds = [];
+        return;
+    }
+    fetchFavoriteTargetIds('WINDOW' as FavoriteTargetType, ids).then((favoriteIds: Array<number> | null) => {
+        if (version != windowFavoriteVersion || favoriteIds == null) return;
+        state.windowFavoriteIds = favoriteIds;
+    });
+}
+
+/**
+ * 收藏或取消当前窗口；只在服务端确认后改变图标，失败时保持原状态。
+ *
+ * @param item 当前首页窗口目录项；客户端文案不会写入收藏关系
+ */
+function toggleWindowFavorite(item: WindowItem): void {
+    const windowId = item.windowId;
+    if (windowId <= 0 || state.windowFavoriteBusyIds.includes(windowId)) return;
+    const owner = catalogOwner;
+    const shouldAdd = !isWindowFavorite(windowId);
+    const pending = state.windowFavoriteBusyIds.slice();
+    pending.push(windowId);
+    state.windowFavoriteBusyIds = pending;
+    // 写请求开始后使之前的状态查询失效，避免旧结果反向覆盖刚确认的收藏操作。
+    windowFavoriteVersion++;
+    const request = shouldAdd
+        ? addFavorite('WINDOW' as FavoriteTargetType, windowId)
+        : removeFavorite('WINDOW' as FavoriteTargetType, windowId);
+    request.then((result) => {
+        // 账号切换后，旧用户的写请求不能改写新用户的页面快照。
+        if (owner != catalogOwner || currentUser()?.userUuid != owner) return;
+        state.windowFavoriteBusyIds = state.windowFavoriteBusyIds.filter((id: number): boolean => id != windowId);
+        if (!result.ok) {
+            toast(result.message.length > 0 ? result.message : '收藏操作失败，请稍后重试');
+            // 初次状态查询可能被写请求作废；结束后同步整页，避免其他已收藏窗口留在旧图标。
+            refreshWindowFavoriteStates();
+            return;
+        }
+        const ids = state.windowFavoriteIds.filter((id: number): boolean => id != windowId);
+        if (shouldAdd) ids.push(windowId);
+        state.windowFavoriteIds = ids;
+        toast(shouldAdd ? '已收藏店铺' : '已取消收藏');
+        // 写操作完成后重查当前窗口集合，恢复被版本号作废的批量状态结果。
+        refreshWindowFavoriteStates();
+    }).catch(() => {
+        // 网络异常回包也只处理原账号的按钮与收藏状态。
+        if (owner != catalogOwner || currentUser()?.userUuid != owner) return;
+        state.windowFavoriteBusyIds = state.windowFavoriteBusyIds.filter((id: number): boolean => id != windowId);
+        toast('网络连接失败，请稍后重试');
+        // 网络失败时结果可能不确定，通过服务端状态查询收敛页面显示。
+        refreshWindowFavoriteStates();
+    });
+}
+
+/**
+ * 静默刷新首页窗口月售汇总，不重载商品目录或重播窗口卡片动画。
+ *
+ * <p>订单支付后，销量事件会经消息队列异步写入统计读模型；顾客返回首页时重新读取一次，
+ * 使卡片尽快显示最新自然月销量。返回首页时不会先清空已展示的数据，因此请求失败仍保留旧值；
+ * 首次加载或下拉刷新会由目录加载流程先清空统计状态，失败时显示“--”。递增请求序号会丢弃迟到响应，
+ * 避免旧请求覆盖较新的汇总。</p>
+ */
+function refreshMonthlyWindowSales() {
+    const requestVersion = ++windowSalesVersion;
+    fetchMonthlyWindowSales().then((salesResult) => {
+        if (requestVersion != windowSalesVersion || !salesResult.ok) return;
+        state.monthlyWindowSales = salesResult.items;
+        state.monthlyWindowSalesReady = true;
     });
 }
 
@@ -935,6 +1044,20 @@ onReady(() => {
 		flex: 1;
 		margin-left: 12px;
 	}
+
+	/* 收藏触控区固定为40px，既满足移动端操作尺寸，也不挤压窗口名称和月售文案。 */
+	.stall-favorite {
+		flex-shrink: 0;
+		width: 40px;
+		height: 40px;
+		margin-left: 4px;
+		align-items: center;
+		justify-content: center;
+		border-radius: 20px;
+	}
+
+	.stall-favorite-hover { background-color: #FFF0E7; }
+	.stall-favorite-heart { width: 22px; height: 22px; flex-shrink: 0; }
 
 	.stall-name {
 		font-size: 15px;
