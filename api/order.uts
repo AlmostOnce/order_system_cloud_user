@@ -1,7 +1,31 @@
 import { httpGet, httpPost, httpPatch, HttpResult } from '../common/http.uts'
 import { jsonObject, jsonArray, jsonNumber, jsonString, jsonBoolean } from '../common/json.uts'
 
-export type OrderLine = { itemId: number, refundableQuantity: number, fulfillableQuantity: number, refundedQuantity: number, productId: number, productName: string, quantity: number, unitPrice: number, lineAmount: number }
+/** 订单历史明细：金额、菜名和规格文字都来自下单快照，不跟随当前菜单变化。 */
+export type OrderLine = {
+    /** 订单明细主键，页面循环键及退款选择都依赖它。 */
+    itemId: number
+    /** 当前仍可申请退款的份数。 */
+    refundableQuantity: number
+    /** 当前仍可履约取餐的份数。 */
+    fulfillableQuantity: number
+    /** 已完成退款的份数。 */
+    refundedQuantity: number
+    /** 商品服务菜品编号，评论仍按菜品维度处理。 */
+    productId: number
+    /** 下单时的菜品名称快照。 */
+    productName: string
+    /** 购买份数。 */
+    quantity: number
+    /** 下单时商品服务核定的单价快照。 */
+    unitPrice: number
+    /** 下单时的行金额快照。 */
+    lineAmount: number
+    /** 下单时规格选项的规范身份，无规格时为 base。 */
+    selectionKey: string
+    /** 下单时规格组与选项的文字快照；老订单为空字符串。 */
+    specificationText: string
+}
 export type CustomerOrder = { orderId: number, orderNo: string, windowId: number, windowName: string, totalAmount: number, status: string, remark: string, pickupCode: string, createdAt: string, paymentExpiresAt: number, serverTime: number, items: Array<OrderLine> }
 
 export function orderPayload(result: HttpResult): UTSJSONObject | null {
@@ -27,7 +51,10 @@ export function parseOrder(data: UTSJSONObject): CustomerOrder | null {
             const line = jsonNumber(raw, 'lineAmount')
             if (productId <= 0 || quantity <= 0 || unit == null || line == null || unit < 0 || line < 0) return null
             items.push({ itemId: jsonNumber(raw, 'itemId') ?? 0, refundableQuantity: jsonNumber(raw, 'refundableQuantity') ?? 0,
-                fulfillableQuantity: jsonNumber(raw, 'fulfillableQuantity') ?? quantity, refundedQuantity: jsonNumber(raw, 'refundedQuantity') ?? 0, productId: productId, productName: jsonString(raw, 'productName') ?? '菜品', quantity: quantity, unitPrice: unit, lineAmount: line })
+                fulfillableQuantity: jsonNumber(raw, 'fulfillableQuantity') ?? quantity, refundedQuantity: jsonNumber(raw, 'refundedQuantity') ?? 0,
+                productId: productId, productName: jsonString(raw, 'productName') ?? '菜品', quantity: quantity, unitPrice: unit,
+                lineAmount: line, selectionKey: jsonString(raw, 'selectionKey') ?? 'base',
+                specificationText: jsonString(raw, 'specificationText') ?? '' })
         }
     }
     return { orderId: id, orderNo: jsonString(data, 'orderNo') ?? '', windowId: windowId, windowName: jsonString(data, 'windowName') ?? '', totalAmount: amount, status: status,

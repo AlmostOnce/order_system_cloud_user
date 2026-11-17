@@ -13,8 +13,8 @@
             <view v-if="items.length > 0" class="account-card vapor-account-secondary--account-card">
                 <text class="account-heading">{{ windowName.length > 0 ? windowName : '店铺名称暂不可用' }}</text>
                 <text class="account-note">到店自取</text>
-                <view v-for="item in items" :key="item.productId" class="order-line">
-                    <view class="order-line-copy"><text class="order-line-name">{{ item.productName }}</text><text class="account-muted">¥{{ item.unitPrice.toFixed(2) }} × {{ item.quantity }}</text></view>
+                <view v-for="item in items" :key="item.productId + ':' + item.selectionKey" class="order-line">
+                    <view class="order-line-copy"><text class="order-line-name">{{ item.productName }}</text><text v-if="item.specificationText.length > 0" class="account-note">{{ item.specificationText }}</text><text class="account-muted">¥{{ item.unitPrice.toFixed(2) }} × {{ item.quantity }}</text></view>
                     <text class="order-line-price">¥{{ item.lineAmount.toFixed(2) }}</text>
                 </view>
                 <view class="order-total"><text class="account-muted">预估合计</text><text class="order-total-price">¥{{ totalText }}</text></view>
@@ -117,7 +117,10 @@ function loadCart(): Promise<void> {
                     state.errorText = item.productName + ' 暂不可下单，请返回购物车调整';
                     return;
                 }
-                lines.push({ productId: item.productId, productName: item.productName, quantity: item.quantity, revision: item.revision, unitPrice: item.unitPrice, lineAmount: item.lineAmount });
+                lines.push({ productId: item.productId, productName: item.productName, quantity: item.quantity,
+                    revision: item.revision, unitPrice: item.unitPrice, lineAmount: item.lineAmount,
+                    selectionKey: item.selectionKey, selectedOptionIds: item.selectedOptionIds,
+                    specificationText: item.specificationText });
             }
             if (lines.length > 100) {
                 state.errorText = '每单最多 100 项菜品';
