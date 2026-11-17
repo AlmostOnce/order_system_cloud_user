@@ -2,11 +2,12 @@
     <view class="account-page account-secondary">
         <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
         <view class="account-nav vapor-account-secondary--account-nav">
-            <view class="account-back vapor-account-secondary--account-back" @click="goBack">
+            <!-- 原生按钮为纯图标返回入口提供键盘语义与读屏名称。 -->
+            <button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack">
                 <view class="account-back-icon"></view>
-            </view>
+            </button>
             <text class="account-title">确认订单</text></view>
-        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!pending && !submitting && createdOrderId == 0 && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!pending && !submitting && createdOrderId == 0 && !couponLoading && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
 <view class="account-content vapor-account-secondary--account-content">
             <view class="account-banner"><view class="banner-copy"><text class="banner-kicker">校园食堂 · 到店取餐</text><text class="banner-title">确认这一餐</text><text class="banner-note">核对菜品与数量，提交后前往支付。</text></view></view>
             <view v-if="loading" class="account-card vapor-account-secondary--account-card"><text class="account-muted">正在核对购物车…</text></view>
@@ -19,6 +20,30 @@
                 </view>
                 <view class="order-total"><text class="account-muted">预估合计</text><text class="order-total-price">¥{{ totalText }}</text></view>
                 <text class="account-note">最终金额以提交后订单为准。</text>
+            </view>
+            <view v-if="items.length > 0" class="account-card vapor-account-secondary--account-card coupon-checkout-card">
+                <view class="coupon-checkout-heading"><text class="account-heading">优惠券</text><button class="account-link account-link-text button-text button-text-44" :disabled="pending || submitting || loading" @click="toggleCouponPicker">{{ couponPickerOpen ? '收起' : (userCouponId > 0 ? '更换' : '选择') }}</button></view>
+                <text v-if="userCouponId == 0" class="account-note coupon-checkout-summary">选择一张可用优惠券，提交时由服务端核验本单是否满足条件。</text>
+                <view v-else class="coupon-selected-summary">
+                    <text class="coupon-selected-title">{{ selectedCouponTitle.length > 0 ? selectedCouponTitle : '已选择优惠券' }}</text>
+                    <text v-if="selectedCouponDiscount > 0" class="coupon-selected-detail">面额 ¥{{ selectedCouponDiscount.toFixed(2) }} · 满 ¥{{ selectedCouponMinSpend.toFixed(2) }} 可用</text>
+                    <text class="coupon-selected-detail">提交时重新核验适用范围和消费门槛，订单返回后显示最终优惠与实付金额。</text>
+                    <button class="account-link account-muted button-text button-text-44 coupon-clear" :disabled="pending || submitting" @click="clearCoupon">不使用优惠券</button>
+                </view>
+                <view v-if="couponPickerOpen" class="coupon-picker">
+                    <text class="account-note coupon-picker-note">可用券会全部列出；选择只表示提交使用意向，最终适用性和优惠金额由服务端确认。</text>
+                    <text v-if="couponLoading" class="account-muted">正在获取可用优惠券…</text>
+                    <button v-for="coupon in availableCoupons" :key="coupon.userCouponId" class="coupon-option button-text" :class="userCouponId == coupon.userCouponId ? 'coupon-option-selected' : ''" @click="selectCoupon(coupon)">
+                        <view class="coupon-option-copy"><text class="coupon-option-title">{{ coupon.title }}</text><text class="coupon-option-detail">¥{{ coupon.discountAmount.toFixed(2) }} · 满 ¥{{ coupon.minSpend.toFixed(2) }} 可用</text><text class="coupon-option-detail">{{ couponScopeLabel(coupon) }}</text></view>
+                        <text class="coupon-option-action">{{ userCouponId == coupon.userCouponId ? '已选择' : '选择' }}</text>
+                    </button>
+                    <text v-if="couponError.length > 0" class="account-error">{{ couponError }}</text>
+                    <text v-if="couponError.length > 0" class="account-note">回到列表顶部下拉可重试优惠券查询。</text>
+                    <view v-if="!couponLoading && couponError.length == 0 && availableCoupons.length == 0" class="coupon-empty">
+                        <text class="account-note">暂无可用优惠券</text>
+                        <button class="account-link account-link-text button-text button-text-44" :disabled="pending || submitting" @click="openCouponPage">去领券</button>
+                    </view>
+                </view>
             </view>
             <view v-if="items.length > 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">订单备注</text><textarea class="order-remark" v-model="remark" :maxlength="255" :disabled="submitting || pending" placeholder="口味偏好等，可选填" /><text class="account-muted">{{ remark.length }}/255</text></view>
             <text v-if="pending" class="account-note">上次提交结果待确认，菜品与备注已锁定。再次确认会查询同一笔订单。</text>
@@ -40,24 +65,67 @@ import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { fetchCart, CartResult } from '../../api/cart.uts';
 import { createOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts';
+import { CustomerCoupon, CustomerCouponListResult, fetchMyAvailableCoupons } from '../../api/coupons.uts';
 import { CheckoutLine, CheckoutDraft, checkoutKey, cleanupKey, readCheckout, orderBody, cleanupBody } from '../../common/checkout.uts';
 import { HttpResult } from '../../common/http.uts';
 import { currentUser } from '../../store/auth.uts';
 import { backToAccount } from '../../common/account.uts';
 
 const initialItems: Array<CheckoutLine> = [];
-const state = reactive({ refreshing: false, currentRefreshTime: '', statusBarHeight: 0, userUuid: '', windowId: 0, windowName: '', items: initialItems, remark: '', totalText: '0.00', loading: false, submitting: false, pending: false, requestKey: '', errorText: '', createdOrderId: 0, pageVisible: false })
+const initialCoupons: Array<CustomerCoupon> = [];
+const state = reactive({
+    refreshing: false,
+    currentRefreshTime: '',
+    statusBarHeight: 0,
+    userUuid: '',
+    windowId: 0,
+    windowName: '',
+    items: initialItems,
+    remark: '',
+    totalText: '0.00',
+    /** 随下单请求提交的用户券 ID；为0时表示不选择优惠券，由后端最终核验。 */
+    userCouponId: 0,
+    /** 以下展示快照只用于说明学生当前选择，不用于计算最终优惠或应付金额。 */
+    selectedCouponTitle: '',
+    selectedCouponDiscount: 0,
+    selectedCouponMinSpend: 0,
+    /** 服务端返回的本人可用券选项；不按当前窗口或金额在客户端剔除。 */
+    availableCoupons: initialCoupons,
+    /** 控制选券列表显示状态。 */
+    couponPickerOpen: false,
+    /** 当前可用券请求状态；页面隐藏或账号切换时使旧请求失效。 */
+    couponLoading: false,
+    /** 是否已成功加载过本次会话的券列表，返回结算时可按需刷新。 */
+    couponLoaded: false,
+    /** 可用券列表失败信息，与空列表分开呈现。 */
+    couponError: '',
+    /** 从领券页返回时要求刷新列表并重新打开选择器。 */
+    reloadCouponsAfterReturn: false,
+    loading: false,
+    submitting: false,
+    pending: false,
+    requestKey: '',
+    errorText: '',
+    createdOrderId: 0,
+    pageVisible: false
+})
 
-const { refreshing, currentRefreshTime, statusBarHeight, userUuid, windowId, windowName, items, remark, totalText, loading, submitting, pending, requestKey, errorText, createdOrderId, pageVisible } = toRefs(state)
+const { refreshing, currentRefreshTime, statusBarHeight, userUuid, windowId, windowName, items, remark, totalText, userCouponId, selectedCouponTitle, selectedCouponDiscount, selectedCouponMinSpend, availableCoupons, couponPickerOpen, couponLoading, couponError, loading, submitting, pending, requestKey, errorText, createdOrderId, pageVisible } = toRefs(state)
+let couponRequestVersion = 0
 
+/** 下拉同时刷新购物车与当前展开的可用券列表；失败保留错误状态，用户可再次下拉重试。 */
 function refreshPage() {
-    if (state.refreshing || state.loading || state.submitting || state.pending || state.createdOrderId > 0)
+    if (state.refreshing || state.loading || state.couponLoading || state.submitting || state.pending || state.createdOrderId > 0)
         return;
     state.refreshing = true;
     const refreshStartedAt = Date.now();
     state.currentRefreshTime = refreshTimeLabel(refreshStartedAt);
     loadCart().then(() => {
-        finishPullRefresh(refreshStartedAt, state.errorText.length == 0, (time: string) => {
+        if (state.couponPickerOpen) return loadAvailableCoupons()
+        return Promise.resolve()
+    }).then(() => {
+        const couponRefreshSucceeded = !state.couponPickerOpen || state.couponError.length == 0
+        finishPullRefresh(refreshStartedAt, state.errorText.length == 0 && couponRefreshSucceeded, (time: string) => {
             if (time.length > 0)
                 state.currentRefreshTime = time;
             state.refreshing = false;
@@ -74,6 +142,94 @@ function goBack() {
 
 function openOrders() {
     uni.navigateTo({ url: '/pages/order/list' });
+}
+
+/** 打开可用券列表；券的范围与门槛由后端在正式下单时最终核验。 */
+function toggleCouponPicker() {
+    if (state.pending || state.submitting || state.loading) return
+    state.couponPickerOpen = !state.couponPickerOpen
+    if (state.couponPickerOpen && !state.couponLoaded) loadAvailableCoupons()
+}
+
+/** 刷新本人当前可用券；旧响应不能覆盖切换账号或离开页面后的状态。 */
+function loadAvailableCoupons(): Promise<void> {
+    const user = currentUser()
+    if (user == null || user.roleCode != 'CUSTOMER' || state.couponLoading) return Promise.resolve()
+    const owner = user.userUuid
+    const version = ++couponRequestVersion
+    state.couponLoading = true
+    state.couponError = ''
+    return fetchMyAvailableCoupons().then((result: CustomerCouponListResult) => {
+        if (!state.pageVisible || version != couponRequestVersion || currentUser()?.userUuid != owner) return
+        if (!result.ok || result.coupons == null) {
+            state.couponError = result.message.length > 0 ? result.message : '优惠券暂时无法获取'
+            return
+        }
+        state.availableCoupons = result.coupons
+        state.couponLoaded = true
+        if (state.userCouponId > 0) {
+            let selected: CustomerCoupon | null = null
+            for (let i = 0; i < result.coupons.length; i++) {
+                if (result.coupons[i].userCouponId == state.userCouponId) { selected = result.coupons[i]; break }
+            }
+            if (selected != null) {
+                state.selectedCouponTitle = selected.title
+                state.selectedCouponDiscount = selected.discountAmount
+                state.selectedCouponMinSpend = selected.minSpend
+            } else if (!state.pending) {
+                // 列表不再包含已选择的券时停止发送过期 ID，提示用户重新选择。
+                state.userCouponId = 0
+                state.selectedCouponTitle = ''
+                state.selectedCouponDiscount = 0
+                state.selectedCouponMinSpend = 0
+                toast('所选优惠券已不可用，请重新选择')
+            }
+        }
+    }).catch(() => {
+        if (state.pageVisible && version == couponRequestVersion && currentUser()?.userUuid == owner) {
+            state.couponError = '优惠券暂时无法获取，请检查网络后重试'
+        }
+    }).finally(() => {
+        if (state.pageVisible && version == couponRequestVersion && currentUser()?.userUuid == owner) state.couponLoading = false
+    })
+}
+
+/** 选券只保存用户券 ID 和展示快照，不在客户端计算可用性或应付金额。 */
+function selectCoupon(coupon: CustomerCoupon) {
+    if (state.pending || state.submitting) return
+    state.userCouponId = coupon.userCouponId
+    state.selectedCouponTitle = coupon.title
+    state.selectedCouponDiscount = coupon.discountAmount
+    state.selectedCouponMinSpend = coupon.minSpend
+    state.couponPickerOpen = false
+}
+
+/** 清除券 ID 与展示快照，后续提交将不携带优惠券字段。 */
+function clearCoupon() {
+    if (state.pending || state.submitting) return
+    state.userCouponId = 0
+    state.selectedCouponTitle = ''
+    state.selectedCouponDiscount = 0
+    state.selectedCouponMinSpend = 0
+}
+
+/** 无可用券时跳到“我的券”，返回后刷新列表并重新展开选择区。 */
+function openCouponPage() {
+    if (state.pending || state.submitting) return
+    state.reloadCouponsAfterReturn = true
+    state.couponPickerOpen = false
+    uni.navigateTo({ url: '/pages/coupons/list?tab=mine' })
+}
+
+/** 按后端确认的范围代码显示全校范围或窗口编号，不反查窗口名称。 */
+function couponScopeLabel(coupon: CustomerCoupon): string {
+    if (coupon.scopeType == 'CAMPUS') return '全校窗口可用'
+    let ids = ''
+    for (let i = 0; i < coupon.windowIds.length; i++) {
+        if (i > 0) ids += '、'
+        ids += coupon.windowIds[i].toString()
+    }
+    return '窗口 ID：' + ids
 }
 
 function openCreated() {
@@ -137,9 +293,10 @@ function submit() {
     state.errorText = '';
     if (!state.pending)
         state.requestKey = 'order-' + Date.now() + '-' + Math.floor(Math.random() * 1000000000);
-    const draft: CheckoutDraft = { key: state.requestKey, windowId: state.windowId, windowName: state.windowName, remark: state.remark, items: state.items };
+    const owner = state.userUuid;
+    const draft: CheckoutDraft = { key: state.requestKey, windowId: state.windowId, windowName: state.windowName, remark: state.remark, userCouponId: state.userCouponId, items: state.items };
     try {
-        uni.setStorageSync(checkoutKey(state.userUuid), JSON.stringify(draft));
+        uni.setStorageSync(checkoutKey(owner), JSON.stringify(draft));
     }
     catch (error) {
         toast('无法保存提交信息，请检查设备存储后重试');
@@ -148,6 +305,8 @@ function submit() {
     state.pending = true;
     state.submitting = true;
     createOrder(orderBody(draft), draft.key).then((result: HttpResult) => {
+        // 请求可能在退出或切换账号后才返回；旧账号响应不得改写当前用户页面或草稿键。
+        if (currentUser()?.userUuid != owner || state.userUuid != owner) return;
         state.submitting = false;
         const data = orderPayload(result);
         const order = data == null ? null : parseOrder(data);
@@ -159,7 +318,7 @@ function submit() {
                 state.errorText = '';
                 state.pending = false;
                 state.requestKey = '';
-                uni.removeStorageSync(checkoutKey(state.userUuid));
+                uni.removeStorageSync(checkoutKey(owner));
             }
             return;
         }
@@ -167,16 +326,16 @@ function submit() {
         state.pending = false;
         const snapshot = cleanupBody(draft);
         try {
-            uni.setStorageSync(cleanupKey(state.userUuid, order.orderId), JSON.stringify(snapshot));
-            uni.removeStorageSync(checkoutKey(state.userUuid));
+            uni.setStorageSync(cleanupKey(owner, order.orderId), JSON.stringify(snapshot));
+            uni.removeStorageSync(checkoutKey(owner));
         }
         catch (error) {
             toast('订单已提交，购物车清理信息保存失败。请勿重复下单。');
         }
         cleanupOrderCart(order.orderId, snapshot).then((cleaned: HttpResult) => {
             if (cleaned.ok)
-                uni.removeStorageSync(cleanupKey(state.userUuid, order.orderId));
-            if (state.pageVisible)
+                uni.removeStorageSync(cleanupKey(owner, order.orderId));
+            if (state.pageVisible && currentUser()?.userUuid == owner && state.userUuid == owner)
                 openCreated();
         });
     });
@@ -189,19 +348,51 @@ onLoad((options: OnLoadOptions) => {
         state.windowName = name as string;
 })
 
+/** 页面每次回到前台都校验学生身份，并恢复幂等下单草稿与所选券 ID。 */
 onPageShow(() => {
     state.pageVisible = true;
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight;
     const user = currentUser();
     if (user == null) {
+        state.pageVisible = false;
         uni.reLaunch({ url: '/pages/login/login' });
         return;
     }
     if (user.roleCode != 'CUSTOMER') {
+        state.pageVisible = false;
         uni.switchTab({ url: '/pages/home/home' });
         return;
     }
+    if (state.userUuid.length > 0 && state.userUuid != user.userUuid) {
+        // 账号切换后清除旧用户的购物车、幂等草稿状态及优惠券快照，再按新 UUID 草稿恢复。
+        // 旧请求的回调通过 owner 检查丢弃，不能删除新用户的本地草稿或显示旧订单。
+        couponRequestVersion++
+        state.items = []
+        state.remark = ''
+        state.totalText = '0.00'
+        state.errorText = ''
+        state.pending = false
+        state.submitting = false
+        state.requestKey = ''
+        state.createdOrderId = 0
+        state.reloadCouponsAfterReturn = false
+        state.availableCoupons = []
+        state.couponError = ''
+        state.couponLoading = false
+        state.couponLoaded = false
+        state.couponPickerOpen = false
+        state.userCouponId = 0
+        state.selectedCouponTitle = ''
+        state.selectedCouponDiscount = 0
+        state.selectedCouponMinSpend = 0
+    }
     state.userUuid = user.userUuid;
+    if (state.reloadCouponsAfterReturn && !state.pending && !state.submitting && state.createdOrderId == 0) {
+        state.reloadCouponsAfterReturn = false
+        state.couponPickerOpen = true
+        state.couponLoaded = false
+        loadAvailableCoupons()
+    }
     if (state.submitting || state.createdOrderId > 0)
         return;
     const draft = readCheckout(state.userUuid);
@@ -211,6 +402,8 @@ onPageShow(() => {
         state.items = draft.items;
         state.remark = draft.remark;
         state.requestKey = draft.key;
+        state.userCouponId = draft.userCouponId;
+        state.selectedCouponTitle = draft.userCouponId > 0 ? '已选择优惠券' : '';
         state.pending = true;
         updateTotal();
     }
@@ -218,15 +411,38 @@ onPageShow(() => {
         loadCart();
 })
 
+/** 隐藏时废弃券查询响应，防止迟到响应回写已经离开的结算页。 */
 onPageHide(() => {
     state.pageVisible = false;
+    couponRequestVersion++
+    state.couponLoading = false
 })
 
+/** 销毁时同样使请求版本失效，避免页面实例释放后仍处理网络结果。 */
 onUnload(() => {
     state.pageVisible = false;
+    couponRequestVersion++
+    state.couponLoading = false
 })
 </script>
 <style>
     @import '../../styles/account.css';
     @import '../../styles/order.css';
+    /* 结算券卡片只表达选用意向；不在本地推算优惠，金额以订单响应为准。 */
+    .coupon-checkout-heading { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+    .coupon-checkout-summary { padding-top: 2px; }
+    .coupon-selected-summary { display: flex; flex-direction: column; margin-top: 4px; }
+    .coupon-selected-title { font-size: 13px; line-height: 20px; font-weight: bold; color: #8D3C27; }
+    .coupon-selected-detail { margin-top: 4px; font-size: 11px; line-height: 17px; color: #7A6C60; }
+    .coupon-clear { align-self: flex-start; margin-top: 2px; }
+    .coupon-picker { margin-top: 10px; padding-top: 10px; border-top: 1px solid #F1E5DA; }
+    .coupon-picker-note { padding-top: 0; padding-bottom: 8px; }
+    .coupon-option { display: flex; flex-direction: row; width: 100%; align-items: center; justify-content: space-between; margin-top: 7px; padding: 10px; border: 1px solid #F1E5DA; border-radius: 12px; background-color: #FFFCF9; text-align: left; }
+    .coupon-option-selected { border-color: #E4572E; background-color: #FFF4EB; }
+    .coupon-option:focus-visible { outline: 2px solid #8D3C27; outline-offset: 2px; }
+    .coupon-option-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+    .coupon-option-title { font-size: 13px; line-height: 19px; font-weight: bold; color: #211C18; }
+    .coupon-option-detail { margin-top: 3px; font-size: 11px; line-height: 16px; color: #7A6C60; }
+    .coupon-option-action { flex-shrink: 0; margin-left: 8px; font-size: 12px; line-height: 20px; font-weight: bold; color: #C2410C; }
+    .coupon-empty { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 4px; }
 </style>

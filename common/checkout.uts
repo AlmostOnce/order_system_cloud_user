@@ -1,7 +1,15 @@
 import { jsonArray, jsonNumber, jsonString, parseJsonObject } from './json.uts'
 
 export type CheckoutLine = { productId: number, productName: string, quantity: number, revision: string, unitPrice: number, lineAmount: number }
-export type CheckoutDraft = { key: string, windowId: number, windowName: string, remark: string, items: Array<CheckoutLine> }
+export type CheckoutDraft = {
+    key: string
+    windowId: number
+    windowName: string
+    remark: string
+    /** 学生主动选用的用户券 ID；0 表示不使用优惠券，服务端下单时重验有效性。 */
+    userCouponId: number
+    items: Array<CheckoutLine>
+}
 
 export function checkoutKey(userUuid: string): string { return 'order_pending_' + userUuid }
 export function cleanupKey(userUuid: string, orderId: number): string { return 'order_cleanup_' + userUuid + '_' + orderId }
@@ -15,8 +23,11 @@ export function readCheckout(userUuid: string): CheckoutDraft | null {
     if (raw == null) return null
     const key = jsonString(raw, 'key') ?? ''
     const windowId = jsonNumber(raw, 'windowId') ?? 0
+    // 老版本的待确认草稿没有券 ID，读取为0并在下单请求中省略该字段。
+    const userCouponId = jsonNumber(raw, 'userCouponId') ?? 0
     const items = jsonArray(raw, 'items')
-    if (key.length == 0 || windowId <= 0 || items == null || items.length == 0 || items.length > 100) return null
+    if (key.length == 0 || windowId <= 0 || userCouponId < 0 || !Number.isSafeInteger(userCouponId)
+        || items == null || items.length == 0 || items.length > 100) return null
     const lines: Array<CheckoutLine> = []
     for (let i = 0; i < items.length; i++) {
         if (items[i] == null || typeof items[i] != 'object' || Array.isArray(items[i])) return null
@@ -28,12 +39,18 @@ export function readCheckout(userUuid: string): CheckoutDraft | null {
         lines.push({ productId: id, productName: jsonString(row, 'productName') ?? '菜品', quantity: qty, revision: rev,
             unitPrice: jsonNumber(row, 'unitPrice') ?? 0, lineAmount: jsonNumber(row, 'lineAmount') ?? 0 })
     }
-    return { key: key, windowId: windowId, windowName: jsonString(raw, 'windowName') ?? '', remark: jsonString(raw, 'remark') ?? '', items: lines }
+    return { key: key, windowId: windowId, windowName: jsonString(raw, 'windowName') ?? '', remark: jsonString(raw, 'remark') ?? '', userCouponId: userCouponId, items: lines }
 }
+/**
+ * 生成正式下单载荷，只提交购物车所需商品字段与可选用户券 ID；
+ * 不发送客户端估算金额，价格和优惠均由订单服务端读取并重新核验。
+ */
 export function orderBody(draft: CheckoutDraft): UTSJSONObject {
     const items: Array<UTSJSONObject> = []
     for (let i = 0; i < draft.items.length; i++) items.push({ productId: draft.items[i].productId, quantity: draft.items[i].quantity })
-    return { windowId: draft.windowId, remark: draft.remark, items: items }
+    const body: UTSJSONObject = { windowId: draft.windowId, remark: draft.remark, items: items }
+    if (draft.userCouponId > 0) body['userCouponId'] = draft.userCouponId
+    return body
 }
 export function cleanupBody(draft: CheckoutDraft): UTSJSONObject {
     const items: Array<UTSJSONObject> = []

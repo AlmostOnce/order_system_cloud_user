@@ -2,18 +2,51 @@ import { httpGet, httpPost, httpPatch, HttpResult } from '../common/http.uts'
 import { jsonObject, jsonArray, jsonNumber, jsonString, jsonBoolean } from '../common/json.uts'
 
 export type OrderLine = { itemId: number, refundableQuantity: number, fulfillableQuantity: number, refundedQuantity: number, productId: number, productName: string, quantity: number, unitPrice: number, lineAmount: number }
-export type CustomerOrder = { orderId: number, orderNo: string, windowId: number, windowName: string, totalAmount: number, status: string, remark: string, pickupCode: string, createdAt: string, paymentExpiresAt: number, serverTime: number, items: Array<OrderLine> }
+export type CustomerOrder = {
+    orderId: number
+    orderNo: string
+    windowId: number
+    windowName: string
+    /** 商品原价合计；保留此金额用于订单金额明细和历史订单兼容。 */
+    totalAmount: number
+    /** 服务端实际核销的优惠金额，不能由客户端根据券面额推算。 */
+    discountAmount: number
+    /** 服务端确认的应付金额；支付页面及订单摘要必须展示此金额。 */
+    payableAmount: number
+    /** 实际核销的用户券 ID；未使用优惠券时为0。 */
+    userCouponId: number
+    /** 下单时保存的券名称快照，避免券模板后续修改影响历史订单显示。 */
+    couponTitleSnapshot: string
+    status: string
+    remark: string
+    pickupCode: string
+    createdAt: string
+    paymentExpiresAt: number
+    serverTime: number
+    items: Array<OrderLine>
+}
 
 export function orderPayload(result: HttpResult): UTSJSONObject | null {
     return result.ok && result.data != null ? jsonObject(result.data, 'data') : null
 }
 
+/**
+ * 解析服务端订单金额快照；旧订单缺少优惠字段时按零优惠兼容，
+ * 新订单必须满足原价减优惠等于应付金额，避免页面展示互相矛盾的金额。
+ */
 export function parseOrder(data: UTSJSONObject): CustomerOrder | null {
     const id = jsonNumber(data, 'orderId')
     const amount = jsonNumber(data, 'totalAmount')
+    // 老订单没有优惠字段时保持“优惠为0、实付等于原价”，兼容历史详情和列表。
+    const discountAmount = jsonNumber(data, 'discountAmount') ?? 0
+    const payableAmount = jsonNumber(data, 'payableAmount') ?? amount
+    const userCouponId = jsonNumber(data, 'userCouponId') ?? 0
     const status = jsonString(data, 'status') ?? ''
     const windowId = jsonNumber(data, 'windowId') ?? 0
-    if (id == null || id <= 0 || amount == null || amount < 0 || windowId <= 0 || status.length == 0) return null
+    if (id == null || !Number.isSafeInteger(id) || id <= 0 || amount == null || amount < 0 || discountAmount < 0 || discountAmount > amount
+        || payableAmount == null || payableAmount < 0 || payableAmount > amount
+        || Math.round(payableAmount * 100) != Math.round((amount - discountAmount) * 100)
+        || !Number.isSafeInteger(userCouponId) || userCouponId < 0 || windowId <= 0 || status.length == 0) return null
     const items: Array<OrderLine> = []
     const rows = jsonArray(data, 'items')
     if (rows != null) {
@@ -30,7 +63,9 @@ export function parseOrder(data: UTSJSONObject): CustomerOrder | null {
                 fulfillableQuantity: jsonNumber(raw, 'fulfillableQuantity') ?? quantity, refundedQuantity: jsonNumber(raw, 'refundedQuantity') ?? 0, productId: productId, productName: jsonString(raw, 'productName') ?? '菜品', quantity: quantity, unitPrice: unit, lineAmount: line })
         }
     }
-    return { orderId: id, orderNo: jsonString(data, 'orderNo') ?? '', windowId: windowId, windowName: jsonString(data, 'windowName') ?? '', totalAmount: amount, status: status,
+    return { orderId: id, orderNo: jsonString(data, 'orderNo') ?? '', windowId: windowId, windowName: jsonString(data, 'windowName') ?? '',
+        totalAmount: amount, discountAmount: discountAmount, payableAmount: payableAmount, userCouponId: userCouponId,
+        couponTitleSnapshot: jsonString(data, 'couponTitleSnapshot') ?? '', status: status,
         remark: jsonString(data, 'remark') ?? '', pickupCode: jsonString(data, 'pickupCode') ?? '', createdAt: jsonString(data, 'createdAt') ?? '', paymentExpiresAt: jsonNumber(data, 'paymentExpiresAt') ?? 0, serverTime: jsonNumber(data, 'serverTime') ?? 0, items: items }
 }
 
