@@ -49,6 +49,10 @@
                     <view class="account-entry" @click="openFavorites">
                         <view class="account-entry-icon"><image class="review-entry-icon" src="/static/favorites/bookmark-filled.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的收藏</text><text class="account-entry-note">查看收藏的店铺与菜品</text></view><view class="account-arrow"></view>
                     </view>
+                    <view class="entry-divider"></view>
+                    <view class="account-entry" @click="openCoupons">
+                        <view class="account-entry-icon"><view class="coupon-entry-icon"><view class="coupon-entry-notch"></view></view></view><view class="account-entry-body"><text class="account-entry-title">我的优惠券</text><text class="account-entry-note">领取优惠，结算时选择使用</text></view><view class="account-arrow"></view>
+                    </view>
                 </view>
                 <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">我的钱包</text>
 				<view v-if="roleCode == 'CUSTOMER'" class="entry-group">
@@ -178,6 +182,11 @@ function openReviews() { uni.navigateTo({ url: '/pages/review/list' }); }
 function openFavorites() {
     if (state.roleCode != 'CUSTOMER') return;
     uni.navigateTo({ url: '/pages/favorites/list' });
+}
+/** 优惠券入口仅供学生查看与领取；券发行和活动管理由专用管理端负责。 */
+function openCoupons() {
+    if (state.roleCode != 'CUSTOMER') return;
+    uni.navigateTo({ url: '/pages/coupons/list' });
 }
 function loadUnreadCount(): Promise<void> {
     startNotificationSession();
@@ -335,6 +344,9 @@ onPageShow(() => {
 
     .wallet-icon-outline { position: absolute; left: 6px; top: 9px; width: 20px; height: 15px; border-width: 2px; border-style: solid; border-color: #C2410C; border-radius: 4px; }
     .wallet-icon-pocket { position: absolute; left: 19px; top: 14px; width: 7px; height: 5px; border-radius: 2px; background-color: #C2410C; }
+	    /* 账户入口用券票轮廓作轻量提示；具体券状态由优惠券页面读取服务端数据。 */
+    .coupon-entry-icon { position: relative; width: 22px; height: 16px; border: 2px solid #C2410C; border-radius: 4px; }
+    .coupon-entry-notch { position: absolute; left: 9px; top: -1px; height: 14px; border-left: 1px dashed #C2410C; }
 
     .order-center { margin-bottom: 14px; padding: 12px; border-radius: 18px; background-color: #FFFFFF; }
     .order-center-heading { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }

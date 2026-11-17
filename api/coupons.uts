@@ -1,0 +1,152 @@
+import { jsonArray, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
+import { httpGet, httpPost, HttpResult } from '../common/http.uts'
+
+/** 服务端确认后可展示的一张优惠券；页面不据此自行判断本单最终是否可用。 */
+export type CustomerCoupon = {
+    /** 券模板编号；领取操作使用该编号定位模板。 */
+    templateId: number
+    /** 已领取优惠券编号；未领取模板为0，不能作为下单券 ID。 */
+    userCouponId: number
+    /** 服务端配置的券名称。 */
+    title: string
+    /** 满减门槛金额，单位元。 */
+    minSpend: number
+    /** 券面减免金额，单位元；结算页仅展示面额，不代替订单优惠试算。 */
+    discountAmount: number
+    /** 适用范围代码，仅支持当前服务契约中的 CAMPUS 与 WINDOWS。 */
+    scopeType: string
+    /** WINDOW 范围对应的窗口 ID；学生端不通过这些内部编号反查或猜测窗口名称。 */
+    windowIds: Array<number>
+    /** 可领取时间起点；仅模板列表展示，持券接口未返回时为空串占位。 */
+    claimStartAt: string
+    /** 可领取时间终点；仅模板列表展示，持券接口未返回时为空串占位。 */
+    claimEndAt: string
+    /** 券的固定生效时间快照。 */
+    validFrom: string
+    /** 券的固定失效时间快照。 */
+    validUntil: string
+    /** 可领取模板的发行总量；持券接口未返回时为0占位，不用于页面展示。 */
+    totalQuantity: number
+    /** 可领取模板的剩余发行量；持券接口未返回时为0占位，不用于页面展示。 */
+    remainingQuantity: number
+    /** 用户券状态；我的优惠券接口当前只返回 AVAILABLE。 */
+    status: string
+}
+
+/** API 结果区分空列表和响应契约异常，避免把服务故障伪装成“没有优惠券”。 */
+export type CustomerCouponListResult = {
+    /** HTTP 与统一业务响应均成功且列表结构完整时为 true。 */
+    ok: boolean
+    /** 可直接展示的失败说明。 */
+    message: string
+    /** 成功时的优惠券列表；失败时为 null。 */
+    coupons: Array<CustomerCoupon> | null
+}
+
+/**
+ * 在统一响应信封的 data 边界校验券数组；任一字段不符合已确认契约时整页失败，
+ * 避免把错误响应显示为空列表或把不完整的券 ID 用于下单。
+ */
+function parseCouponList(result: HttpResult, owned: boolean): CustomerCouponListResult {
+    if (!result.ok || result.data == null) {
+        return { ok: false, message: result.message, coupons: null }
+    }
+    const rows = jsonArray(result.data, 'data')
+    if (rows == null) return { ok: false, message: '优惠券列表响应异常，请稍后重试', coupons: null }
+
+    const coupons: Array<CustomerCoupon> = []
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) {
+            return { ok: false, message: '优惠券列表响应异常，请稍后重试', coupons: null }
+        }
+        const row = rows[i] as UTSJSONObject
+        const templateId = jsonNumber(row, 'templateId') ?? 0
+        const minSpend = jsonNumber(row, 'minSpend')
+        const discountAmount = jsonNumber(row, 'discountAmount')
+        const scopeType = jsonString(row, 'scopeType') ?? ''
+        const rawWindowIds = jsonArray(row, 'windowIds')
+        // 持券接口刻意不返回模板领取时段；该信息只用于“可领取”模板展示。
+        const claimStartAt = owned ? '' : (jsonString(row, 'claimStartAt') ?? '')
+        const claimEndAt = owned ? '' : (jsonString(row, 'claimEndAt') ?? '')
+        const validFrom = jsonString(row, 'validFrom') ?? ''
+        const validUntil = jsonString(row, 'validUntil') ?? ''
+        // 持券接口不返回模板发行量；占位值仅满足统一前端类型，不用于我的券或结算显示。
+        const totalQuantity = owned ? 0 : (jsonNumber(row, 'totalQuantity') ?? 0)
+        const remainingQuantity = owned ? 0 : (jsonNumber(row, 'remainingQuantity') ?? 0)
+        const userCouponId = owned ? (jsonNumber(row, 'userCouponId') ?? 0) : 0
+        const status = owned ? (jsonString(row, 'status') ?? '') : ''
+        if (!Number.isSafeInteger(templateId) || templateId <= 0 || minSpend == null || minSpend < 0 || discountAmount == null || discountAmount <= 0
+            || (scopeType != 'CAMPUS' && scopeType != 'WINDOWS') || rawWindowIds == null
+            || validFrom.length == 0 || validUntil.length == 0
+            || (!owned && (claimStartAt.length == 0 || claimEndAt.length == 0 || totalQuantity <= 0 || remainingQuantity < 0
+                || !Number.isSafeInteger(totalQuantity) || !Number.isSafeInteger(remainingQuantity) || remainingQuantity > totalQuantity))
+            || (owned && (!Number.isSafeInteger(userCouponId) || userCouponId <= 0 || status != 'AVAILABLE'))) {
+            return { ok: false, message: '优惠券列表响应异常，请稍后重试', coupons: null }
+        }
+        const windowIds: Array<number> = []
+        for (let j = 0; j < rawWindowIds.length; j++) {
+            const value = rawWindowIds[j]
+            if (typeof value != 'number' || (value as number) <= 0 || !Number.isSafeInteger(value as number)) {
+                return { ok: false, message: '优惠券列表响应异常，请稍后重试', coupons: null }
+            }
+            windowIds.push(value as number)
+        }
+        if ((scopeType == 'CAMPUS' && windowIds.length != 0) || (scopeType == 'WINDOWS' && windowIds.length == 0)) {
+            return { ok: false, message: '优惠券列表响应异常，请稍后重试', coupons: null }
+        }
+        coupons.push({ templateId: templateId, userCouponId: userCouponId,
+            title: jsonString(row, 'title') ?? '', minSpend: minSpend, discountAmount: discountAmount,
+            scopeType: scopeType, windowIds: windowIds, claimStartAt: claimStartAt, claimEndAt: claimEndAt,
+            validFrom: validFrom, validUntil: validUntil, totalQuantity: totalQuantity,
+            remainingQuantity: remainingQuantity, status: status })
+        if (coupons[coupons.length - 1].title.length == 0) {
+            return { ok: false, message: '优惠券列表响应异常，请稍后重试', coupons: null }
+        }
+    }
+    return { ok: true, message: '', coupons: coupons }
+}
+
+/** 校验领取成功的单券快照，只有服务端确实返回契约内的用户券 ID 才提示领取成功。 */
+export function isClaimResponseValid(result: HttpResult, expectedTemplateId: number): boolean {
+    if (!result.ok || result.data == null || !Number.isSafeInteger(expectedTemplateId) || expectedTemplateId <= 0) return false
+    const data = jsonObject(result.data, 'data')
+    if (data == null) return false
+    const templateId = jsonNumber(data, 'templateId') ?? 0
+    const userCouponId = jsonNumber(data, 'userCouponId') ?? 0
+    const minSpend = jsonNumber(data, 'minSpend')
+    const discountAmount = jsonNumber(data, 'discountAmount')
+    const scopeType = jsonString(data, 'scopeType') ?? ''
+    const windowIds = jsonArray(data, 'windowIds')
+    const status = jsonString(data, 'status') ?? ''
+    if (!Number.isSafeInteger(templateId) || templateId != expectedTemplateId
+        || !Number.isSafeInteger(userCouponId) || userCouponId <= 0
+        || minSpend == null || minSpend < 0 || discountAmount == null || discountAmount <= 0
+        || (scopeType != 'CAMPUS' && scopeType != 'WINDOWS') || windowIds == null
+        || (scopeType == 'CAMPUS' && windowIds.length != 0) || (scopeType == 'WINDOWS' && windowIds.length == 0)
+        || (jsonString(data, 'title') ?? '').length == 0 || (jsonString(data, 'validFrom') ?? '').length == 0
+        || (jsonString(data, 'validUntil') ?? '').length == 0 || status != 'AVAILABLE') return false
+    for (let i = 0; i < windowIds.length; i++) {
+        const id = windowIds[i]
+        if (typeof id != 'number' || !Number.isSafeInteger(id as number) || (id as number) <= 0) return false
+    }
+    return true
+}
+
+/** 查询当前仍可领取的券模板；空数组是正常业务结果。 */
+export function fetchClaimableCoupons(): Promise<CustomerCouponListResult> {
+    return httpGet('/coupons/claimable', true).then((result: HttpResult): CustomerCouponListResult => {
+        return parseCouponList(result, false)
+    }).catch((): CustomerCouponListResult => ({ ok: false, message: '优惠券暂时无法获取，请检查网络后重试', coupons: null }))
+}
+
+/** 领取券模板；服务端使用用户和模板唯一约束处理重复领取。 */
+export function claimCoupon(templateId: number): Promise<HttpResult> {
+    return httpPost('/coupons/' + templateId + '/claim', null, true)
+}
+
+/** 查询本人当前可用的用户券；订单下单时服务端仍会重新核验范围和门槛。 */
+export function fetchMyAvailableCoupons(): Promise<CustomerCouponListResult> {
+    return httpGet('/coupons/mine?status=AVAILABLE', true).then((result: HttpResult): CustomerCouponListResult => {
+        return parseCouponList(result, true)
+    }).catch((): CustomerCouponListResult => ({ ok: false, message: '优惠券暂时无法获取，请检查网络后重试', coupons: null }))
+}

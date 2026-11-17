@@ -1,0 +1,306 @@
+<template>
+    <view class="account-page account-secondary coupon-page">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <!-- 使用原生按钮承载纯图形返回入口，并提供读屏可识别的名称。 -->
+            <button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack">
+                <view class="account-back-icon"></view>
+            </button>
+            <text class="account-title">优惠券</text>
+        </view>
+        <view class="coupon-banner">
+            <view class="coupon-banner-copy">
+                <text class="coupon-kicker">校园食堂 · 用餐优惠</text>
+                <text class="coupon-banner-title">给下一餐添一点实惠</text>
+                <text class="coupon-banner-note">领券后可在结算时选择，是否适用由服务端下单校验。</text>
+            </view>
+            <view class="coupon-banner-mark"><view class="coupon-banner-ticket"><view class="coupon-banner-cut"></view></view></view>
+        </view>
+        <view class="coupon-tabs">
+            <button class="coupon-tab button-text" :class="activeTab == 'CLAIMABLE' ? 'coupon-tab-active' : ''" @click="selectTab('CLAIMABLE')">可领取</button>
+            <button class="coupon-tab button-text" :class="activeTab == 'MINE' ? 'coupon-tab-active' : ''" @click="selectTab('MINE')">我的券</button>
+        </view>
+        <scroll-view class="account-scroll coupon-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+            <view class="account-content vapor-account-secondary--account-content">
+                <view v-if="loading && coupons.length == 0" class="account-card vapor-account-secondary--account-card coupon-state-card">
+                    <text class="account-note">正在获取优惠券…</text>
+                </view>
+                <view v-for="coupon in coupons" :key="activeTab == 'MINE' ? coupon.userCouponId : coupon.templateId" class="coupon-card">
+                    <view class="coupon-card-face">
+                        <text class="coupon-face-label">满减券</text>
+                        <text class="coupon-face-currency">¥</text>
+                        <text class="coupon-face-amount">{{ coupon.discountAmount.toFixed(2) }}</text>
+                        <text class="coupon-face-unit">立减</text>
+                    </view>
+                    <view class="coupon-card-detail">
+                        <view class="coupon-card-heading">
+                            <text class="coupon-title">{{ coupon.title }}</text>
+                            <text v-if="activeTab == 'MINE'" class="coupon-status">可使用</text>
+                        </view>
+                        <text class="coupon-condition">满 ¥{{ coupon.minSpend.toFixed(2) }} 可用</text>
+                        <text class="coupon-meta">{{ scopeLabel(coupon) }}</text>
+                        <text class="coupon-meta">使用期限：{{ formatDate(coupon.validFrom) }} 至 {{ formatDate(coupon.validUntil) }}</text>
+                        <text v-if="activeTab == 'CLAIMABLE'" class="coupon-meta">领取时间：{{ formatDate(coupon.claimStartAt) }} 至 {{ formatDate(coupon.claimEndAt) }}</text>
+                        <view v-if="activeTab == 'CLAIMABLE'" class="coupon-card-footer">
+                            <text class="coupon-quantity">剩余 {{ coupon.remainingQuantity }} 张</text>
+                            <button class="coupon-claim button-text" :disabled="claimingTemplateId > 0 || loading || coupon.remainingQuantity <= 0" :class="claimingTemplateId == coupon.templateId ? 'coupon-claim-busy' : (coupon.remainingQuantity <= 0 ? 'coupon-claim-disabled' : '')" @click="claim(coupon)">{{ claimingTemplateId == coupon.templateId ? '领取中…' : (coupon.remainingQuantity <= 0 ? '已领完' : '立即领取') }}</button>
+                        </view>
+                        <text v-else class="coupon-meta coupon-use-hint">结算时选择；订单提交时会重新核验适用范围和门槛。</text>
+                    </view>
+                </view>
+                <view v-if="errorText.length > 0" class="account-card vapor-account-secondary--account-card coupon-state-card">
+                    <text class="account-error">{{ errorText }}</text>
+                    <text class="account-note">可在列表顶部下拉重试。</text>
+                </view>
+                <view v-if="!loading && errorText.length == 0 && coupons.length == 0" class="account-card vapor-account-secondary--account-card coupon-state-card">
+                    <text class="account-heading">{{ activeTab == 'CLAIMABLE' ? '暂时没有可领取的优惠券' : '还没有可用优惠券' }}</text>
+                    <text class="account-note">{{ activeTab == 'CLAIMABLE' ? '新的用餐优惠开放后会显示在这里。' : '领取后的优惠券会保存在这里，结算时可选择使用。' }}</text>
+                    <button v-if="activeTab == 'MINE'" class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="selectTab('CLAIMABLE')">去看看可领取的券</button>
+                </view>
+            </view>
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            </view>
+        </scroll-view>
+    </view>
+</template>
+
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
+import { backToAccount } from '../../common/account.uts'
+import { toast, toastSuccess } from '../../common/feedback.uts'
+import { currentUser } from '../../store/auth.uts'
+import { CustomerCoupon, CustomerCouponListResult, claimCoupon, fetchClaimableCoupons, fetchMyAvailableCoupons, isClaimResponseValid } from '../../api/coupons.uts'
+import { HttpResult } from '../../common/http.uts'
+
+type CouponTab = 'CLAIMABLE' | 'MINE'
+const emptyCoupons: Array<CustomerCoupon> = []
+const state = reactive({
+    /** 顶部安全区高度，沿用账户二级页的原生状态栏留白。 */
+    statusBarHeight: 0,
+    /** 当前登录用户标识；异步响应只允许写回发起请求的同一账号。 */
+    userUuid: '',
+    /** 页面离开后关闭请求写入，避免旧页面响应覆盖当前会话。 */
+    pageVisible: false,
+    /** 当前展示可领取模板或本人可用券，切换时清空另一类数据。 */
+    activeTab: 'CLAIMABLE' as CouponTab,
+    /** 当前标签页从服务端返回的券快照，不在客户端推导券状态。 */
+    coupons: emptyCoupons,
+    /** 当前列表请求状态；加载失败与正常空列表分别呈现。 */
+    loading: false,
+    /** 下拉刷新动画状态。 */
+    refreshing: false,
+    /** 最近一次下拉刷新的时间文案。 */
+    currentRefreshTime: '',
+    /** 列表接口错误说明；空串代表没有待展示的错误。 */
+    errorText: '',
+    /** 正在领取的模板 ID；非0期间阻止重复点击其他券。 */
+    claimingTemplateId: 0
+})
+const { statusBarHeight, activeTab, coupons, loading, refreshing, currentRefreshTime, errorText, claimingTemplateId } = toRefs(state)
+let requestVersion = 0
+
+/** 离开后递增版本，避免旧请求在页面重新进入或切换账号后覆盖当前券列表。 */
+function isCurrentRequest(version: number, owner: string): boolean {
+    return state.pageVisible && requestVersion == version && currentUser()?.userUuid == owner
+}
+
+/** 使用账户二级页共用的返回栈规则；从结算页进入时会返回原结算上下文。 */
+function goBack() {
+    backToAccount()
+}
+
+/** 切换列表后立即清除另一类别的快照，避免把可领取模板误显示为已持有券。 */
+function selectTab(tab: CouponTab) {
+    if (state.activeTab == tab || state.loading || state.claimingTemplateId > 0) return
+    state.activeTab = tab
+    state.coupons = []
+    state.errorText = ''
+    loadCoupons()
+}
+
+/** 当前列表只读取一个明确状态；空列表与接口故障由不同状态呈现。 */
+function loadCoupons(): Promise<void> {
+    const user = currentUser()
+    if (user == null || user.roleCode != 'CUSTOMER' || state.loading || state.claimingTemplateId > 0) return Promise.resolve()
+    const version = ++requestVersion
+    const owner = user.userUuid
+    const tab = state.activeTab
+    state.userUuid = owner
+    state.loading = true
+    state.errorText = ''
+    const request: Promise<CustomerCouponListResult> = tab == 'CLAIMABLE' ? fetchClaimableCoupons() : fetchMyAvailableCoupons()
+    return request.then((result: CustomerCouponListResult) => {
+        if (!isCurrentRequest(version, owner) || state.activeTab != tab) return
+        if (!result.ok || result.coupons == null) {
+            state.errorText = result.message.length > 0 ? result.message : '优惠券暂时无法获取，请稍后重试'
+            return
+        }
+        state.coupons = result.coupons
+    }).catch(() => {
+        if (isCurrentRequest(version, owner) && state.activeTab == tab) state.errorText = '优惠券暂时无法获取，请检查网络后重试'
+    }).finally(() => {
+        if (isCurrentRequest(version, owner)) state.loading = false
+    })
+}
+
+/** 领券采用服务端确认后更新列表；并发和重复领取最终由后端唯一约束裁决。 */
+function claim(coupon: CustomerCoupon) {
+    if (state.claimingTemplateId > 0 || state.loading || coupon.remainingQuantity <= 0) return
+    state.claimingTemplateId = coupon.templateId
+    const owner = state.userUuid
+    const version = requestVersion
+    claimCoupon(coupon.templateId).then((result: HttpResult) => {
+        if (currentUser()?.userUuid == owner && requestVersion == version && state.claimingTemplateId == coupon.templateId) state.claimingTemplateId = 0
+        // 页面隐藏期间请求代次会变化；迟到结果不能提示新页面，也不能触发另一轮列表刷新。
+        if (!state.pageVisible || requestVersion != version || currentUser()?.userUuid != owner) return
+        if (result.ok) {
+            if (isClaimResponseValid(result, coupon.templateId)) toastSuccess('已领取到我的优惠券')
+            else toast('领取结果暂时无法确认，已刷新优惠券列表')
+            loadCoupons()
+            return
+        }
+        if (result.statusCode == 409) {
+            // 后端409代表本人已领过；切到我的券并刷新，避免用户停留在同一张可领取卡片反复冲突。
+            state.activeTab = 'MINE'
+            state.coupons = []
+            state.errorText = ''
+            toast('你已领取过这张优惠券，已为你打开我的券')
+            loadCoupons()
+            return
+        }
+        toast(result.message.length > 0 ? result.message : '领取失败，请稍后重试')
+    }).catch(() => {
+        if (currentUser()?.userUuid == owner && requestVersion == version && state.claimingTemplateId == coupon.templateId) state.claimingTemplateId = 0
+        if (!state.pageVisible || requestVersion != version || currentUser()?.userUuid != owner) return
+        toast('领取结果暂时无法确认，请刷新优惠券列表')
+    })
+}
+
+/** 服务端按券范围代码返回全校券或窗口券；窗口名不在学生端用内部 ID 猜测。 */
+function scopeLabel(coupon: CustomerCoupon): string {
+    if (coupon.scopeType == 'CAMPUS') return '全校窗口可用'
+    let ids = ''
+    for (let i = 0; i < coupon.windowIds.length; i++) {
+        if (i > 0) ids += '、'
+        ids += coupon.windowIds[i].toString()
+    }
+    return '适用窗口 ID：' + ids
+}
+
+/** ISO 时间使用项目现有的本地展示方式，不在客户端修改券的有效时间边界。 */
+function formatDate(value: string): string {
+    if (value.length == 0) return '时间暂不可用'
+    return value.replace('T', ' ').substring(0, 16)
+}
+
+function refreshPage() {
+    if (state.refreshing || state.loading || state.claimingTemplateId > 0) return
+    state.refreshing = true
+    const startedAt = Date.now()
+    state.currentRefreshTime = refreshTimeLabel(startedAt)
+    loadCoupons().then(() => {
+        finishPullRefresh(startedAt, state.errorText.length == 0, (time: string) => {
+            if (time.length > 0) state.currentRefreshTime = time
+            state.refreshing = false
+        })
+    }).catch(() => {
+        finishPullRefresh(startedAt, false, (_time: string) => { state.refreshing = false })
+    })
+}
+
+/** 允许结算页直接打开“我的券”标签，普通账户入口默认展示可领取列表。 */
+onLoad((options: OnLoadOptions) => {
+    if (options['tab'] == 'mine') state.activeTab = 'MINE'
+})
+
+/** 每次展示时重新检查 CUSTOMER 身份并刷新列表，避免退出重登后泄露旧账号券数据。 */
+onPageShow(() => {
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+    const user = currentUser()
+    if (user == null) {
+        state.pageVisible = false
+        requestVersion++
+        uni.reLaunch({ url: '/pages/login/login' })
+        return
+    }
+    if (user.roleCode != 'CUSTOMER') {
+        state.pageVisible = false
+        requestVersion++
+        uni.switchTab({ url: '/pages/home/home' })
+        return
+    }
+    if (state.userUuid != user.userUuid) {
+        state.coupons = []
+        state.errorText = ''
+        state.claimingTemplateId = 0
+    }
+    state.userUuid = user.userUuid
+    state.pageVisible = true
+    loadCoupons()
+})
+
+/** 离开时使当前列表及领券请求失效，迟到结果不再更新页面。 */
+onPageHide(() => {
+    state.pageVisible = false
+    requestVersion++
+    state.loading = false
+    state.refreshing = false
+    state.claimingTemplateId = 0
+})
+
+/** 页面销毁时保持与隐藏阶段相同的请求失效规则。 */
+onUnload(() => {
+    state.pageVisible = false
+    requestVersion++
+    state.loading = false
+    state.refreshing = false
+    state.claimingTemplateId = 0
+})
+</script>
+
+<style>
+@import '../../styles/account.css';
+@import '../../styles/order.css';
+
+.coupon-page { min-height: 100%; }
+/* 券面金额与规则分栏呈现，沿用账户二级页暖色系并让领取状态保持清晰。 */
+.coupon-banner { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin: 0 16px 12px 16px; padding: 16px; border-radius: 20px; background-color: #6D3426; }
+.coupon-banner-copy { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.coupon-kicker { font-size: 11px; line-height: 18px; color: #F3CDB9; }
+.coupon-banner-title { margin-top: 4px; font-size: 20px; line-height: 28px; font-weight: bold; color: #FFFFFF; }
+.coupon-banner-note { margin-top: 6px; max-width: 260px; font-size: 12px; line-height: 18px; color: #F3CDB9; }
+.coupon-banner-mark { display: flex; flex-shrink: 0; width: 52px; height: 52px; margin-left: 10px; align-items: center; justify-content: center; border-radius: 16px; background-color: #8F4B35; }
+.coupon-banner-ticket { position: relative; width: 27px; height: 20px; border: 2px solid #FFE2CC; border-radius: 4px; }
+.coupon-banner-cut { position: absolute; top: -1px; left: 12px; height: 18px; border-left: 1px dashed #FFE2CC; }
+.coupon-tabs { display: flex; flex-direction: row; margin: 0 16px 8px 16px; padding: 4px; border-radius: 14px; background-color: #F3E8DE; }
+/* 两个标签和领取操作保留账户页至少44px的触控高度，避免紧凑样式压缩可点区域。 */
+.coupon-tab { display: flex; flex: 1; height: 44px; margin: 0; padding: 0; align-items: center; justify-content: center; border: 0; border-radius: 11px; background-color: transparent; font-size: 13px; line-height: 20px; color: #7A6C60; }
+.coupon-tab-active { background-color: #FFFFFF; font-weight: bold; color: #C2410C; }
+.coupon-scroll { min-height: 0; }
+.coupon-card { display: flex; flex-direction: row; min-height: 166px; margin-bottom: 10px; overflow: hidden; border: 1px solid #F1E5DA; border-radius: 18px; background-color: #FFFFFF; }
+.coupon-card-face { position: relative; display: flex; flex-shrink: 0; width: 92px; flex-direction: column; align-items: center; justify-content: center; padding: 12px 8px; background-color: #FCE8D9; }
+.coupon-card-face::after { position: absolute; top: 0; right: -6px; bottom: 0; width: 12px; border-radius: 50%; background: repeating-linear-gradient(to bottom, #FDF6F0 0, #FDF6F0 5px, transparent 5px, transparent 10px); content: ''; }
+.coupon-face-label { font-size: 11px; line-height: 17px; color: #8D3C27; }
+.coupon-face-currency { margin-top: 7px; font-size: 13px; line-height: 16px; font-weight: bold; color: #C2410C; }
+.coupon-face-amount { font-size: 23px; line-height: 28px; font-weight: bold; color: #C2410C; }
+.coupon-face-unit { margin-top: 2px; font-size: 11px; line-height: 16px; color: #8D3C27; }
+.coupon-card-detail { display: flex; flex: 1; min-width: 0; flex-direction: column; padding: 12px 12px 10px 16px; }
+.coupon-card-heading { display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; }
+.coupon-title { flex: 1; min-width: 0; font-size: 14px; line-height: 20px; font-weight: bold; color: #211C18; }
+.coupon-status { flex-shrink: 0; margin-left: 6px; padding: 2px 7px; border-radius: 9px; background-color: #EEF5E9; font-size: 10px; line-height: 16px; color: #4A6A3B; }
+.coupon-condition { margin-top: 4px; font-size: 12px; line-height: 18px; font-weight: 600; color: #C2410C; }
+.coupon-meta { margin-top: 4px; font-size: 11px; line-height: 16px; color: #7A6C60; }
+.coupon-card-footer { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 8px; }
+.coupon-quantity { font-size: 11px; line-height: 18px; color: #A2968B; }
+.coupon-claim { min-width: 88px; height: 44px; margin: 0; padding: 0 12px; border: 0; border-radius: 22px; background-color: #E4572E; font-size: 12px; line-height: 44px; font-weight: bold; color: #FFFFFF; }
+.coupon-claim-busy, .coupon-claim-disabled { background-color: #D9C8BB; color: #6B5B50; }
+.coupon-use-hint { margin-top: auto; padding-top: 8px; }
+.coupon-state-card { margin-top: 4px; }
+
+/* #ifdef WEB */
+.coupon-tab:focus-visible, .coupon-claim:focus-visible { outline: 2px solid #8D3C27; outline-offset: 2px; }
+/* #endif */
+</style>
