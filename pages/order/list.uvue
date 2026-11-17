@@ -24,7 +24,8 @@
                 <view v-if="item.status == '待支付'" class="order-list-countdown"><text class="order-list-countdown-label">剩余支付时间</text><text class="order-list-countdown-value">{{ paymentTime(item) }}</text></view>
                 <text class="account-muted order-list-date">{{ formatDate(item.createdAt) }}</text>
                 <text class="account-muted">订单号 {{ item.orderNo }}</text>
-                <view class="order-list-top order-list-bottom"><text class="account-muted">{{ item.status == '已完成' ? '查看详情与评价' : '查看订单详情' }}</text><text class="order-total-price">¥{{ item.totalAmount.toFixed(2) }}</text></view>
+                <!-- 列表显示服务端应付快照，避免把优惠前的商品金额误认为支付金额。 -->
+                <view class="order-list-top order-list-bottom"><text class="account-muted">{{ item.status == '已完成' ? '查看详情与评价' : '查看订单详情' }}</text><text class="order-total-price">实付 ¥{{ item.payableAmount.toFixed(2) }}</text></view>
                 </view>
                 <view v-if="!loading && visibleOrders.length == 0 && errorText.length == 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">{{ selectedStatus == 'all' ? '还没有订单' : '暂无该状态的订单' }}</text><text class="account-note">去食堂挑选喜欢的菜品，开启下一餐。</text>
                     <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="goHome">去点餐</button>
