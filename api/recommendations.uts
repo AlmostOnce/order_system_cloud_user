@@ -1,0 +1,103 @@
+import { httpGet, HttpResult } from '../common/http.uts'
+import { jsonArray, jsonBoolean, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
+
+/** 首页单道推荐菜品；推荐只定位菜品，规格选择与最终核价仍由菜单和商品服务负责。 */
+export type HomeRecommendationItem = {
+    /** 商品域菜品编号，用于去重及菜单定位，不代表规格组合编号。 */
+    productId: number
+    /** 菜品所属档口，导航时与菜品编号一起传递。 */
+    windowId: number
+    /** 菜品所属餐厅，用于验证响应没有越过当前筛选范围。 */
+    restaurantId: number
+    /** 当前菜品名称。 */
+    productName: string
+    /** 当前图片引用，展示层交给 BusinessImage 解析并兜底。 */
+    imageUrl: string
+    /** 当前基础售价，不是已选规格的成交价格。 */
+    basePrice: number
+    /** 存在启用规格时仅提示顾客前往菜单选规格，不自动预选。 */
+    hasSpecifications: boolean
+    /** FIXED 或 STARTING；未知值仅按基础价展示，不猜测价格含义。 */
+    priceType: string
+    /** 受控推荐理由代码；未知代码不直接展示，避免暴露内部内容。 */
+    reasonCode: string
+}
+
+/** 推荐响应快照；服务端声明降级模式时，首页不能继续声称结果完全来自个人偏好。 */
+export type HomeRecommendationPage = {
+    /** 本次结果标识，供后续效果关联使用，不在卡片显示。 */
+    recommendationId: string
+    /** 服务端算法版本，不由客户端重新计算或改写排序。 */
+    algorithmVersion: string
+    /** PERSONALIZED、COLD_START 或 FALLBACK。 */
+    mode: string
+    /** 该结果生成时间；不作为客户端会话或过期响应的判断依据。 */
+    generatedAt: string
+    /** 保持服务端排序、按菜品编号唯一的最多十项结果。 */
+    items: Array<HomeRecommendationItem>
+}
+
+/** 区分真实空推荐与获取失败；后者不会影响首页原有档口请求的成功状态。 */
+export type HomeRecommendationResult = {
+    /** HTTP 与响应契约均有效时为 true，包括 items 为空的成功结果。 */
+    ok: boolean
+    /** 失败时供推荐区显示的具体提示。 */
+    message: string
+    /** 成功的推荐快照；失败时为空，禁止把损坏响应当成空结果。 */
+    data: HomeRecommendationPage | null
+}
+
+/**
+ * 读取当前学生的首页推荐，用户身份仅由统一请求层携带的 JWT 决定。
+ * @param restaurantId 当前餐厅筛选；0 表示全部餐厅，对外请求省略此参数
+ * @return 经过结构、金额、主键、去重和餐厅范围校验的推荐结果
+ */
+export function fetchHomeRecommendations(restaurantId: number): Promise<HomeRecommendationResult> {
+    let path = '/recommendations/home?limit=10'
+    if (restaurantId > 0) path += '&restaurantId=' + restaurantId
+    return httpGet(path, true).then((result: HttpResult): HomeRecommendationResult => {
+        if (!result.ok || result.data == null) return recommendationFailure(result.message)
+        const data = jsonObject(result.data, 'data')
+        if (data == null) return recommendationFailure('推荐响应不完整，请稍后再试')
+        const rows = jsonArray(data, 'items')
+        const recommendationId = jsonString(data, 'recommendationId') ?? ''
+        const algorithmVersion = jsonString(data, 'algorithmVersion') ?? ''
+        const mode = jsonString(data, 'mode') ?? ''
+        const generatedAt = jsonString(data, 'generatedAt') ?? ''
+        if (rows == null || rows.length > 10 || recommendationId.length == 0 || algorithmVersion.length == 0 || mode.length == 0 || generatedAt.length == 0) {
+            return recommendationFailure('推荐响应不完整，请稍后再试')
+        }
+        const items: Array<HomeRecommendationItem> = []
+        const productIds: Array<number> = []
+        for (let index = 0; index < rows.length; index++) {
+            const raw = rows[index]
+            // 不接受数组、标量或残缺条目，防止损坏金额被默认成零价、错误编号跳入其他档口。
+            if (raw == null || typeof raw != 'object' || Array.isArray(raw)) return recommendationFailure('推荐菜品响应异常，请稍后再试')
+            const row = raw as UTSJSONObject
+            const productId = jsonNumber(row, 'productId') ?? 0
+            const windowId = jsonNumber(row, 'windowId') ?? 0
+            const itemRestaurantId = jsonNumber(row, 'restaurantId') ?? 0
+            const productName = jsonString(row, 'productName') ?? ''
+            const basePrice = jsonNumber(row, 'basePrice')
+            const hasSpecifications = jsonBoolean(row, 'hasSpecifications')
+            if (!Number.isSafeInteger(productId) || productId <= 0 || !Number.isSafeInteger(windowId) || windowId <= 0 ||
+                !Number.isSafeInteger(itemRestaurantId) || itemRestaurantId <= 0 || productName.trim().length == 0 ||
+                basePrice == null || !Number.isFinite(basePrice) || basePrice < 0 || hasSpecifications == null ||
+                productIds.includes(productId) || (restaurantId > 0 && itemRestaurantId != restaurantId)) {
+                return recommendationFailure('推荐菜品响应异常，请稍后再试')
+            }
+            productIds.push(productId)
+            items.push({ productId: productId, windowId: windowId, restaurantId: itemRestaurantId,
+                productName: productName, imageUrl: jsonString(row, 'imageUrl') ?? '', basePrice: basePrice,
+                hasSpecifications: hasSpecifications, priceType: jsonString(row, 'priceType') ?? '',
+                reasonCode: jsonString(row, 'reasonCode') ?? '' })
+        }
+        return { ok: true, message: '', data: { recommendationId: recommendationId,
+            algorithmVersion: algorithmVersion, mode: mode, generatedAt: generatedAt, items: items } }
+    }).catch((): HomeRecommendationResult => recommendationFailure('推荐暂时无法加载，请稍后再试'))
+}
+
+/** 将失败统一留在推荐区；没有明确错误文本时给出可理解的兜底，不伪造成功空列表。 */
+function recommendationFailure(message: string): HomeRecommendationResult {
+    return { ok: false, message: message.length > 0 ? message : '推荐暂时无法加载，请稍后再试', data: null }
+}

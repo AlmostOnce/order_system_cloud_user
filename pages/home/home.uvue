@@ -38,6 +38,43 @@
 				</view>
 			</view>
 		</view>
+        <!-- 推荐独立于目录加载；卡片只进入既有菜单，不直接加购或复用历史规格。 -->
+        <view v-if="roleCode == 'CUSTOMER'" class="section">
+            <view class="section-head">
+                <text class="section-title">今天想吃什么</text>
+                <text class="section-count">{{ recommendationModeText() }}</text>
+            </view>
+            <view v-if="recommendationLoading && recommendationItems.length == 0" class="recommendation-state">
+                <text class="state-text">正在挑选推荐菜品…</text>
+            </view>
+            <view v-else-if="recommendationError.length > 0 && recommendationItems.length == 0" class="recommendation-state">
+                <text class="state-text">{{ recommendationError }}</text>
+            </view>
+            <view v-else-if="recommendationMode == 'FALLBACK' && recommendationItems.length == 0" class="recommendation-state">
+                <text class="state-text">推荐暂时不可用，请稍后再试</text>
+            </view>
+            <view v-else-if="recommendationItems.length == 0" class="recommendation-state">
+                <text class="state-text">当前餐厅范围暂无可推荐菜品</text>
+            </view>
+            <view v-else>
+                <text v-if="recommendationError.length > 0" class="recommendation-error">{{ recommendationError }}</text>
+                <scroll-view class="recommendation-scroll" direction="horizontal">
+                    <view class="recommendation-list" :style="'width: ' + (recommendationItems.length * 164) + 'px'">
+                        <view v-for="item in recommendationItems" :key="item.productId" class="recommendation-card" hover-class="recommendation-card-hover" @click="openRecommendation(item)">
+                            <view class="recommendation-image"><business-image :src="item.imageUrl" kind="product" :preview="false"></business-image></view>
+                            <view class="recommendation-body">
+                                <text class="recommendation-name" :max-lines="1">{{ item.productName }}</text>
+                                <text class="recommendation-reason" :max-lines="1">{{ recommendationReason(item.reasonCode) }}</text>
+                                <view class="recommendation-price-row">
+                                    <text class="recommendation-price">¥{{ recommendationPrice(item) }}</text>
+                                    <text class="recommendation-specification">{{ item.hasSpecifications ? '选规格' : '去看看' }}</text>
+                                </view>
+                            </view>
+                        </view>
+                    </view>
+                </scroll-view>
+            </view>
+        </view>
 		<!-- 档口列表：区头先入场，卡片等数据到位后依次浮入 -->
 		<view class="section">
 			<view class="section-head" :class="entered ? '' : 'section-head-pre'">
@@ -80,11 +117,6 @@
 							<text class="stall-rating">{{ cardRatingText(windowRatings, item.windowId) }}</text>
 							<text class="stall-month-sales">月售 {{ monthlyWindowSalesText(item.windowId) }} 份</text>
 						</view>
-					</view>
-					<!-- 收藏入口与整张卡片导航分离；原生 view 不支持 aria-label，心形图标提供可见提示。 -->
-					<view class="stall-favorite" hover-class="stall-favorite-hover"
-						@click.stop="toggleWindowFavorite(item)">
-						<image class="stall-favorite-heart" :src="isWindowFavorite(item.windowId) ? '/static/favorites/heart-filled.svg' : '/static/favorites/heart-outline.svg'"></image>
 					</view>
 					<text class="stall-arrow">›</text>
 				</view>
@@ -146,12 +178,12 @@ import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 // 导入登录态：登录判断与当前身份读取（退出入口已迁到「我的」页）。
 import { isLoggedIn, currentUser } from '../../store/auth.uts';
+import { getSessionVersion } from '../../common/storage.uts';
+import { fetchHomeRecommendations, HomeRecommendationItem, HomeRecommendationResult } from '../../api/recommendations.uts';
 // 导入商品查询与结果类型：档口列表、餐厅列表及其返回结构。
 import { listActiveWindows, listActiveRestaurants, WindowItem, WindowListResult, RestaurantItem, RestaurantListResult } from '../../api/product.uts';
 import { CardRating, fetchCardRatings, cardRatingText } from '../../api/comments.uts';
 import { fetchMonthlyWindowSales, MonthlyWindowSalesItem } from '../../api/statistics.uts';
-import { addFavorite, fetchFavoriteTargetIds, FavoriteTargetType, removeFavorite } from '../../api/favorites.uts';
-import { toast } from '../../common/feedback.uts';
 /** 表示「全部餐厅」的哨兵值，与任何真实餐厅 ID 都不会冲突。 */
 const ALL_RESTAURANTS: number = 0;
 /** 「全部餐厅」的展示名称。 */
@@ -208,8 +240,12 @@ const initialEmptyWindows: Array<WindowItem> = [];
 const initialWindowRatings: Array<CardRating> = [];
 let windowRatingVersion = 0;
 let windowSalesVersion = 0;
-let windowFavoriteVersion = 0;
 let catalogOwner = '';
+/** 推荐请求和已展示数据各自归属某次登录会话，退出后重新登录同账号也不得接纳旧结果。 */
+let recommendationRequestVersion = 0;
+let recommendationOwner = '';
+let recommendationSessionVersion = -1;
+const initialRecommendations: Array<HomeRecommendationItem> = [];
 // 餐厅列表的初始空数组。
 const initialEmptyRestaurants: Array<RestaurantItem> = [];
 const state = reactive({ refreshing: false, currentRefreshTime: '',
@@ -221,12 +257,14 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     greeting: '',
     // 当前角色编码，用于模板判断是否展示档口列表。
     roleCode: '',
+    /** 推荐列表及其独立状态；加载失败不会改写目录的 loading/loadError。 */
+    recommendationItems: initialRecommendations,
+    recommendationLoading: false,
+    recommendationError: '',
+    /** 服务端实际结果模式，只有已确认的个性化结果才使用个人偏好文案。 */
+    recommendationMode: '',
     // 后端返回的档口全量列表。
     windows: initialEmptyWindows,
-    // 当前登录学生已收藏的窗口 ID；本地只是服务端状态的页面副本，不作为持久化事实。
-    windowFavoriteIds: [] as Array<number>,
-    // 正在写入收藏的窗口 ID，避免同一卡片重复提交。
-    windowFavoriteBusyIds: [] as Array<number>,
     windowRatings: initialWindowRatings,
     // 与档口列表分开读取的月售汇总；统计服务失败不会影响档口浏览。
     monthlyWindowSales: initialMonthlyWindowSales,
@@ -254,7 +292,7 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     // 餐厅选择面板是否已进入终态，控制其滑入滑出过渡。
     pickerReady: false })
 
-const { refreshing, currentRefreshTime, statusBarHeight, greeting, roleCode, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, heroShapesEntered, listReady, pickerVisible, pickerReady } = toRefs(state)
+const { refreshing, currentRefreshTime, statusBarHeight, greeting, roleCode, recommendationItems, recommendationLoading, recommendationError, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, heroShapesEntered, listReady, pickerVisible, pickerReady } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.loading || state.pickerVisible || state.roleCode != 'CUSTOMER')
@@ -262,6 +300,8 @@ function refreshPage() {
     state.refreshing = true;
     const refreshStartedAt = Date.now();
     state.currentRefreshTime = refreshTimeLabel(refreshStartedAt);
+    // 推荐与目录分别发起；推荐返回慢或失败都不阻塞原有目录和下拉刷新收起。
+    loadRecommendations();
     loadCatalog().then(() => {
         finishPullRefresh(refreshStartedAt, state.loadError.length == 0, (time: string) => {
             if (time.length > 0)
@@ -352,6 +392,7 @@ function loadProfile() {
     const profile = currentUser();
     // 令牌存在但解析失败，说明凭据已不可用，回到登录页重新获取。
     if (profile == null) {
+        clearRecommendations();
         uni.reLaunch({ url: '/pages/login/login' });
         return;
     }
@@ -361,20 +402,17 @@ function loadProfile() {
     state.greeting = buildGreeting();
     // 仅顾客角色需要拉取档口与餐厅数据。
     if (state.roleCode == 'CUSTOMER') {
+        // 新会话即使仍是同一账号也先清理推荐，防止退出重登后短暂显示旧个性化结果。
+        if (recommendationOwner != profile.userUuid || recommendationSessionVersion != getSessionVersion()) clearRecommendations();
         if (catalogOwner == profile.userUuid) {
-            // 返回首页时只更新易变化的月售统计，保持窗口目录、筛选和卡片动画不动。
+            // 返回首页时独立更新月售与推荐，保持窗口目录、筛选和档口卡片动画不动。
             refreshMonthlyWindowSales();
-            // 首页是缓存 tab；从收藏页返回时只校准窗口收藏状态，不重新拉商品目录。
-            refreshWindowFavoriteStates();
+            loadRecommendations();
             return;
         }
         catalogOwner = profile.userUuid;
         windowRatingVersion++;
-        // 切换登录账号时作废旧账号的收藏状态查询，再加载新账号自己的关系。
-        windowFavoriteVersion++;
         state.windows = [];
-        state.windowFavoriteIds = [];
-        state.windowFavoriteBusyIds = [];
         state.visibleWindows = [];
         state.restaurants = [];
         state.windowRatings = [];
@@ -383,14 +421,98 @@ function loadProfile() {
         state.monthlyWindowSalesReady = false;
         state.selectedRestaurantId = ALL_RESTAURANTS;
         state.selectedRestaurantName = ALL_RESTAURANTS_NAME;
+        loadRecommendations();
         loadCatalog();
     }
     else {
+        clearRecommendations();
         // 后端餐厅与档口查询接口只放行顾客角色，其它角色在此直接给出说明，
         // 省掉一次必然失败的请求，也不会在首页上摆一个错误提示。
         state.loading = false;
         state.loadError = '';
     }
+}
+
+/** 清理推荐所属身份并使所有在途请求失效；仅影响推荐，不修改目录或餐厅筛选。 */
+function clearRecommendations(): void {
+    recommendationRequestVersion++;
+    recommendationOwner = '';
+    recommendationSessionVersion = -1;
+    state.recommendationItems = [];
+    state.recommendationMode = '';
+    state.recommendationLoading = false;
+    state.recommendationError = '';
+}
+
+/**
+ * 按当前学生和餐厅独立读取推荐；成功替换排序，刷新失败保留同会话同范围的旧列表。
+ * 请求版本、会话版本、账号与筛选共同校验，阻止快速切换、退出重登及离页后的晚到响应污染首页。
+ */
+function loadRecommendations(): void {
+    const profile = currentUser();
+    if (!homeVisible || !isLoggedIn() || profile == null || profile.roleCode != 'CUSTOMER') {
+        clearRecommendations();
+        return;
+    }
+    const owner = profile.userUuid;
+    const sessionVersion = getSessionVersion();
+    const restaurantId = state.selectedRestaurantId;
+    const version = ++recommendationRequestVersion;
+    recommendationOwner = owner;
+    recommendationSessionVersion = sessionVersion;
+    state.recommendationLoading = true;
+    state.recommendationError = '';
+    fetchHomeRecommendations(restaurantId).then((result: HomeRecommendationResult) => {
+        const current = currentUser();
+        if (!homeVisible || version != recommendationRequestVersion || sessionVersion != getSessionVersion() ||
+            !isLoggedIn() || current == null || current.userUuid != owner || current.roleCode != 'CUSTOMER' ||
+            restaurantId != state.selectedRestaurantId) return;
+        state.recommendationLoading = false;
+        if (!result.ok || result.data == null) {
+            state.recommendationError = result.message;
+            return;
+        }
+        state.recommendationItems = result.data!.items;
+        state.recommendationMode = result.data!.mode;
+    });
+}
+
+/** 降级或新用户结果使用热门口径；未知模式不推测为个性化。 */
+function recommendationModeText(): string {
+    if (state.recommendationLoading) return '正在更新';
+    if (state.recommendationMode == 'PERSONALIZED') return '猜你喜欢';
+    if (state.recommendationMode == 'COLD_START') return '热门与发现';
+    if (state.recommendationMode == 'FALLBACK') return '暂不可用';
+    return '精选菜品';
+}
+
+/** 仅将约定的理由代码转成短文案，未知值显示中性描述而不透传内部代码。 */
+function recommendationReason(reasonCode: string): string {
+    if (reasonCode == 'PURCHASED') return '再尝尝喜欢的味道';
+    if (reasonCode == 'FAVORITED') return '你收藏过这道菜';
+    if (reasonCode == 'FLAVOR_MATCH') return '也许合你的口味';
+    if (reasonCode == 'CONTENT_SIMILAR') return '与你喜欢的菜品相近';
+    if (reasonCode == 'SEARCH_RELATED') return '与你最近的搜索相关';
+    if (reasonCode == 'WINDOW_FAVORITE') return '来自收藏的档口';
+    if (reasonCode == 'POPULAR') return '大家都在吃';
+    if (reasonCode == 'EXPLORE') return '换个新口味';
+    return '看看这道菜';
+}
+
+/** 仅 STARTING 使用起价后缀；未知价格类型如实标注基础价，绝不冒充规格成交价。 */
+function recommendationPrice(item: HomeRecommendationItem): string {
+    const price = item.basePrice.toFixed(2);
+    if (item.priceType == 'STARTING') return price + ' 起';
+    if (item.priceType == 'FIXED') return price;
+    return price + ' 基础价';
+}
+
+/** 推荐只定位当前菜品，不发送购物车写请求；规格仍由顾客在菜单页主动选择。 */
+function openRecommendation(item: HomeRecommendationItem): void {
+    const profile = currentUser();
+    if (!isLoggedIn() || profile == null || profile.roleCode != 'CUSTOMER' ||
+        profile.userUuid != recommendationOwner || recommendationSessionVersion != getSessionVersion()) return;
+    uni.navigateTo({ url: '/pages/menu/menu?windowId=' + item.windowId + '&productId=' + item.productId });
 }
 
 function loadCatalog(): Promise<void> {
@@ -418,8 +540,6 @@ function loadCatalog(): Promise<void> {
             }
             // 写入档口全量数据。
             state.windows = windowResult.items;
-            // 收藏状态是独立请求，失败时不阻塞窗口目录和点餐入口。
-            refreshWindowFavoriteStates();
             const version = ++windowRatingVersion;
             state.windowRatings = [];
             // 窗口目录刷新后重新取月售；此时清空旧汇总，避免新旧目录混用旧销量。
@@ -437,80 +557,6 @@ function loadCatalog(): Promise<void> {
                 state.listReady = true;
             }, 60);
         });
-    });
-}
-
-/**
- * 判断指定窗口在本页服务端状态快照中是否已收藏。
- *
- * @param windowId 商品服务的窗口 ID
- * @return 本地状态快照中是否有该用户的收藏关系
- */
-function isWindowFavorite(windowId: number): boolean {
-    return state.windowFavoriteIds.includes(windowId);
-}
-
-/**
- * 刷新当前活动窗口的收藏状态；请求序号阻止切账号或新一轮刷新后的迟到响应覆盖页面。
- */
-function refreshWindowFavoriteStates(): void {
-    const version = ++windowFavoriteVersion;
-    const ids: Array<number> = [];
-    for (let i = 0; i < state.windows.length; i++) {
-        const id = state.windows[i].windowId;
-        if (id > 0 && !ids.includes(id)) ids.push(id);
-    }
-    if (ids.length == 0) {
-        state.windowFavoriteIds = [];
-        return;
-    }
-    fetchFavoriteTargetIds('WINDOW' as FavoriteTargetType, ids).then((favoriteIds: Array<number> | null) => {
-        if (version != windowFavoriteVersion || favoriteIds == null) return;
-        state.windowFavoriteIds = favoriteIds;
-    });
-}
-
-/**
- * 收藏或取消当前窗口；只在服务端确认后改变图标，失败时保持原状态。
- *
- * @param item 当前首页窗口目录项；客户端文案不会写入收藏关系
- */
-function toggleWindowFavorite(item: WindowItem): void {
-    const windowId = item.windowId;
-    if (windowId <= 0 || state.windowFavoriteBusyIds.includes(windowId)) return;
-    const owner = catalogOwner;
-    const shouldAdd = !isWindowFavorite(windowId);
-    const pending = state.windowFavoriteBusyIds.slice();
-    pending.push(windowId);
-    state.windowFavoriteBusyIds = pending;
-    // 写请求开始后使之前的状态查询失效，避免旧结果反向覆盖刚确认的收藏操作。
-    windowFavoriteVersion++;
-    const request = shouldAdd
-        ? addFavorite('WINDOW' as FavoriteTargetType, windowId)
-        : removeFavorite('WINDOW' as FavoriteTargetType, windowId);
-    request.then((result) => {
-        // 账号切换后，旧用户的写请求不能改写新用户的页面快照。
-        if (owner != catalogOwner || currentUser()?.userUuid != owner) return;
-        state.windowFavoriteBusyIds = state.windowFavoriteBusyIds.filter((id: number): boolean => id != windowId);
-        if (!result.ok) {
-            toast(result.message.length > 0 ? result.message : '收藏操作失败，请稍后重试');
-            // 初次状态查询可能被写请求作废；结束后同步整页，避免其他已收藏窗口留在旧图标。
-            refreshWindowFavoriteStates();
-            return;
-        }
-        const ids = state.windowFavoriteIds.filter((id: number): boolean => id != windowId);
-        if (shouldAdd) ids.push(windowId);
-        state.windowFavoriteIds = ids;
-        toast(shouldAdd ? '已收藏店铺' : '已取消收藏');
-        // 写操作完成后重查当前窗口集合，恢复被版本号作废的批量状态结果。
-        refreshWindowFavoriteStates();
-    }).catch(() => {
-        // 网络异常回包也只处理原账号的按钮与收藏状态。
-        if (owner != catalogOwner || currentUser()?.userUuid != owner) return;
-        state.windowFavoriteBusyIds = state.windowFavoriteBusyIds.filter((id: number): boolean => id != windowId);
-        toast('网络连接失败，请稍后重试');
-        // 网络失败时结果可能不确定，通过服务端状态查询收敛页面显示。
-        refreshWindowFavoriteStates();
     });
 }
 
@@ -601,6 +647,9 @@ function selectRestaurant(restaurantId: number, restaurantName: string) {
     state.selectedRestaurantId = restaurantId;
     // 名称过长时截断后再展示。
     state.selectedRestaurantName = shortenName(restaurantName);
+    // 餐厅是推荐的硬范围，切换时立即清空旧卡片并废弃旧请求，不能短暂展示其他餐厅结果。
+    clearRecommendations();
+    loadRecommendations();
     // 按新餐厅重新筛选可见档口。
     buildVisibleWindows();
     // 重新筛选后重播一次入场：先归零再切终态，卡片会再次依次浮入。
@@ -637,8 +686,8 @@ function replayHeroShapes() {
         if (homeVisible) state.heroShapesEntered = true;
     }, 60);
 }
-onPageHide(() => { homeVisible = false; stopHeroShapes(); });
-onUnload(() => { homeVisible = false; stopHeroShapes(); });
+onPageHide(() => { homeVisible = false; recommendationRequestVersion++; state.recommendationLoading = false; stopHeroShapes(); });
+onUnload(() => { homeVisible = false; clearRecommendations(); stopHeroShapes(); });
 
 onPageShow(() => {
     homeVisible = true;
@@ -649,6 +698,7 @@ onPageShow(() => {
     state.statusBarHeight = info.statusBarHeight > 0 ? info.statusBarHeight : 24;
     // 令牌被清空（如退出登录）时不允许停留在本页。
     if (!isLoggedIn()) {
+        clearRecommendations();
         uni.reLaunch({ url: '/pages/login/login' });
         return;
     }
@@ -992,6 +1042,32 @@ onReady(() => {
 		margin-top: 14px;
 	}
 
+    /* 推荐横向浏览，固定图片和卡片高度，不让十条推荐把原有档口列表挤到多屏之后。 */
+    .recommendation-scroll { width: 100%; height: 230px; margin-top: 14px; }
+    .recommendation-list { flex-direction: row; }
+    .recommendation-card {
+        width: 152px;
+        height: 214px;
+        margin-right: 12px;
+        flex-shrink: 0;
+        border-radius: 18px;
+        border-width: 1px;
+        border-style: solid;
+        border-color: #EFE1D6;
+        background-color: #FFFFFF;
+        overflow: hidden;
+    }
+    .recommendation-card-hover { background-color: #FDF0E8; border-color: #E4572E; }
+    .recommendation-image { width: 150px; height: 108px; flex-shrink: 0; background-color: #FDF0E8; overflow: hidden; }
+    .recommendation-body { flex: 1; padding: 10px; }
+    .recommendation-name { font-size: 15px; font-weight: bold; color: #211C18; text-overflow: ellipsis; }
+    .recommendation-reason { margin-top: 6px; font-size: 11px; color: #7A6C60; text-overflow: ellipsis; }
+    .recommendation-price-row { flex-direction: row; align-items: center; justify-content: space-between; margin-top: auto; }
+    .recommendation-price { font-size: 14px; font-weight: bold; color: #C2410C; }
+    .recommendation-specification { margin-left: 4px; font-size: 11px; color: #7A6C60; }
+    .recommendation-state { height: 230px; margin-top: 14px; padding: 20px; border-radius: 18px; background-color: #FFFFFF; justify-content: center; align-items: center; }
+    .recommendation-error { margin-top: 10px; font-size: 12px; color: #7A6C60; }
+
 	/* 每张卡片的延展时间由 stallDelay 以行内样式给出，实现由上到下依次浮入 */
 	.stall {
 		flex-direction: row;
@@ -1044,20 +1120,6 @@ onReady(() => {
 		flex: 1;
 		margin-left: 12px;
 	}
-
-	/* 收藏触控区固定为40px，既满足移动端操作尺寸，也不挤压窗口名称和月售文案。 */
-	.stall-favorite {
-		flex-shrink: 0;
-		width: 40px;
-		height: 40px;
-		margin-left: 4px;
-		align-items: center;
-		justify-content: center;
-		border-radius: 20px;
-	}
-
-	.stall-favorite-hover { background-color: #FFF0E7; }
-	.stall-favorite-heart { width: 22px; height: 22px; flex-shrink: 0; }
 
 	.stall-name {
 		font-size: 15px;
@@ -1192,5 +1254,11 @@ onReady(() => {
     .home-scroll { flex: 1; min-height: 0; width: 100%; }
     /* #ifdef WEB */
     .page { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+    .recommendation-list { display: flex; }
+    .recommendation-card { display: flex; flex-direction: column; cursor: pointer; }
+    .recommendation-body { display: flex; flex-direction: column; }
+    .recommendation-name { white-space: nowrap; overflow: hidden; }
+    .recommendation-reason { white-space: nowrap; overflow: hidden; }
+    .recommendation-price-row { display: flex; }
     /* #endif */
 </style>
