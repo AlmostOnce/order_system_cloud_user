@@ -47,7 +47,7 @@
                     </view>
                     <view class="entry-divider"></view>
                     <view class="account-entry" @click="openFavorites">
-                        <view class="account-entry-icon"><image class="review-entry-icon" src="/static/favorites/heart-filled.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的收藏</text><text class="account-entry-note">查看收藏的店铺与菜品</text></view><view class="account-arrow"></view>
+                        <view class="account-entry-icon"><image class="review-entry-icon" src="/static/favorites/bookmark-filled.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的收藏</text><text class="account-entry-note">查看收藏的店铺与菜品</text></view><view class="account-arrow"></view>
                     </view>
                 </view>
                 <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">我的钱包</text>

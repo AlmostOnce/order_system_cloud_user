@@ -15,7 +15,7 @@
                 <text class="favorite-banner-note">随时回到熟悉的味道</text>
             </view>
             <view class="favorite-banner-mark">
-                <image class="favorite-banner-heart" src="/static/favorites/heart-filled.svg" mode="aspectFit"></image>
+                <image class="favorite-banner-bookmark" src="/static/favorites/bookmark-filled.svg" mode="aspectFit"></image>
             </view>
         </view>
         <view class="favorite-tabs vapor-account-secondary--favorite-tabs">
@@ -41,7 +41,7 @@
                 </view>
                 <view v-else-if="!loading && favoriteItems.length == 0 && errorText.length == 0" class="account-card vapor-account-secondary--account-card favorite-state">
                     <text class="account-heading">这里还空着</text>
-                    <text class="account-note">{{ targetType == 'WINDOW' ? '在首页点亮店铺旁的爱心，就能收藏常去的店铺。' : '在点餐页点亮菜品旁的爱心，就能收藏喜欢的菜。' }}</text>
+                    <text class="account-note">{{ targetType == 'WINDOW' ? '进入点餐页后，点击右上角书签收藏店铺。' : '点击菜品打开评价页，再点顶部书签即可收藏。' }}</text>
                 </view>
                 <view v-for="item in favoriteItems" :key="item.favoriteId" class="favorite-card vapor-account-secondary--favorite-card">
                     <view class="favorite-card-main" hover-class="favorite-card-pressed" @click="openFavorite(item)">

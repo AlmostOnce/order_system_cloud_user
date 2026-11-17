@@ -7,7 +7,15 @@
             <view class="account-back vapor-account-secondary--account-back" @click="goBack">
                 <view class="account-back-icon"></view>
             </view>
-            <text class="account-title">{{ windowId > 0 ? '店铺评价' : (productId > 0 ? '菜品评价' : '我的评价') }}</text></view>
+            <text class="account-title">{{ windowId > 0 ? '店铺评价' : (productId > 0 ? '菜品评价' : '我的评价') }}</text>
+            <!-- 仅由点菜页的菜品评价弹层开启；收藏请求仍由父级菜单页统一处理。 -->
+            <view v-if="showProductFavoriteAction && productFavoriteEnabled && productId > 0"
+                class="review-product-favorite"
+                :class="productFavoriteBusy ? 'review-product-favorite-busy' : (productFavorite ? 'review-product-favorite-on' : '')"
+                hover-class="review-product-favorite-hover" @click.stop="requestProductFavoriteToggle">
+                <image class="review-product-favorite-icon" :src="productFavorite ? '/static/favorites/bookmark-filled.svg' : '/static/favorites/bookmark-outline.svg'"></image>
+            </view>
+        </view>
         <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || (!loading && !ratingLoading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMore" :scroll-top="reviewScrollTop" @scroll="reviewListScrolled">
             <view class="review-feed-content">
                 <!-- 概览使用独立列表样式，压缩介绍留白，不影响发布评价页的表单密度。 -->
@@ -109,9 +117,17 @@ const props = defineProps({
     /** true 时嵌在店铺页里：挂载即拉数，不再等独立页的 onPageShow；返回键只通知父级关闭。 */
     embedded: { type: Boolean, default: false },
     /** true 时隐藏标题栏。店铺评价标签已经有档口头，避免再叠一层返回。抽屉和独立页保持 false。 */
-    hideNav: { type: Boolean, default: false }
+    hideNav: { type: Boolean, default: false },
+    /** 仅点菜页点击菜品后弹出的评价层启用菜品收藏；其他复用场景不显示该操作。 */
+    showProductFavoriteAction: { type: Boolean, default: false },
+    /** 当前登录角色是否允许收藏；由父级依据 CUSTOMER 身份控制，不在只读评价组件内判断。 */
+    productFavoriteEnabled: { type: Boolean, default: false },
+    /** 当前评价菜品的收藏关系快照；父级写入成功后回传新状态。 */
+    productFavorite: { type: Boolean, default: false },
+    /** 当前菜品收藏写请求是否进行中；进行时保留按钮并弱化视觉反馈。 */
+    productFavoriteBusy: { type: Boolean, default: false }
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'toggle-product-favorite'])
 const initialReviews: Array<Review> = []
 // 标签仅写全部/好评/差评/有图；分数由0/5/1表达，有图单独使用布尔查询条件。
 const scoreTabs: Array<number> = [0, 5, 1]
@@ -124,6 +140,10 @@ let reviewVersion = 0
 let summaryVersion = 0
 let contextVersion = 0
 let reviewDisposed = false
+/** 评价列表只发出当前菜品收藏意图，不直接写用户服务，避免把收藏业务耦合到只读评价查询。 */
+function requestProductFavoriteToggle(): void {
+    if (state.productId > 0 && !props.productFavoriteBusy) emit('toggle-product-favorite')
+}
 /** 把父级传入的目标写进查询状态。非法编号只展示错误，不再打评价接口。 */
 function applyEmbedTarget() {
     state.productId = props.embedProductId
@@ -297,6 +317,11 @@ onPageShow(() => {
 /* 仅作用于只读评价列表；不改写发布页共用的review-*表单样式。 */
 /* 移动端一屏要看到更多评价：压缩卡片内边距和筛选条高度，不改标签含义与点击区域划分。 */
 .review-feed-content { padding: 8px 12px 16px 12px; }
+.review-product-favorite { display: flex; flex-shrink: 0; width: 44px; height: 44px; margin-left: auto; border-radius: 22px; background-color: #FFFFFF; align-items: center; justify-content: center; }
+.review-product-favorite-on { background-color: #FFF0E7; }
+.review-product-favorite-busy { opacity: 0.72; }
+.review-product-favorite-hover { opacity: 0.82; }
+.review-product-favorite-icon { width: 20px; height: 22px; flex-shrink: 0; }
 .review-overview { padding: 12px; border-radius: 14px; background-color: #FFFFFF; border-width: 1px; border-style: solid; border-color: #EFE3D8; }
 /* 左侧介绍可收缩换行/截断，右侧评分固定宽度，长菜名不会把分数挤出屏幕。 */
 .review-overview-main { flex-direction: row; align-items: center; }

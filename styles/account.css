@@ -37,7 +37,7 @@
 .favorite-banner-title { margin-top: 4px; font-size: 18px; line-height: 25px; font-weight: bold; color: #FFFFFF; }
 .favorite-banner-note { margin-top: 4px; font-size: 12px; line-height: 18px; color: #E7CCBB; }
 .favorite-banner-mark { display: flex; flex-shrink: 0; width: 48px; height: 48px; margin-left: 12px; border-radius: 16px; background-color: #4A352C; align-items: center; justify-content: center; }
-.favorite-banner-heart { width: 24px; height: 24px; }
+.favorite-banner-bookmark { width: 24px; height: 24px; }
 .favorite-tabs { display: flex; flex-direction: row; padding: 4px 16px 8px 16px; background-color: #FFFFFF; }
 .favorite-tab { display: flex; flex: 1; height: 40px; margin-right: 8px; border-radius: 12px; background-color: #F2E9E1; align-items: center; justify-content: center; }
 /* uvue 原生 CSS 不支持结构伪类；最后一个标签用专属类清除尾部间距。 */
