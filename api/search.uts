@@ -62,11 +62,14 @@ export type SearchProductsResult = {
  * @param keyword 搜索关键词，由调用方保证非空且不超过 80 字符
  * @param page 页码，从 1 开始
  * @param size 每页条数，取值 1 至 100
+ * @param queryId 用户主动提交的首屏查询标识；分页或非主动查询传空字符串
  * @return 搜索结果
  */
-export function searchProducts(keyword: string, page: number, size: number): Promise<SearchProductsResult> {
+export function searchProducts(keyword: string, page: number, size: number, queryId: string = ''): Promise<SearchProductsResult> {
     // 关键词含空格与中文，必须编码后再拼进查询串；页码与条数均为纯数字。
-    const path = '/search/products?q=' + encodeURIComponent(keyword) + '&page=' + page + '&size=' + size
+    let path = '/search/products?q=' + encodeURIComponent(keyword) + '&page=' + page + '&size=' + size
+    // 仅首屏传递本次主动搜索标识，分页不触发重复行为采集；认证刷新重试复用同一路径。
+    if (page == 1 && queryId.length > 0) path += '&queryId=' + encodeURIComponent(queryId)
     return httpGet(path, true).then((result: HttpResult): SearchProductsResult => {
         const empty: SearchProductItem[] = []
         // 请求整体失败（网络、401、403、搜索服务不可用等）：透传后端提示。

@@ -39,6 +39,7 @@
 						<text class="search-submit-text">搜索</text>
 					</view>
 				</view>
+				<text class="search-privacy-hint">提交的关键词和首屏结果会用于近期推荐，按14天保留期自动清理。</text>
 			</view>
 		</view>
 		<!-- 结果区：状态卡与结果列表共用同一滚动容器 -->
@@ -63,7 +64,7 @@
 				<view v-else-if="submittedKeyword.length == 0" class="history-area">
 					<view v-if="history.length > 0" class="history-card">
 						<view class="history-head">
-							<text class="history-title">最近搜索</text>
+							<text class="history-title">最近搜索（本机）</text>
 							<view class="history-actions">
 								<view class="history-clear" @click="toggleHistoryEditing"><text class="history-action-text">{{ historyEditing ? '完成' : '删除' }}</text></view>
 								<view class="history-clear" @click="clearHistory"><text class="history-action-text">清空</text></view>
@@ -123,7 +124,7 @@
 				</view>
 			</view>
 		</scroll-view>
-		<confirm-dialog v-if="historyClearConfirm" title="清空搜索记录？" message="清空后无法恢复，你可以保留这些记录。" confirm-text="确认清空" @cancel="cancelClearHistory" @confirm="confirmClearHistory" />
+		<confirm-dialog v-if="historyClearConfirm" title="清空本机搜索记录？" message="只清除此设备的历史词。推荐服务已采集的搜索意图会按14天保留期自动清理。" confirm-text="清空本机记录" @cancel="cancelClearHistory" @confirm="confirmClearHistory" />
 	</view>
 </template>
 
@@ -162,6 +163,8 @@ const state = reactive({
     keyword: '',
     // 已提交搜索的关键词，用于展示「没有找到」等文案。
     submittedKeyword: '',
+    // 当前主动搜索的标识，仅留在页面内；失败重试复用，换账号或清空时丢弃。
+    queryId: '',
     // 是否正在加载第一页。
     searching: false,
     // 是否正在加载下一页。
@@ -277,6 +280,9 @@ function submit() {
         return;
     }
     state.submittedKeyword = trimmed;
+    // 每次明确点击搜索、键盘确认或点击历史词都生成新标识；它不是身份凭据。
+    // 沿用项目现有时间戳与随机数格式，满足服务端 16～64 位安全字符约束。
+    state.queryId = 'search-' + Date.now() + '-' + Math.floor(Math.random() * 1000000000);
     runSearch(1);
 }
 
@@ -346,7 +352,9 @@ function runSearch(targetPage: number) {
         state.loadingMore = true;
         state.errorText = '';
     }
-    searchProducts(state.submittedKeyword, targetPage, PAGE_SIZE).then((result: SearchProductsResult) => {
+    // 重试第一页复用同一标识，后续分页传空值，避免失败重试或上拉被记作新搜索。
+    const queryId = targetPage == 1 ? state.queryId : '';
+    searchProducts(state.submittedKeyword, targetPage, PAGE_SIZE, queryId).then((result: SearchProductsResult) => {
         // 版本号不一致说明已有更新的搜索，本次结果作废。
         if (version != state.requestVersion) {
             return;
@@ -416,6 +424,7 @@ function clearKeyword() {
     state.requestVersion = state.requestVersion + 1;
     state.keyword = '';
     state.submittedKeyword = '';
+    state.queryId = '';
     state.searching = false;
     state.loadingMore = false;
     state.errorText = '';
@@ -605,6 +614,14 @@ onReady(() => {
 		padding-right: 5px;
 		border-radius: 999px;
 		background-color: #FFFFFF;
+	}
+
+	/* 明确告知学生哪些成功搜索信号会用于推荐及其短期保留时长。 */
+	.search-privacy-hint {
+		margin-top: 8px;
+		margin-left: 8px;
+		font-size: 11px;
+		color: #F6DED2;
 	}
 
 	/* 放大镜：圆形镜片 + 右下角斜向手柄，用两个方块拼出来 */
