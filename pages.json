@@ -46,6 +46,11 @@
             "style": { "navigationStyle": "custom" }
         },
         {
+            // 学生可查看可领取与本人持有的优惠券；发行管理只在专用管理端进行。
+            "path": "pages/coupons/list",
+            "style": { "navigationStyle": "custom" }
+        },
+        {
             "path": "pages/wallet/payment-password",
             "style": { "navigationStyle": "custom", "disableScroll": true }
         },
