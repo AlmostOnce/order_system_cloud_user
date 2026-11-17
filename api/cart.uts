@@ -42,6 +42,12 @@ export type CartItem = {
 	unitPrice: number
 	/** 当前行金额，不可售时为 0。 */
 	lineAmount: number
+	/** 规格组合规范键；旧无规格条目缺字段时归一为 base。 */
+	selectionKey: string
+	/** 商品服务核验后的选项编号，用于创建订单。 */
+	selectedOptionIds: Array<number>
+	/** 当前规格文字；失效时为加入购物车时保存的快照。 */
+	specificationText: string
 }
 
 /**
@@ -124,10 +130,26 @@ function toItem(raw: UTSJSONObject): CartItem {
 		// 单价，后端可能返回 null，统一折算为 0。
 		unitPrice: jsonNumber(raw, 'unitPrice') ?? 0,
 		// 行金额，后端可能返回 null，统一折算为 0。
-		lineAmount: jsonNumber(raw, 'lineAmount') ?? 0
+		lineAmount: jsonNumber(raw, 'lineAmount') ?? 0,
+		// 旧购物车响应没有规格字段时仍作为 base 行读取。
+		selectionKey: jsonString(raw, 'selectionKey') ?? 'base',
+		selectedOptionIds: numberArray(raw, 'selectedOptionIds'),
+		specificationText: jsonString(raw, 'specificationText') ?? ''
 	}
 	// 返回转换后的条目。
 	return item
+}
+
+/** 安全读取选项编号数组，过滤损坏项，避免错误请求进入下单草稿。 */
+function numberArray(raw: UTSJSONObject, key: string): Array<number> {
+	const result = [] as Array<number>
+	const values = jsonArray(raw, key)
+	if (values == null) return result
+	for (let i = 0; i < values.length; i++) {
+		const value = values[i]
+		if (typeof value == 'number' && (value as number) > 0) result.push(value as number)
+	}
+	return result
 }
 
 /**
@@ -261,11 +283,13 @@ export function fetchCart(): Promise<CartResult> {
  * @param windowId 窗口 ID
  * @param productId 菜品 ID
  * @param quantity 本次增加的数量，必须大于零
+ * @param selectedOptionIds 顾客选择的各规格组单个选项编号；未配置规格时为空数组
  * @return 写操作结果
  */
-export function addToCart(windowId: number, productId: number, quantity: number): Promise<CartActionResult> {
+export function addToCart(windowId: number, productId: number, quantity: number,
+		selectedOptionIds: Array<number> = []): Promise<CartActionResult> {
 	// 按后端 CartItemAddRequest 契约组装请求体。
-	const body: UTSJSONObject = { productId: productId, quantity: quantity }
+	const body: UTSJSONObject = { productId: productId, quantity: quantity, selectedOptionIds: selectedOptionIds }
 	// 返回收敛后的写操作结果。
 	return new Promise<CartActionResult>((resolve) => {
 		httpPost('/cart/windows/' + windowId + '/items', body, true).then((result: HttpResult) => {
@@ -282,14 +306,19 @@ export function addToCart(windowId: number, productId: number, quantity: number)
  * @param windowId 窗口 ID
  * @param productId 菜品 ID
  * @param quantity 目标数量，必须大于零
+ * @param selectionKey 购物车查询返回的规格键；base 走原兼容路径，其余键定位单个规格行
  * @return 写操作结果
  */
-export function setCartItemQuantity(windowId: number, productId: number, quantity: number): Promise<CartActionResult> {
+export function setCartItemQuantity(windowId: number, productId: number, quantity: number,
+		selectionKey: string = 'base'): Promise<CartActionResult> {
 	// 按后端 CartItemQuantityRequest 契约组装请求体。
 	const body: UTSJSONObject = { quantity: quantity }
 	// 返回收敛后的写操作结果。
 	return new Promise<CartActionResult>((resolve) => {
-		httpPut('/cart/windows/' + windowId + '/items/' + productId, body, true).then((result: HttpResult) => {
+		const path = selectionKey == 'base'
+			? '/cart/windows/' + windowId + '/items/' + productId
+			: '/cart/windows/' + windowId + '/items/' + productId + '/selections/' + encodeURIComponent(selectionKey)
+		httpPut(path, body, true).then((result: HttpResult) => {
 			resolve(toActionResult(result))
 		})
 	})
@@ -300,12 +329,17 @@ export function setCartItemQuantity(windowId: number, productId: number, quantit
  *
  * @param windowId 窗口 ID
  * @param productId 菜品 ID
+ * @param selectionKey 购物车查询返回的规格键；base 走原兼容路径，其余键只删除对应规格
  * @return 写操作结果
  */
-export function removeCartItem(windowId: number, productId: number): Promise<CartActionResult> {
+export function removeCartItem(windowId: number, productId: number,
+		selectionKey: string = 'base'): Promise<CartActionResult> {
 	// 删除接口无请求体，只需要鉴权。
 	return new Promise<CartActionResult>((resolve) => {
-		httpDelete('/cart/windows/' + windowId + '/items/' + productId, true).then((result: HttpResult) => {
+		const path = selectionKey == 'base'
+			? '/cart/windows/' + windowId + '/items/' + productId
+			: '/cart/windows/' + windowId + '/items/' + productId + '/selections/' + encodeURIComponent(selectionKey)
+		httpDelete(path, true).then((result: HttpResult) => {
 			resolve(toActionResult(result))
 		})
 	})

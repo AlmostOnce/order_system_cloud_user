@@ -1,4 +1,4 @@
-import { jsonArray, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
+import { jsonArray, jsonBoolean, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
 /**
  * 档口菜单（点餐详情）接口。
  *
@@ -9,6 +9,28 @@ import { jsonArray, jsonNumber, jsonObject, jsonString } from '../common/json.ut
 
 // 导入统一请求入口：菜单查询是鉴权的 GET 请求。
 import { httpGet, HttpResult } from '../common/http.uts'
+
+/** 菜品可选规格组；价格加价仅用于当前菜单预览，最终金额由商品服务重新计算。 */
+export type ProductSpecificationGroup = {
+	/** 规格组编号；只用于稳定渲染和区分选择状态。 */
+	groupId: number
+	/** 规格组名称，例如份量或辣度。 */
+	name: string
+	/** 是否必须选择本组的一项；单组只允许选择一个选项。 */
+	required: boolean
+	/** 当前组启用的选项，顺序由商品服务给出。 */
+	options: Array<ProductSpecificationOption>
+}
+
+/** 单组选项。 */
+export type ProductSpecificationOption = {
+	/** 选项编号；加购请求只提交该编号，不提交选项名称或价格。 */
+	optionId: number
+	/** 学生端展示的选项名称。 */
+	name: string
+	/** 在菜品基础售价上增加的金额，仅用于当前菜单单价预览。 */
+	additionalPrice: number
+}
 
 /**
  * 菜单中的单个菜品，对应后端 MenuProductVO。
@@ -28,6 +50,8 @@ export type MenuProduct = {
 	price: number
 	/** 窗口内排序值。 */
 	sortOrder: number
+	/** 启用规格组；无配置的菜品返回空数组，仍可直接加购。 */
+	specificationGroups: Array<ProductSpecificationGroup>
 }
 
 /**
@@ -124,10 +148,45 @@ function toProduct(raw: UTSJSONObject): MenuProduct {
 		// 价格，缺失按 0 处理。
 		price: jsonNumber(raw, 'price') ?? 0,
 		// 排序值。
-		sortOrder: jsonNumber(raw, 'sortOrder') ?? 0
+		sortOrder: jsonNumber(raw, 'sortOrder') ?? 0,
+		// 新旧菜单响应都归一为空数组，避免页面把缺字段误判为必选规格。
+		specificationGroups: toSpecificationGroups(jsonArray(raw, 'specificationGroups'))
 	}
 	// 返回转换后的菜品。
 	return product
+}
+
+/**
+ * 将菜单规格转换为页面选择器需要的安全结构；损坏的组或选项不会成为可提交选项。
+ * @param rawGroups 后端菜单规格数组
+ * @return 按服务端排序排列的有效规格组
+ */
+function toSpecificationGroups(rawGroups: Array<any> | null): Array<ProductSpecificationGroup> {
+	const groups = [] as Array<ProductSpecificationGroup>
+	if (rawGroups == null) return groups
+	for (let i = 0; i < rawGroups.length; i++) {
+		const rawGroup = rawGroups[i]
+		if (rawGroup == null || typeof rawGroup != 'object' || Array.isArray(rawGroup)) continue
+		const groupObject = rawGroup as UTSJSONObject
+		const groupId = jsonNumber(groupObject, 'groupId') ?? 0
+		const rawOptions = jsonArray(groupObject, 'options')
+		if (groupId <= 0 || rawOptions == null) continue
+		const options = [] as Array<ProductSpecificationOption>
+		for (let j = 0; j < rawOptions.length; j++) {
+			const rawOption = rawOptions[j]
+			if (rawOption == null || typeof rawOption != 'object' || Array.isArray(rawOption)) continue
+			const optionObject = rawOption as UTSJSONObject
+			const optionId = jsonNumber(optionObject, 'optionId') ?? 0
+			const name = jsonString(optionObject, 'name') ?? ''
+			const additionalPrice = jsonNumber(optionObject, 'additionalPrice') ?? -1
+			if (optionId > 0 && name.length > 0 && additionalPrice >= 0)
+				options.push({ optionId: optionId, name: name, additionalPrice: additionalPrice })
+		}
+		if (options.length == 0) continue
+		groups.push({ groupId: groupId, name: jsonString(groupObject, 'name') ?? '',
+			required: jsonBoolean(groupObject, 'required') ?? false, options: options })
+	}
+	return groups
 }
 
 /**

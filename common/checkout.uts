@@ -1,6 +1,26 @@
 import { jsonArray, jsonNumber, jsonString, parseJsonObject } from './json.uts'
 
-export type CheckoutLine = { productId: number, productName: string, quantity: number, revision: string, unitPrice: number, lineAmount: number }
+/** 可重试订单草稿行；金额只用于展示，提交时依旧由商品服务核价。 */
+export type CheckoutLine = {
+    /** 菜品编号。 */
+    productId: number
+    /** 下单前菜单展示的菜名。 */
+    productName: string
+    /** 下单数量。 */
+    quantity: number
+    /** 下单前购物车版本，清理购物车时用于避免删除并发新增。 */
+    revision: string
+    /** 购物车核价展示的单价，不作为订单请求价格。 */
+    unitPrice: number
+    /** 购物车核价展示的行金额，不作为订单请求金额。 */
+    lineAmount: number
+    /** 规格选项编号的规范键，购物车下单后清理时精确标识规格行。 */
+    selectionKey: string
+    /** 商品服务已核验的选项编号；订单创建会再次核验并计算价格。 */
+    selectedOptionIds: Array<number>
+    /** 当前规格显示文字，重试页与订单确认页可读。 */
+    specificationText: string
+}
 export type CheckoutDraft = { key: string, windowId: number, windowName: string, remark: string, items: Array<CheckoutLine> }
 
 export function checkoutKey(userUuid: string): string { return 'order_pending_' + userUuid }
@@ -25,18 +45,34 @@ export function readCheckout(userUuid: string): CheckoutDraft | null {
         const qty = jsonNumber(row, 'quantity') ?? 0
         const rev = jsonString(row, 'revision') ?? ''
         if (id <= 0 || qty <= 0 || rev.length == 0) return null
+        const optionIds = [] as Array<number>
+        const rawOptionIds = jsonArray(row, 'selectedOptionIds')
+        if (rawOptionIds != null) {
+            for (let optionIndex = 0; optionIndex < rawOptionIds.length; optionIndex++) {
+                const optionId = rawOptionIds[optionIndex]
+                if (typeof optionId != 'number' || (optionId as number) <= 0) return null
+                optionIds.push(optionId as number)
+            }
+        }
+        const selectionKey = jsonString(row, 'selectionKey') ?? (optionIds.length == 0 ? 'base' : '')
+        // 本地草稿必须同时保留选项与规格键；不完整的新草稿宁可要求重新读取购物车，也不能静默下成基础价。
+        if (selectionKey.length == 0 || (optionIds.length == 0 && selectionKey != 'base')) return null
         lines.push({ productId: id, productName: jsonString(row, 'productName') ?? '菜品', quantity: qty, revision: rev,
-            unitPrice: jsonNumber(row, 'unitPrice') ?? 0, lineAmount: jsonNumber(row, 'lineAmount') ?? 0 })
+            unitPrice: jsonNumber(row, 'unitPrice') ?? 0, lineAmount: jsonNumber(row, 'lineAmount') ?? 0,
+            selectionKey: selectionKey, selectedOptionIds: optionIds,
+            specificationText: jsonString(row, 'specificationText') ?? '' })
     }
     return { key: key, windowId: windowId, windowName: jsonString(raw, 'windowName') ?? '', remark: jsonString(raw, 'remark') ?? '', items: lines }
 }
 export function orderBody(draft: CheckoutDraft): UTSJSONObject {
     const items: Array<UTSJSONObject> = []
-    for (let i = 0; i < draft.items.length; i++) items.push({ productId: draft.items[i].productId, quantity: draft.items[i].quantity })
+    for (let i = 0; i < draft.items.length; i++) items.push({ productId: draft.items[i].productId,
+        quantity: draft.items[i].quantity, selectedOptionIds: draft.items[i].selectedOptionIds })
     return { windowId: draft.windowId, remark: draft.remark, items: items }
 }
 export function cleanupBody(draft: CheckoutDraft): UTSJSONObject {
     const items: Array<UTSJSONObject> = []
-    for (let i = 0; i < draft.items.length; i++) items.push({ productId: draft.items[i].productId, quantity: draft.items[i].quantity, revision: draft.items[i].revision })
+    for (let i = 0; i < draft.items.length; i++) items.push({ productId: draft.items[i].productId,
+        quantity: draft.items[i].quantity, revision: draft.items[i].revision, selectionKey: draft.items[i].selectionKey })
     return { windowId: draft.windowId, items: items }
 }
