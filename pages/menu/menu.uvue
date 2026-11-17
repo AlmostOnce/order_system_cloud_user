@@ -1,20 +1,55 @@
 <template>
 	<view class="page">
-		<!-- 状态栏底色与头部品牌区同色，避免顶部出现米色缝隙 -->
+		<!-- 状态栏保留浅色安全区，避免系统状态文字直接压在明暗不均的封面照片上。 -->
 		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
-		<!-- 头部：返回按钮 + 档口名称 + 位置，沿用首页的柿子橙品牌色 -->
-		<view class="hero">
-			<view class="hero-shape hero-shape-1" :class="entered ? '' : 'hero-shape-1-pre'"></view>
-			<view class="hero-shape hero-shape-2" :class="entered ? '' : 'hero-shape-2-pre'"></view>
-			<view class="hero-body" :class="entered ? '' : 'hero-body-pre'">
-				<view class="nav-top">
-					<view class="nav-back" hover-class="nav-back-hover" @click="goBack">
-						<view class="nav-back-icon"></view>
+		<view class="window-intro">
+			<!-- 店主图片铺满顶部封面；保留手动轮播、图片预览和无图时的本地默认图。 -->
+			<view class="menu-window-cover">
+				<business-image v-if="windowImageUrls.length == 1" :src="windowImageUrls[0]" kind="window"></business-image>
+				<swiper v-else-if="windowImageUrls.length > 1" class="menu-window-swiper" :current="windowImageIndex" @change="windowImageChanged">
+					<swiper-item v-for="(url, index) in windowImageUrls" :key="url">
+						<view class="menu-window-slide" @click.stop="previewWindowImage(index)">
+							<!-- 多图预览统一由整组相册处理；避免子组件拦截点击后只预览单张图片。 -->
+							<business-image :src="url" kind="window" :preview="false"></business-image>
+						</view>
+					</swiper-item>
+				</swiper>
+				<business-image v-else kind="window" :preview="false"></business-image>
+				<!-- 返回、搜索和收藏悬浮在图片上方，避免另外占用一行压缩封面。 -->
+				<view class="window-hero-nav">
+					<view class="nav-top">
+						<view class="nav-back" hover-class="nav-back-hover" @click="goBack">
+							<view class="nav-back-icon"></view>
+						</view>
+						<text class="hero-eyebrow">档口点餐</text>
+						<view class="nav-actions">
+							<!-- 搜索只在菜品标签显示；图标展开本店搜索框，避免常驻输入框挤压首屏。 -->
+							<view v-if="shopTab == 'menu' && !loading && loadError.length == 0"
+								class="header-search-action" :class="shopSearchVisible ? 'header-search-action-on' : ''"
+								hover-class="header-search-action-hover" @click.stop="toggleShopSearch">
+								<view class="header-search-icon">
+									<view class="search-icon-lens search-icon-lens-header"></view>
+									<view class="search-icon-handle search-icon-handle-header"></view>
+								</view>
+							</view>
+							<!-- 店铺收藏继续使用右上角书签按钮。 -->
+							<view v-if="favoriteEnabled" class="window-favorite-action"
+								:class="windowFavoriteBusy ? 'window-favorite-action-busy' : (windowFavorite ? 'window-favorite-action-on' : '')"
+								hover-class="window-favorite-action-hover" @click.stop="toggleWindowFavorite">
+								<image class="window-favorite-icon" :src="windowFavorite ? '/static/favorites/bookmark-filled.svg' : '/static/favorites/bookmark-outline.svg'"></image>
+							</view>
+						</view>
 					</view>
-					<text class="hero-eyebrow">档口点餐</text>
 				</view>
-				<text class="hero-title">{{ windowName.length > 0 ? windowName : '档口点餐' }}</text>
-				<text class="hero-loc">{{ windowLocation.length > 0 ? windowLocation : '位置待补充' }}</text>
+				<text v-if="windowImageUrls.length > 1" class="menu-window-counter">{{ windowImageIndex + 1 }}/{{ windowImageUrls.length }}</text>
+			</view>
+			<!-- 白色信息卡向上覆盖封面底边；标题、位置和店主说明集中在同一块中。 -->
+			<view class="window-info-card">
+				<view class="window-hero-info">
+					<text class="window-hero-title" :max-lines="1">{{ windowName.length > 0 ? windowName : '档口点餐' }}</text>
+					<text class="window-hero-location" :max-lines="1">{{ windowLocation.length > 0 ? windowLocation : '位置待补充' }}</text>
+				</view>
+				<window-message :content="windowDescription"></window-message>
 			</view>
 		</view>
 		<view class="shop-tabs">
@@ -22,8 +57,11 @@
 			<view class="shop-tab" @click="selectShopTab('reviews')"><text class="shop-tab-text" :class="shopTab == 'reviews' ? 'shop-tab-text-active' : ''">评价</text><view v-if="shopTab == 'reviews'" class="shop-tab-underline"></view></view>
 		</view>
 		<view v-if="shopTab == 'menu'" class="shop-menu-content">
-		<view v-if="!loading && loadError.length == 0" class="shop-search-bar">
-			<view class="shop-search-icon"></view>
+		<view v-if="shopSearchVisible && !loading && loadError.length == 0" class="shop-search-bar">
+			<view class="shop-search-icon">
+				<view class="search-icon-lens search-icon-lens-field"></view>
+				<view class="search-icon-handle search-icon-handle-field"></view>
+			</view>
 			<input class="shop-search-input" v-model="shopKeyword" placeholder="搜索本店菜品" confirm-type="search" :maxlength="80" />
 			<view v-if="shopKeyword.length > 0" class="shop-search-clear" @click="clearShopSearch"><text class="shop-search-clear-text">清除</text></view>
 		</view>
@@ -40,8 +78,10 @@
 			<view class="shop-results-head"><text class="shop-results-title">本店搜索</text><text class="shop-results-count">{{ shopSearchResults.length }} 道菜品</text></view>
 			<view v-if="shopSearchResults.length == 0" class="shop-search-empty"><text class="shop-search-empty-text">没有找到相关菜品，换个关键词试试</text></view>
 			<view v-for="product in shopSearchResults" :key="product.productId" class="shop-result" hover-class="shop-result-hover" @click="openShopResult(product)">
-				<view class="shop-result-image"><business-image :src="product.imageUrl" kind="product"></business-image></view>
-				<view class="shop-result-body"><view class="shop-result-title-line"><text class="shop-result-name" :max-lines="1">{{ product.productName }}</text><!-- 蒸汽模式原生 view 不支持 aria-label；心形图标提供可见收藏提示。 --><view v-if="favoriteEnabled" class="product-favorite product-favorite-small" @click.stop="toggleProductFavorite(product)"><image class="product-favorite-heart" :src="isProductFavorite(product.productId) ? '/static/favorites/heart-filled.svg' : '/static/favorites/heart-outline.svg'"></image></view></view><text v-if="product.description.length > 0" class="shop-result-description" :max-lines="1">{{ product.description }}</text><text class="shop-result-price">¥{{ formatPrice(product.price) }}</text></view>
+				<view class="shop-result-image">
+					<business-image :src="product.imageUrl" kind="product"></business-image>
+				</view>
+				<view class="shop-result-body"><text class="shop-result-name" :max-lines="1">{{ product.productName }}</text><text v-if="product.description.length > 0" class="shop-result-description" :max-lines="1">{{ product.description }}</text><text class="shop-result-price">¥{{ formatPrice(product.price) }}</text></view>
 				<text class="shop-result-arrow">›</text>
 			</view>
 		</scroll-view>
@@ -68,20 +108,6 @@
 					<text class="stock-status-text">{{ stockLoading ? '正在查询库存…' : stockLoadError }}</text>
 				</view>
                 <text v-if="cartLoadError.length > 0" class="stock-status-text">{{ cartLoadError }}</text>
-				<!-- 店铺图片保持紧凑高度。只有一张时不放进 swiper：原生滑动容器会把点击吃掉，预览出不来。 -->
-                <view class="menu-window-cover">
-                    <business-image v-if="windowImageUrls.length == 1" :src="windowImageUrls[0]" kind="window"></business-image>
-                    <swiper v-else-if="windowImageUrls.length > 1" class="menu-window-swiper" :current="windowImageIndex" @change="windowImageChanged" @click="previewCurrentWindowImage">
-                        <swiper-item v-for="(url, index) in windowImageUrls" :key="url">
-                            <view class="menu-window-slide">
-                                <business-image :src="url" kind="window"></business-image>
-                            </view>
-                        </swiper-item>
-                    </swiper>
-                    <business-image v-else kind="window" :preview="false"></business-image>
-                    <text v-if="windowImageUrls.length > 1" class="menu-window-counter">{{ windowImageIndex + 1 }}/{{ windowImageUrls.length }}</text>
-                </view>
-                <window-message :content="windowDescription"></window-message>
 				<!-- 空菜单 / 当前分类无菜品 -->
 				<view v-if="groups.length == 0" class="state state-inline">
 					<text class="state-text">该档口暂无在售菜品</text>
@@ -103,28 +129,25 @@
 							<view class="dish-anchor" :id="productSectionId(product.productId)"></view>
 							<!-- 点卡片打开评价抽屉；加减号放在点击区外，避免加菜时误开评论。 -->
 							<view class="dish-hit" hover-class="dish-hit-hover" @click="openProductReviewDrawer(product)">
-							<view class="dish-thumb">
-								<business-image :src="product.imageUrl" kind="product"></business-image>
-							</view>
-							<view class="dish-body">
-								<!-- 蒸汽模式原生 view 不支持 aria-label；心形图标提供可见收藏提示。 -->
-								<view class="dish-name-line"><text class="dish-name" :max-lines="1">{{ product.productName }}</text><view v-if="favoriteEnabled" class="product-favorite" @click.stop="toggleProductFavorite(product)"><image class="product-favorite-heart" :src="isProductFavorite(product.productId) ? '/static/favorites/heart-filled.svg' : '/static/favorites/heart-outline.svg'"></image></view></view>
+								<view class="dish-thumb">
+									<business-image :src="product.imageUrl" kind="product"></business-image>
+								</view>
+								<view class="dish-body">
+									<text class="dish-name" :max-lines="1">{{ product.productName }}</text>
 								<view class="dish-meta"><text class="dish-rating">{{ cardRatingText(productRatings, product.productId) }}</text><text class="dish-stock">{{ stockHint(product.productId) }}</text></view>
 								<text class="dish-month-sales">月售 {{ monthlyProductSalesText(product.productId) }}</text>
 								<text v-if="product.description.length > 0" class="dish-desc" :max-lines="1">{{ product.description }}</text>
 							</view>
 							</view>
 								<view class="dish-buy">
-									<text class="dish-price">¥{{ formatPrice(product.price) }}</text>
-									<view class="stepper">
-										<view
-											v-if="quantityOf(product.productId) > 0"
-											class="step step-minus"
-											hover-class="step-hover"
-											@click="decrease(product)"
-										>
-											<view class="step-line"></view>
-										</view>
+									<text v-if="hasSpecifications(product)" class="dish-price">¥{{ formatPrice(product.price) }} 起</text>
+									<text v-else class="dish-price">¥{{ formatPrice(product.price) }}</text>
+									<view v-if="hasSpecifications(product)" class="spec-card-action">
+										<text v-if="quantityOf(product.productId) > 0" class="step-count">{{ quantityOf(product.productId) }}</text>
+										<view class="spec-select-button" hover-class="spec-select-button-hover" @click="increase(product)"><text class="spec-select-label">选规格</text></view>
+									</view>
+									<view v-else class="stepper">
+										<view v-if="quantityOf(product.productId) > 0" class="step step-minus" hover-class="step-hover" @click="decrease(product)"><view class="step-line"></view></view>
 										<text v-if="quantityOf(product.productId) > 0" class="step-count">{{ quantityOf(product.productId) }}</text>
 										<view class="step step-plus" :class="canIncrease(product.productId) ? '' : 'step-disabled'" hover-class="step-plus-hover" @click="increase(product)">
 											<view class="step-line step-line-light"></view><view class="step-line step-line-light step-line-vertical"></view>
@@ -189,9 +212,10 @@
 				<view v-if="cartItems.length == 0" class="sheet-empty">
 					<text class="sheet-empty-text">还没有选择菜品</text>
 				</view>
-				<view class="sheet-item" v-for="item in cartItems" :key="item.productId">
+				<view class="sheet-item" v-for="item in cartItems" :key="item.productId + ':' + item.selectionKey">
 					<view class="sheet-item-body">
 						<text class="sheet-item-name">{{ item.productName }}</text>
+						<text v-if="item.specificationText.length > 0" class="sheet-item-specification">{{ item.specificationText }}</text>
 						<!-- 不可售条目只提示原因，不展示价格与加号，避免误下单 -->
 						<text v-if="item.available" class="sheet-item-price">¥{{ formatPrice(item.unitPrice) }}</text>
 						<text v-else class="sheet-item-warn">{{ unavailableHint(item) }}</text>
@@ -205,16 +229,49 @@
 							<view class="step-line step-line-light"></view><view class="step-line step-line-light step-line-vertical"></view>
 						</view>
 					</view>
+					<view v-else class="sheet-item-remove" hover-class="sheet-item-remove-hover" @click="removeUnavailableItem(item)"><text class="sheet-item-remove-text">移除</text></view>
                 </view>
                 <view slot="refresher" class="native-refresh-slot">
                     <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
 				</view>
 			</scroll-view>
 		</view>
+		<!-- 规格选择器单独浮在菜单之上；每组单选，顾客确认后才按商品服务返回的选择键写入购物车。 -->
+		<view v-if="specificationPickerVisible" class="mask" :class="specificationPickerReady ? '' : 'mask-pre'" @click="closeSpecificationPicker"></view>
+		<view v-if="specificationPickerVisible" class="specification-sheet" :class="specificationPickerReady ? '' : 'specification-sheet-pre'" :style="specificationSheetStyle()">
+			<view class="specification-sheet-head">
+				<view class="specification-sheet-copy">
+					<text class="specification-sheet-title">{{ specificationProduct == null ? '选择规格' : specificationProduct!.productName }}</text>
+					<text class="specification-sheet-base-price">基础价 ¥{{ specificationProduct == null ? '0.00' : formatPrice(specificationProduct!.price) }}</text>
+				</view>
+				<view class="specification-sheet-close" hover-class="specification-sheet-close-hover" @click="closeSpecificationPicker"><text class="specification-sheet-close-text">×</text></view>
+			</view>
+			<scroll-view class="specification-groups" direction="vertical">
+				<view v-if="specificationProduct != null">
+				<view v-for="group in specificationProduct!.specificationGroups" :key="group.groupId" class="specification-group">
+					<view class="specification-group-head"><text class="specification-group-name">{{ group.name }}</text><text class="specification-group-rule">{{ group.required ? '必选一项' : '可选一项' }}</text></view>
+					<view class="specification-options">
+						<view v-for="option in group.options" :key="option.optionId" class="specification-option" :class="selectedSpecificationOption(group.groupId) == option.optionId ? 'specification-option-on' : ''" hover-class="specification-option-hover" @click="chooseSpecification(group.groupId, option.optionId)">
+							<text class="specification-option-name">{{ option.name }}</text>
+							<text class="specification-option-price">{{ option.additionalPrice > 0 ? '+¥' + formatPrice(option.additionalPrice) : '不加价' }}</text>
+						</view>
+					</view>
+				</view>
+				</view>
+			</scroll-view>
+			<view class="specification-sheet-footer">
+				<view class="specification-price-copy"><text class="specification-total-label">当前单价</text><text class="specification-total-price">¥{{ formatPrice(selectedSpecificationPrice()) }}</text></view>
+				<view class="specification-confirm" :class="canConfirmSpecifications() ? '' : 'specification-confirm-disabled'" hover-class="specification-confirm-hover" @click="confirmSpecifications"><text class="specification-confirm-text">加入购物车</text></view>
+			</view>
+		</view>
 		<!-- 抽屉只做自下而上的容器；评论界面复用既有评价列表，不在菜单里另写一套卡片。 -->
 		<view v-if="productReviewVisible" class="mask" :class="productReviewReady ? '' : 'mask-pre'" @click="closeProductReviewDrawer"></view>
 		<view v-if="productReviewVisible" class="review-sheet" :class="productReviewReady ? '' : 'review-sheet-pre'" :style="productReviewSheetStyle()">
-			<review-list :key="productReviewId" :embedProductId="productReviewId" :embedProductName="productReviewName" :embedded="true" @close="closeProductReviewDrawer"></review-list>
+			<!-- 菜品收藏放在对应菜品的评价页标题栏，点击书签不会关闭抽屉或改动菜单数量。 -->
+			<review-list :key="productReviewId" :embedProductId="productReviewId" :embedProductName="productReviewName" :embedded="true"
+				:showProductFavoriteAction="true" :productFavoriteEnabled="favoriteEnabled"
+				:productFavorite="productReviewFavorite" :productFavoriteBusy="productReviewFavoriteBusy"
+				@toggle-product-favorite="toggleProductReviewFavorite" @close="closeProductReviewDrawer"></review-list>
 		</view>
 	</view>
 </template>
@@ -267,6 +324,14 @@ type QuantityEntry = {
     /** 当前购物车数量。 */
     quantity: number;
 };
+
+/** 当前规格面板中每个单选组的选择；数组保持组顺序，避免依赖平台 Map 支持。 */
+type SpecificationSelection = {
+    /** 单选组编号。 */
+    groupId: number;
+    /** 该组唯一的已选选项编号。 */
+    optionId: number;
+};
 /** 未归类菜品的固定分组 ID，取负数保证不与后端分类 ID 冲突。 */
 const UNCATEGORIZED_ID: number = -1;
 /** 未归类菜品的固定分组名称。 */
@@ -306,6 +371,7 @@ const initialEmptyStocks: Array<ProductStock> = [];
 const initialCategoryOffsets: Array<CategoryOffset> = [];
 const initialProductRatings: Array<CardRating> = [];
 const initialMonthlyProductSales: Array<MonthlyProductSalesItem> = [];
+const initialSpecificationSelections: Array<SpecificationSelection> = [];
 const menuInstance = getCurrentInstance();
 let measurementScheduled = false;
 let layoutVersion = 0;
@@ -318,6 +384,8 @@ let locationVersion = 0;
 let productRatingVersion = 0;
 let productReviewVersion = 0;
 let productFavoriteVersion = 0;
+let windowFavoriteVersion = 0;
+let specificationPickerVersion = 0;
 // 记录状态快照所属学生，切换账号时必须丢弃旧人的收藏图标和待处理按钮状态。
 let productFavoriteOwner = '';
 const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTime: '', cartLoading: false,
@@ -325,9 +393,14 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     statusBarHeight: 0,
     // 当前档口 ID，来自路由参数，取不到时为 0（页面会展示失败态）。
     windowId: 0,
+    // 当前学生对本窗口的收藏快照与提交状态；商家角色不会显示对应操作。
+    windowFavorite: false,
+    windowFavoriteBusy: false,
     pendingProductId: 0,
     highlightedProductId: 0,
     shopKeyword: '',
+    // 本店搜索默认收起；顶部搜索图标展开输入框，关闭时同步清除隐藏筛选条件。
+    shopSearchVisible: false,
     productRatings: initialProductRatings,
     // 收藏状态是当前学生对本窗口菜品的服务端快照，不写入商品目录或购物车数据。
     productFavoriteIds: [] as Array<number>,
@@ -372,6 +445,11 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     cartPanelVisible: false,
     // 购物车清单面板是否已进入终态，控制滑入滑出过渡。
     cartPanelReady: false,
+    // 规格选择器独立覆盖在菜单上；确认前只保存在页面内存，不提前写入购物车。
+    specificationPickerVisible: false,
+    specificationPickerReady: false,
+    specificationProduct: null as MenuProduct | null,
+    specificationSelections: initialSpecificationSelections,
     // 是否有购物车写操作正在进行，防止连续点击产生并发请求。
     mutating: false,
     // 是否已进入入场动画终态。
@@ -381,11 +459,13 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     // 菜品卡片是否已就绪，控制依次浮入。
     listReady: false })
 
-const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHeight, windowId, highlightedProductId, shopKeyword, stocks, stockLoading, stockRequestVersion, stockLoadError, windowName, windowImageUrls, windowImageIndex, windowLocation, windowDescription, loading, loadError, groups, activeCategoryId, dishesAnchor, railAnchor, dishesScrollTop, categoryTailHeight, categoryOffsets, quantities, cartItems, cartQuantity, cartAmount, cartPanelVisible, cartPanelReady, mutating, entered, layoutReady, listReady } = toRefs(state)
+const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHeight, windowId, highlightedProductId, shopKeyword, shopSearchVisible, stocks, stockLoading, stockRequestVersion, stockLoadError, windowName, windowImageUrls, windowImageIndex, windowLocation, windowDescription, loading, loadError, groups, activeCategoryId, dishesAnchor, railAnchor, dishesScrollTop, categoryTailHeight, categoryOffsets, quantities, cartItems, cartQuantity, cartAmount, cartPanelVisible, cartPanelReady, specificationPickerVisible, specificationPickerReady, specificationProduct, specificationSelections, mutating, entered, layoutReady, listReady } = toRefs(state)
 const { shopTab } = toRefs(state)
 const { productReviewVisible, productReviewReady, productReviewId, productReviewName } = toRefs(state)
 const { productRatings } = toRefs(state)
-const { favoriteEnabled } = toRefs(state)
+const { favoriteEnabled, windowFavorite, windowFavoriteBusy } = toRefs(state)
+const productReviewFavorite = computed((): boolean => state.productFavoriteIds.includes(state.productReviewId))
+const productReviewFavoriteBusy = computed((): boolean => state.productFavoriteBusyIds.includes(state.productReviewId))
 
 const shopSearchResults = computed((): Array<MenuProduct> => {
     const keyword = state.shopKeyword.trim().toLowerCase();
@@ -401,7 +481,14 @@ const shopSearchResults = computed((): Array<MenuProduct> => {
     return results;
 });
 
-function clearShopSearch() { state.shopKeyword = ''; }
+/** 清除当前关键词但保留搜索框，便于顾客直接输入新的本店菜品关键词。 */
+function clearShopSearch(): void { state.shopKeyword = ''; }
+
+/** 顶部搜索图标展开或收起输入框；收起时清空关键词，避免隐藏筛选仍改变菜单内容。 */
+function toggleShopSearch(): void {
+    state.shopSearchVisible = !state.shopSearchVisible;
+    if (!state.shopSearchVisible) state.shopKeyword = '';
+}
 
 /**
  * 判断菜品是否在当前学生的服务端收藏状态快照中。
@@ -411,6 +498,60 @@ function clearShopSearch() { state.shopKeyword = ''; }
  */
 function isProductFavorite(productId: number): boolean {
     return state.productFavoriteIds.includes(productId);
+}
+
+/**
+ * 刷新当前点餐窗口的收藏状态，保留已有状态直到服务端确认新结果。
+ * 请求版本与登录用户共同限定响应归属，避免迟到响应覆盖新窗口或新账号。
+ */
+function refreshWindowFavoriteState(): void {
+    const version = ++windowFavoriteVersion;
+    const owner = productFavoriteOwner;
+    const currentWindowId = state.windowId;
+    if (!state.favoriteEnabled || owner.length == 0 || currentWindowId <= 0) {
+        state.windowFavorite = false;
+        return;
+    }
+    fetchFavoriteTargetIds('WINDOW' as FavoriteTargetType, [currentWindowId]).then((favoriteIds: Array<number> | null) => {
+        if (menuDisposed || version != windowFavoriteVersion || owner != productFavoriteOwner || currentWindowId != state.windowId || currentUser()?.userUuid != owner || favoriteIds == null) return;
+        state.windowFavorite = favoriteIds.includes(currentWindowId);
+    });
+}
+
+/**
+ * 切换当前窗口的收藏关系。
+ * 写入期间忽略重复点击；成功后更新本地书签状态并提示顾客，失败保留原状态并重新读取服务端状态。
+ */
+function toggleWindowFavorite(): void {
+    const currentWindowId = state.windowId;
+    if (!state.favoriteEnabled || currentWindowId <= 0 || state.windowFavoriteBusy) return;
+    const owner = productFavoriteOwner;
+    const shouldAdd = !state.windowFavorite;
+    state.windowFavoriteBusy = true;
+    // 写入会使先前的状态查询失效，防止旧查询把按钮恢复成过期状态。
+    windowFavoriteVersion++;
+    const request = shouldAdd
+        ? addFavorite('WINDOW' as FavoriteTargetType, currentWindowId)
+        : removeFavorite('WINDOW' as FavoriteTargetType, currentWindowId);
+    request.then((result) => {
+        // 旧账号、已卸载页面或不同窗口的响应不允许改变当前页面状态。
+        if (menuDisposed || owner != productFavoriteOwner || currentUser()?.userUuid != owner || currentWindowId != state.windowId) return;
+        state.windowFavoriteBusy = false;
+        if (!result.ok) {
+            toast(result.message.length > 0 ? result.message : '收藏操作失败，请稍后重试');
+            refreshWindowFavoriteState();
+            return;
+        }
+        state.windowFavorite = shouldAdd;
+        toast(shouldAdd ? '已收藏店铺' : '已取消收藏');
+        refreshWindowFavoriteState();
+    }).catch(() => {
+        if (menuDisposed || owner != productFavoriteOwner || currentUser()?.userUuid != owner || currentWindowId != state.windowId) return;
+        state.windowFavoriteBusy = false;
+        toast('网络连接失败，请稍后重试');
+        // 请求超时结果不确定，重新查询以服务端事实校准书签状态。
+        refreshWindowFavoriteState();
+    });
 }
 
 /**
@@ -424,7 +565,7 @@ function refreshProductFavoriteStates(productIds: Array<number>): void {
         state.productFavoriteIds = [];
         return;
     }
-    // 只保留当前菜单中已有的确认状态；批量查询失败时不把已知爱心状态清空。
+    // 只保留当前菜单中已有的确认状态；批量查询失败时不把已知书签状态清空。
     state.productFavoriteIds = state.productFavoriteIds.filter((id: number): boolean => productIds.includes(id));
     fetchFavoriteTargetIds('PRODUCT' as FavoriteTargetType, productIds).then((favoriteIds: Array<number> | null) => {
         if (menuDisposed || version != productFavoriteVersion || favoriteIds == null) return;
@@ -435,10 +576,9 @@ function refreshProductFavoriteStates(productIds: Array<number>): void {
 /**
  * 菜品收藏在服务端确认后才更新图标；失败时保留当前状态并提示顾客。
  *
- * @param product 当前菜单或店内搜索中的菜品；点击入口会阻止父级导航冒泡
+ * @param productId 当前评价抽屉所展示的菜品编号；请求成功后才更新书签状态
  */
-function toggleProductFavorite(product: MenuProduct): void {
-    const productId = product.productId;
+function toggleProductFavorite(productId: number): void {
     if (!state.favoriteEnabled || productId <= 0 || state.productFavoriteBusyIds.includes(productId)) return;
     const owner = productFavoriteOwner;
     const shouldAdd = !isProductFavorite(productId);
@@ -474,6 +614,14 @@ function toggleProductFavorite(product: MenuProduct): void {
     });
 }
 
+/**
+ * 处理菜品评价页标题栏的收藏操作。
+ * 目标菜品编号来自当前抽屉状态，避免依赖菜单列表对象或让收藏操作触发卡片点击。
+ */
+function toggleProductReviewFavorite(): void {
+	toggleProductFavorite(state.productReviewId);
+}
+
 /** 收集当前已加载菜单的菜品 ID，供单次收藏写入后恢复整页状态。 */
 function currentMenuProductIds(): Array<number> {
     const ids: Array<number> = [];
@@ -490,7 +638,13 @@ function currentMenuProductIds(): Array<number> {
 function selectShopTab(tab: string) {
     if (state.shopTab == tab) return;
     state.shopTab = tab;
+    // 离开菜品标签时关闭菜单专属搜索，避免评价页隐藏着一组会影响回退结果的筛选条件。
+    if (tab != 'menu') {
+        state.shopSearchVisible = false;
+        state.shopKeyword = '';
+    }
     closeCartPanel();
+    closeSpecificationPicker();
     closeProductReviewDrawer();
     if (tab == 'menu' && state.shopKeyword.trim().length == 0) nextTick(() => { resetCategoryNavigation(); });
 }
@@ -509,13 +663,9 @@ function previewWindowImage(index: number) {
     uni.previewImage({ current: urls[index], urls: urls });
 }
 
-/** 多图轮播点当前这张；页码由 swiper 的 change 维护，避免点到空白索引。 */
-function previewCurrentWindowImage() {
-    previewWindowImage(state.windowImageIndex);
-}
-
 function openShopResult(product: MenuProduct) {
     state.shopKeyword = '';
+    state.shopSearchVisible = false;
     state.pendingProductId = product.productId;
     nextTick(() => {
         if (menuDisposed) return;
@@ -936,17 +1086,131 @@ watch(() => state.stockLoading, () => { scheduleCategoryMeasurement(); }, { flus
 watch(() => state.stockLoadError, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
 watch(() => state.cartLoadError, () => { scheduleCategoryMeasurement(); }, { flush: 'post' });
 onResize(() => { scheduleCategoryMeasurement(); });
-onUnload(() => { menuDisposed = true; layoutVersion++; locationVersion++; productReviewVersion++; });
+onUnload(() => { menuDisposed = true; layoutVersion++; locationVersion++; productReviewVersion++; specificationPickerVersion++; });
 
 function quantityOf(productId: number): number {
-    // 遍历扁平数量列表，命中即返回。
+	// 同一菜品的不同规格会分别成行；菜单卡片只展示所有规格份数的合计。
+	let total = 0;
     for (let i = 0; i < state.quantities.length; i++) {
         if (state.quantities[i].productId == productId) {
-            return state.quantities[i].quantity;
+			total += state.quantities[i].quantity;
         }
     }
-    // 未找到说明该菜品还不在购物车里。
-    return 0;
+	return total;
+}
+
+/** 规格组非空时必须先选择组合；无规格菜品继续沿用原来的直接加购按钮。 */
+function hasSpecifications(product: MenuProduct): boolean {
+	return product.specificationGroups.length > 0;
+}
+
+/** 读取当前面板中某组已选的唯一选项，0 表示还未选择。 */
+function selectedSpecificationOption(groupId: number): number {
+	for (let i = 0; i < state.specificationSelections.length; i++) {
+		if (state.specificationSelections[i].groupId == groupId) return state.specificationSelections[i].optionId;
+	}
+	return 0;
+}
+
+/** 同组再次点选时替换旧选项，保证学生端遵守单组选一项的规则。 */
+function chooseSpecification(groupId: number, optionId: number) {
+	const next = [] as Array<SpecificationSelection>;
+	for (let i = 0; i < state.specificationSelections.length; i++) {
+		if (state.specificationSelections[i].groupId != groupId) next.push(state.specificationSelections[i]);
+	}
+	next.push({ groupId: groupId, optionId: optionId });
+	state.specificationSelections = next;
+}
+
+/** 打开独立规格面板；库存按菜品合计检查，不拆成规格库存。 */
+function openSpecificationPicker(product: MenuProduct) {
+	if (state.mutating || state.specificationPickerVisible) return;
+	if (!canIncrease(product.productId)) {
+		toast(state.stockLoading ? '正在查询库存，请稍候' : (state.stockLoadError.length > 0 ? '库存查询失败，请稍后重试' : '已达到当前可售数量'));
+		return;
+	}
+	closeCartPanel();
+	closeProductReviewDrawer();
+	const version = ++specificationPickerVersion;
+	state.specificationProduct = product;
+	state.specificationSelections = [];
+	state.specificationPickerReady = false;
+	state.specificationPickerVisible = true;
+	setTimeout(() => {
+		if (!menuDisposed && version == specificationPickerVersion) state.specificationPickerReady = true;
+	}, 30);
+}
+
+/** 先播放滑出动画再卸载面板，并用版本号防止快速重开被旧定时器关闭。 */
+function closeSpecificationPicker() {
+	if (!state.specificationPickerVisible) return;
+	const version = ++specificationPickerVersion;
+	state.specificationPickerReady = false;
+	setTimeout(() => {
+		if (version == specificationPickerVersion && !state.specificationPickerReady) {
+			state.specificationPickerVisible = false;
+			state.specificationProduct = null;
+			state.specificationSelections = [];
+		}
+	}, 240);
+}
+
+/** 仅用菜单当前加价展示预估单价；加入购物车时商品服务会重新核价。 */
+function selectedSpecificationPrice(): number {
+	const product = state.specificationProduct;
+	if (product == null) return 0;
+	let price = product.price;
+	for (let i = 0; i < product.specificationGroups.length; i++) {
+		const group = product.specificationGroups[i];
+		const optionId = selectedSpecificationOption(group.groupId);
+		for (let j = 0; j < group.options.length; j++) {
+			if (group.options[j].optionId == optionId) price += group.options[j].additionalPrice;
+		}
+	}
+	return price;
+}
+
+/** 必选组未选齐、库存已满或存在其它写操作时禁止提交选择。 */
+function canConfirmSpecifications(): boolean {
+	const product = state.specificationProduct;
+	if (product == null || state.mutating || !canIncrease(product.productId)) return false;
+	for (let i = 0; i < product.specificationGroups.length; i++) {
+		const group = product.specificationGroups[i];
+		if (group.required && selectedSpecificationOption(group.groupId) <= 0) return false;
+	}
+	return true;
+}
+
+/** 复核必选组后提交选项 ID；服务端返回的规范键和文字才会进入购物车。 */
+function confirmSpecifications() {
+	const product = state.specificationProduct;
+	if (product == null || state.mutating) return;
+	for (let i = 0; i < product.specificationGroups.length; i++) {
+		const group = product.specificationGroups[i];
+		if (group.required && selectedSpecificationOption(group.groupId) <= 0) {
+			toast('请选择' + group.name);
+			return;
+		}
+	}
+	if (!canIncrease(product.productId)) {
+		toast(state.stockLoading ? '正在查询库存，请稍候' : (state.stockLoadError.length > 0 ? '库存查询失败，请稍后重试' : '已达到当前可售数量'));
+		return;
+	}
+	const optionIds = [] as Array<number>;
+	for (let i = 0; i < product.specificationGroups.length; i++) {
+		const optionId = selectedSpecificationOption(product.specificationGroups[i].groupId);
+		if (optionId > 0) optionIds.push(optionId);
+	}
+	state.mutating = true;
+	addToCart(state.windowId, product.productId, 1, optionIds).then((result: CartActionResult) => {
+		state.mutating = false;
+		if (!result.ok) {
+			toast(result.message);
+			return;
+		}
+		closeSpecificationPicker();
+		loadCart();
+	});
 }
 
 /**
@@ -988,6 +1252,13 @@ function productReviewSheetStyle(): string {
     return 'height:' + sheet + 'px';
 }
 
+/** 规格面板按真机窗口高度限制，选项多时只滚动规格区域而不挤动背景菜单。 */
+function specificationSheetStyle(): string {
+	const height = uni.getWindowInfo().windowHeight;
+	const sheet = Math.max(360, Math.min(620, Math.floor((height > 0 ? height : 720) * 0.74)));
+	return 'height:' + sheet + 'px';
+}
+
 function productGlyph(product: MenuProduct): string {
     // 有名称时取首字。
     if (product.productName.length > 0) {
@@ -1003,7 +1274,11 @@ function formatPrice(value: number): string {
 }
 
 function increase(product: MenuProduct) {
-    // 复用按菜品 ID 增减的实现，数量取自当前购物车。
+	if (hasSpecifications(product)) {
+		openSpecificationPicker(product);
+		return;
+	}
+	// 无规格菜品继续使用按菜品 ID 增减的原有流程。
     increaseById(product.productId, quantityOf(product.productId));
 }
 
@@ -1013,13 +1288,41 @@ function decrease(product: MenuProduct) {
 }
 
 function increaseItem(item: CartItem) {
-    // 直接使用条目自带数量，避免再去扁平列表里查找。
-    increaseById(item.productId, item.quantity);
+	if (!canIncrease(item.productId)) {
+		toast(state.stockLoading ? '正在查询库存，请稍候' : (state.stockLoadError.length > 0 ? '库存查询失败，请稍后重试' : '已达到当前可售数量'));
+		return;
+	}
+	if (state.mutating) return;
+	state.mutating = true;
+	setCartItemQuantity(state.windowId, item.productId, item.quantity + 1, item.selectionKey).then((result: CartActionResult) => {
+		state.mutating = false;
+		if (!result.ok) { toast(result.message); return; }
+		loadCart();
+	});
 }
 
 function decreaseItem(item: CartItem) {
-    // 直接使用条目自带数量，避免再去扁平列表里查找。
-    decreaseById(item.productId, item.quantity);
+	if (state.mutating) return;
+	state.mutating = true;
+	const request = item.quantity == 1
+		? removeCartItem(state.windowId, item.productId, item.selectionKey)
+		: setCartItemQuantity(state.windowId, item.productId, item.quantity - 1, item.selectionKey);
+	request.then((result: CartActionResult) => {
+		state.mutating = false;
+		if (!result.ok) { toast(result.message); return; }
+		loadCart();
+	});
+}
+
+/** 规格已失效的购物车行不再显示加减按钮，仍保留仅删除本规格的出口。 */
+function removeUnavailableItem(item: CartItem) {
+	if (state.mutating) return;
+	state.mutating = true;
+	removeCartItem(state.windowId, item.productId, item.selectionKey).then((result: CartActionResult) => {
+		state.mutating = false;
+		if (!result.ok) { toast(result.message); return; }
+		loadCart();
+	});
 }
 
 function increaseById(productId: number, current: number) {
@@ -1132,8 +1435,8 @@ function sheetListStyle(): string {
     const total = state.cartItems.length > 0 ? state.cartItems.length : 1;
     // 面板最多展示 5 条，超出部分靠内部滚动查看。
     const visible = total > 5 ? 5 : total;
-    // 每项固定 60px，换算出面板高度。
-    return 'height: ' + (visible * 60) + 'px';
+	// 每项预留规格文字、价格与数量控件的紧凑高度。
+	return 'height: ' + (visible * 72) + 'px';
 }
 
 function unavailableHint(item: CartItem): string {
@@ -1200,14 +1503,22 @@ onPageShow(() => {
     if (favoriteOwner != productFavoriteOwner) {
         productFavoriteOwner = favoriteOwner;
         productFavoriteVersion++;
+        windowFavoriteVersion++;
         state.productFavoriteIds = [];
         state.productFavoriteBusyIds = [];
+        state.windowFavorite = false;
+        state.windowFavoriteBusy = false;
     }
     state.favoriteEnabled = profile != null && profile.roleCode == 'CUSTOMER';
     if (!state.favoriteEnabled) {
         productFavoriteVersion++;
+        windowFavoriteVersion++;
         state.productFavoriteIds = [];
         state.productFavoriteBusyIds = [];
+        state.windowFavorite = false;
+        state.windowFavoriteBusy = false;
+    } else {
+        refreshWindowFavoriteState();
     }
     // 每次进入页面都重新拉取菜单与购物车，保证价格与可售状态是新的。
     loadMenu();
@@ -1243,76 +1554,20 @@ onReady(() => {
 	/* ---------- 头部 ---------- */
 
 	.statusfill {
-		background-color: #E4572E;
+		background-color: #FDF6F0;
 	}
 
-	.hero {
-		position: relative;
-		background-color: #E4572E;
-		padding-top: 10px;
-		padding-bottom: 22px;
-		overflow: hidden;
-	}
-
-	.hero-shape {
-		position: absolute;
-		border-radius: 999px;
-		transition-property: opacity, transform;
-		/* 带回弹的缓动曲线，与首页保持一致 */
-		transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
-	}
-
-	.hero-shape-1 {
-		width: 150px;
-		height: 150px;
-		right: -52px;
-		top: -46px;
-		background-color: #FFFFFF;
-		opacity: 0.14;
-		transform: scale(1);
-		transition-duration: 0.7s;
-		transition-delay: 0.06s;
-	}
-
-	.hero-shape-1-pre {
-		opacity: 0;
-		transform: scale(0.5);
-	}
-
-	.hero-shape-2 {
-		width: 24px;
-		height: 24px;
-		right: 40px;
-		top: 46px;
-		background-color: #F2A93B;
-		opacity: 1;
-		transform: scale(1);
-		transition-duration: 0.5s;
-		transition-delay: 0.16s;
-	}
-
-	.hero-shape-2-pre {
-		opacity: 0;
-		transform: scale(0);
-	}
-
-	.hero-body {
-		padding-left: 20px;
-		padding-right: 20px;
-		opacity: 1;
-		transform: translateY(0);
-		transition-property: opacity, transform;
-		transition-duration: 0.5s;
-		transition-timing-function: ease-out;
-		transition-delay: 0.06s;
-	}
-
-	.hero-body-pre {
-		opacity: 0;
-		transform: translateY(12px);
-	}
+	/* 店铺封面与信息卡固定在菜品、评价滚动区之外，信息卡与下方标签共用白底。 */
+	.window-intro { flex-shrink: 0; width: 100%; background-color: #FFFFFF; }
+	.window-hero-nav { position: absolute; z-index: 4; top: 10px; left: 14px; right: 14px; }
+	/* 负上边距让信息卡压住图片底边，圆角只出现在卡片上沿，形成连续的店铺页头。 */
+	.window-info-card { position: relative; z-index: 5; margin-top: -22px; padding-top: 16px; border-top-left-radius: 24px; border-top-right-radius: 24px; background-color: #FFFFFF; }
+	.window-hero-info { padding: 0 16px 10px; }
+	.window-hero-title { font-size: 20px; line-height: 26px; font-weight: bold; color: #211C18; }
+	.window-hero-location { margin-top: 3px; font-size: 12px; line-height: 17px; color: #7A6C60; }
 
 	.nav-top {
+		width: 100%;
 		flex-direction: row;
 		align-items: center;
 	}
@@ -1322,13 +1577,13 @@ onReady(() => {
 		width: 34px;
 		height: 34px;
 		border-radius: 999px;
-		background-color: rgba(255, 255, 255, 0.22);
+		background-color: rgba(33, 28, 24, 0.48);
 		align-items: center;
 		justify-content: center;
 	}
 
 	.nav-back-hover {
-		background-color: rgba(255, 255, 255, 0.42);
+		background-color: rgba(33, 28, 24, 0.68);
 	}
 
 	.nav-back-icon {
@@ -1346,27 +1601,36 @@ onReady(() => {
 
 	.hero-eyebrow {
 		margin-left: 10px;
+		padding: 5px 8px;
+		border-radius: 10px;
+		background-color: rgba(33, 28, 24, 0.48);
 		font-size: 11px;
-		color: #FFD9C7;
-		letter-spacing: 1px;
-		font-weight: bold;
-	}
-
-	.hero-title {
-		margin-top: 12px;
-		font-size: 24px;
-		font-weight: bold;
 		color: #FFFFFF;
 		letter-spacing: 1px;
+		font-weight: bold;
 	}
 
-	.hero-loc {
-		margin-top: 6px;
-		font-size: 12px;
-		color: #FFD9C7;
-	}
+	/* 搜索与收藏作为一组靠右并列，两个操作共用一致的44px手机触控尺寸。 */
+	.nav-actions { flex-direction: row; align-items: center; margin-left: auto; }
+	.header-search-action { display: flex; flex-shrink: 0; width: 44px; height: 44px; margin-right: 8px; border-radius: 22px; background-color: #FFFFFF; align-items: center; justify-content: center; }
+	.header-search-action-on { background-color: #FFF0E7; }
+	.header-search-action-hover { opacity: 0.82; }
+	.header-search-icon { position: relative; width: 20px; height: 20px; }
+	.search-icon-lens { position: absolute; top: 1px; left: 1px; width: 12px; height: 12px; border-width: 2px; border-style: solid; border-color: #8D4C35; border-radius: 8px; }
+	.search-icon-lens-header { border-color: #8D4C35; }
+	.search-icon-lens-field { border-color: #A2968B; }
+	.search-icon-handle { position: absolute; right: 1px; bottom: 2px; width: 7px; height: 2px; border-radius: 1px; background-color: #8D4C35; transform: rotate(45deg); }
+	.search-icon-handle-header { background-color: #8D4C35; }
+	.search-icon-handle-field { background-color: #A2968B; }
 
-	.shop-search-bar { flex-direction: row; align-items: center; margin: 10px 16px; padding: 0 12px; min-height: 42px; border-radius: 13px; background-color: #FFFFFF; border-width: 1px; border-style: solid; border-color: #EFE1D6; }
+	/* 店铺收藏固定在点餐页右上角，44px触控区中只显示书签图标。 */
+	.window-favorite-action { display: flex; flex-direction: row; flex-shrink: 0; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 22px; background-color: #FFFFFF; }
+	.window-favorite-action-on { background-color: #FFF0E7; }
+	.window-favorite-action-busy { opacity: 0.72; }
+	.window-favorite-action-hover { opacity: 0.82; }
+	.window-favorite-icon { width: 20px; height: 22px; flex-shrink: 0; }
+
+	.shop-search-bar { flex-direction: row; align-items: center; margin: 8px 14px; padding: 0 12px; min-height: 42px; border-radius: 13px; background-color: #FFFFFF; border-width: 1px; border-style: solid; border-color: #EFE1D6; }
 	.shop-tabs { flex-direction: row; background-color: #FFFFFF; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #F0E5DC; }
 	.shop-tab { flex: 1; height: 48px; align-items: center; justify-content: center; }
 	.shop-tab-text { font-size: 15px; color: #8C7C6F; }
@@ -1375,7 +1639,7 @@ onReady(() => {
 	.shop-menu-content { flex: 1; min-height: 0; width: 100%; }
 	.catalog-placeholder { flex: 1; min-height: 0; width: 100%; }
 	.shop-review-panel { flex: 1; min-height: 0; width: 100%; background-color: #FDF6F0; }
-	.shop-search-icon { width: 13px; height: 13px; border-width: 2px; border-style: solid; border-color: #A2968B; border-radius: 7px; margin-right: 10px; }
+	.shop-search-icon { position: relative; flex-shrink: 0; width: 20px; height: 20px; margin-right: 10px; }
 	.shop-search-input { flex: 1; min-width: 0; height: 40px; font-size: 14px; color: #211C18; }
 	.shop-search-clear { padding: 8px; }
 	.shop-search-clear-text { font-size: 12px; color: #C2410C; }
@@ -1389,16 +1653,10 @@ onReady(() => {
 	.shop-result-hover { background-color: #FFF1E8; }
 	.shop-result-image { width: 62px; height: 62px; border-radius: 12px; overflow: hidden; flex-shrink: 0; }
 	.shop-result-body { flex: 1; min-width: 0; margin-left: 12px; }
-	.shop-result-title-line { flex-direction: row; align-items: center; }
-	.shop-result-name { flex: 1; min-width: 0; font-size: 15px; font-weight: bold; color: #211C18; }
+	.shop-result-name { font-size: 15px; font-weight: bold; color: #211C18; }
 	.shop-result-description { margin-top: 3px; font-size: 12px; color: #7A6C60; text-overflow: ellipsis; }
 	.shop-result-price { margin-top: 4px; font-size: 14px; font-weight: bold; color: #E4572E; }
 	.shop-result-arrow { margin-left: 8px; font-size: 22px; color: #B7A79B; }
-	/* 收藏图标放在菜名行末，点击范围独立，不占用菜品图片或购物车步进器。 */
-	.product-favorite { display: flex; flex-shrink: 0; width: 34px; height: 34px; margin-left: 4px; border-radius: 17px; align-items: center; justify-content: center; }
-	.product-favorite-small { width: 30px; height: 30px; }
-	.product-favorite-heart { width: 20px; height: 20px; }
-
 	.stock-status {
 		margin: 0;
 		padding: 12px;
@@ -1695,10 +1953,6 @@ onReady(() => {
 		margin-left: 10px;
 	}
 
-	/* 只压缩菜名可用宽度；收藏触控区保持稳定，不会挤动价格和加减数量。 */
-	.dish-name-line { flex-direction: row; align-items: center; min-width: 0; }
-	.dish-name { flex: 1; min-width: 0; }
-
 	.dish-name {
 		font-size: 14px;
 		line-height: 20px;
@@ -1791,6 +2045,27 @@ onReady(() => {
 		font-weight: bold;
 		color: #211C18;
 	}
+
+	/* 有规格菜不在卡片上提供含糊的减号，点“选规格”后可查看并管理各规格数量。 */
+	.spec-card-action {
+		flex-direction: row;
+		align-items: center;
+		justify-content: flex-end;
+	}
+
+	.spec-select-button {
+		min-width: 60px;
+		height: 28px;
+		padding-left: 10px;
+		padding-right: 10px;
+		border-radius: 14px;
+		background-color: #E4572E;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.spec-select-button-hover { background-color: #C2410C; }
+	.spec-select-label { color: #FFFFFF; font-size: 11px; font-weight: bold; }
 
 	/* ---------- 底部购物车栏 ---------- */
 
@@ -2025,7 +2300,7 @@ onReady(() => {
 	.sheet-item {
 		flex-direction: row;
 		align-items: center;
-		height: 60px;
+		height: 72px;
 		padding-left: 22px;
 		padding-right: 22px;
 	}
@@ -2039,6 +2314,15 @@ onReady(() => {
 		font-size: 14px;
 		color: #211C18;
 	}
+
+	.sheet-item-specification {
+		margin-top: 2px;
+		font-size: 10px;
+		color: #8B7768;
+	}
+	.sheet-item-remove { padding-left: 10px; padding-right: 10px; padding-top: 6px; padding-bottom: 6px; border-radius: 12px; background-color: #F5EEE8; }
+	.sheet-item-remove-hover { background-color: #E9DDD3; }
+	.sheet-item-remove-text { color: #76675C; font-size: 11px; }
 
 	.sheet-item-price {
 		margin-top: 3px;
@@ -2064,9 +2348,58 @@ onReady(() => {
 		font-size: 12px;
 		color: #A2968B;
 	}
+
+	/* 规格选择独立作为移动端底部面板；只有选项列表滚动，价格与提交操作固定可见。 */
+	.specification-sheet {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 1001;
+		flex-direction: column;
+		overflow: hidden;
+		background-color: #FFFFFF;
+		border-top-left-radius: 22px;
+		border-top-right-radius: 22px;
+		padding-top: 14px;
+		padding-bottom: 22px;
+		transform: translateY(0);
+		transition-property: transform;
+		transition-duration: 0.3s;
+		transition-timing-function: cubic-bezier(0.22, 1.3, 0.36, 1);
+	}
+
+	.specification-sheet-pre { transform: translateY(760px); }
+	.specification-sheet-head { flex-direction: row; align-items: center; padding-left: 20px; padding-right: 16px; }
+	.specification-sheet-copy { flex: 1; }
+	.specification-sheet-title { font-size: 16px; font-weight: bold; color: #211C18; }
+	.specification-sheet-base-price { margin-top: 4px; font-size: 11px; color: #A2968B; }
+	.specification-sheet-close { width: 34px; height: 34px; border-radius: 17px; background-color: #F5EEE8; align-items: center; justify-content: center; }
+	.specification-sheet-close-hover { background-color: #E9DDD3; }
+	.specification-sheet-close-text { color: #76675C; font-size: 23px; line-height: 25px; }
+	.specification-groups { flex: 1; min-height: 0; margin-top: 8px; padding-left: 20px; padding-right: 20px; }
+	.specification-group { padding-top: 12px; padding-bottom: 10px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #F0E7E0; }
+	.specification-group-head { flex-direction: row; align-items: center; margin-bottom: 9px; }
+	.specification-group-name { flex: 1; color: #211C18; font-size: 13px; font-weight: bold; }
+	.specification-group-rule { color: #A2968B; font-size: 10px; }
+	.specification-options { flex-direction: row; flex-wrap: wrap; }
+	.specification-option { min-width: 88px; margin-right: 8px; margin-bottom: 8px; padding-left: 10px; padding-right: 10px; padding-top: 7px; padding-bottom: 7px; border-radius: 12px; border-width: 1px; border-style: solid; border-color: #E8DDD4; background-color: #FFFFFF; }
+	.specification-option-hover { background-color: #FDF6F0; }
+	.specification-option-on { border-color: #E4572E; background-color: #FFF0E8; }
+	.specification-option-name { color: #51443B; font-size: 11px; }
+	.specification-option-price { margin-top: 3px; color: #A2968B; font-size: 10px; }
+	.specification-sheet-footer { flex-direction: row; align-items: center; padding-top: 10px; padding-left: 20px; padding-right: 20px; border-top-width: 1px; border-top-style: solid; border-top-color: #F0E7E0; }
+	.specification-price-copy { flex: 1; }
+	.specification-total-label { color: #8B7768; font-size: 10px; }
+	.specification-total-price { margin-top: 2px; color: #E4572E; font-size: 18px; font-weight: bold; }
+	.specification-confirm { min-width: 126px; height: 42px; border-radius: 21px; background-color: #E4572E; align-items: center; justify-content: center; }
+	.specification-confirm-hover { background-color: #C2410C; }
+	.specification-confirm-disabled { background-color: #D9C9BE; }
+	.specification-confirm-text { color: #FFFFFF; font-size: 13px; font-weight: bold; }
     .menu-state-scroll { flex: 1; min-height: 0; width: 100%; }
-    .menu-window-swiper { width: 100%; height: 112px; }
-    .menu-window-slide { width: 100%; height: 112px; }
-    .menu-window-counter { position: absolute; right: 8px; bottom: 8px; padding: 3px 8px; border-radius: 10px; background-color: rgba(33, 28, 24, 0.65); color: #FFFFFF; font-size: 11px; }
-    .menu-window-cover { position: relative; height: 112px; margin: 8px 14px 12px 14px; border-radius: 14px; overflow: hidden; }
+    .menu-window-swiper { width: 100%; height: 220px; }
+    .menu-window-slide { width: 100%; height: 220px; }
+    .menu-window-counter { position: absolute; z-index: 4; right: 12px; bottom: 28px; padding: 3px 8px; border-radius: 10px; background-color: rgba(33, 28, 24, 0.72); color: #FFFFFF; font-size: 11px; }
+    /* 全宽220px封面接近外卖店铺头图比例；business-image用aspectFill填满并裁去多余边缘。 */
+    .menu-window-cover { position: relative; width: 100%; height: 220px; margin: 0; overflow: hidden; background-color: #EADDD1; }
 </style>
