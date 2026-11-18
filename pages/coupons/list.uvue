@@ -2,10 +2,11 @@
     <view class="account-page account-secondary coupon-page">
         <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
         <view class="account-nav vapor-account-secondary--account-nav">
-            <!-- 使用原生按钮承载纯图形返回入口，并提供读屏可识别的名称。 -->
-            <button class="account-back vapor-account-secondary--account-back" aria-label="返回" @click="goBack">
+            <!-- uni-app x 的 button 不可包含图标子节点，因此用空按钮覆盖图标触控区并保留读屏名称。 -->
+            <view class="account-back vapor-account-secondary--account-back">
                 <view class="account-back-icon"></view>
-            </button>
+                <button class="account-back-hitbox" aria-label="返回" @click="goBack"></button>
+            </view>
             <text class="account-title">优惠券</text>
         </view>
         <view class="coupon-banner">
@@ -265,8 +266,7 @@ onUnload(() => {
 @import '../../styles/account.css';
 @import '../../styles/order.css';
 
-.coupon-page { min-height: 100%; }
-/* 券面金额与规则分栏呈现，沿用账户二级页暖色系并让领取状态保持清晰。 */
+/* 券面金额与规则分栏沿用账户页暖色系；用虚线分界替代 uni-app x 不支持的渐变伪元素。 */
 .coupon-banner { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin: 0 16px 12px 16px; padding: 16px; border-radius: 20px; background-color: #6D3426; }
 .coupon-banner-copy { display: flex; flex: 1; flex-direction: column; min-width: 0; }
 .coupon-kicker { font-size: 11px; line-height: 18px; color: #F3CDB9; }
@@ -281,8 +281,7 @@ onUnload(() => {
 .coupon-tab-active { background-color: #FFFFFF; font-weight: bold; color: #C2410C; }
 .coupon-scroll { min-height: 0; }
 .coupon-card { display: flex; flex-direction: row; min-height: 166px; margin-bottom: 10px; overflow: hidden; border: 1px solid #F1E5DA; border-radius: 18px; background-color: #FFFFFF; }
-.coupon-card-face { position: relative; display: flex; flex-shrink: 0; width: 92px; flex-direction: column; align-items: center; justify-content: center; padding: 12px 8px; background-color: #FCE8D9; }
-.coupon-card-face::after { position: absolute; top: 0; right: -6px; bottom: 0; width: 12px; border-radius: 50%; background: repeating-linear-gradient(to bottom, #FDF6F0 0, #FDF6F0 5px, transparent 5px, transparent 10px); content: ''; }
+.coupon-card-face { display: flex; flex-shrink: 0; width: 92px; flex-direction: column; align-items: center; justify-content: center; padding: 12px 8px; border-right: 1px dashed #D8B6A2; background-color: #FCE8D9; }
 .coupon-face-label { font-size: 11px; line-height: 17px; color: #8D3C27; }
 .coupon-face-currency { margin-top: 7px; font-size: 13px; line-height: 16px; font-weight: bold; color: #C2410C; }
 .coupon-face-amount { font-size: 23px; line-height: 28px; font-weight: bold; color: #C2410C; }

@@ -2,7 +2,9 @@
 .account-scroll { flex: 1; min-height: 0; width: 100%; }
 .account-status { background-color: #FFFFFF; }
 .account-nav { display: flex; flex-direction: row; align-items: center; padding: 4px 16px 6px 8px; background-color: #FFFFFF; }
-.account-back { display: flex; width: 44px; height: 44px; margin: 0; padding: 0; border-width: 0; border-radius: 12px; background-color: #FDF6F0; align-items: center; justify-content: center; }
+.account-back { position: relative; display: flex; width: 44px; height: 44px; margin: 0; padding: 0; border-width: 0; border-radius: 12px; background-color: #FDF6F0; align-items: center; justify-content: center; }
+/* 空按钮铺满图标容器，为读屏与键盘保留原生按钮语义和完整触控区域。 */
+.account-back-hitbox { position: absolute; top: 0; right: 0; bottom: 0; left: 0; margin: 0; padding: 0; border-width: 0; border-radius: 14px; background-color: transparent; }
 .account-back-icon { width: 10px; height: 10px; margin-left: 4px; border-left-width: 2px; border-left-style: solid; border-left-color: #211C18; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #211C18; transform: rotate(45deg); }
 .account-title { margin-left: 12px; font-size: 18px; line-height: 24px; font-weight: bold; color: #211C18; }
 .account-content { padding: 12px 16px 20px 16px; }
