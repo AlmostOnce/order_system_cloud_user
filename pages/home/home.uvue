@@ -292,7 +292,8 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     // 餐厅选择面板是否已进入终态，控制其滑入滑出过渡。
     pickerReady: false })
 
-const { refreshing, currentRefreshTime, statusBarHeight, greeting, roleCode, recommendationItems, recommendationLoading, recommendationError, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, heroShapesEntered, listReady, pickerVisible, pickerReady } = toRefs(state)
+// 首页模板直接读取推荐模式，因此把它与其它推荐状态一并暴露为响应式引用，避免运行时找不到变量。
+const { refreshing, currentRefreshTime, statusBarHeight, greeting, roleCode, recommendationItems, recommendationLoading, recommendationError, recommendationMode, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, heroShapesEntered, listReady, pickerVisible, pickerReady } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.loading || state.pickerVisible || state.roleCode != 'CUSTOMER')
