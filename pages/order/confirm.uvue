@@ -2,10 +2,8 @@
     <view class="account-page account-secondary">
         <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
         <view class="account-nav vapor-account-secondary--account-nav">
-            <!-- uni-app x 的 button 不可包含图标子节点，因此用空按钮覆盖图标触控区并保留读屏名称。 -->
-            <view class="account-back vapor-account-secondary--account-back">
+            <view class="account-back vapor-account-secondary--account-back" @click="goBack">
                 <view class="account-back-icon"></view>
-                <button class="account-back-hitbox" aria-label="返回" @click="goBack"></button>
             </view>
             <text class="account-title">确认订单</text></view>
         <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!pending && !submitting && createdOrderId == 0 && !couponLoading && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
@@ -24,21 +22,17 @@
             </view>
             <view v-if="items.length > 0" class="account-card vapor-account-secondary--account-card coupon-checkout-card">
                 <view class="coupon-checkout-heading"><text class="account-heading">优惠券</text><button class="account-link account-link-text button-text button-text-44" :disabled="pending || submitting || loading" @click="toggleCouponPicker">{{ couponPickerOpen ? '收起' : (userCouponId > 0 ? '更换' : '选择') }}</button></view>
-                <text v-if="userCouponId == 0" class="account-note coupon-checkout-summary">选择一张可用优惠券，提交时由服务端核验本单是否满足条件。</text>
-                <view v-else class="coupon-selected-summary">
+                <view v-if="userCouponId > 0" class="coupon-selected-summary">
                     <text class="coupon-selected-title">{{ selectedCouponTitle.length > 0 ? selectedCouponTitle : '已选择优惠券' }}</text>
                     <text v-if="selectedCouponDiscount > 0" class="coupon-selected-detail">面额 ¥{{ selectedCouponDiscount.toFixed(2) }} · 满 ¥{{ selectedCouponMinSpend.toFixed(2) }} 可用</text>
-                    <text class="coupon-selected-detail">提交时重新核验适用范围和消费门槛，订单返回后显示最终优惠与实付金额。</text>
-                    <button class="account-link account-muted button-text button-text-44 coupon-clear" :disabled="pending || submitting" @click="clearCoupon">不使用优惠券</button>
+                    <button class="coupon-clear account-link account-muted button-text button-text-44" :disabled="pending || submitting" @click="clearCoupon">不使用优惠券</button>
                 </view>
                 <view v-if="couponPickerOpen" class="coupon-picker">
-                    <text class="account-note coupon-picker-note">可用券会全部列出；选择只表示提交使用意向，最终适用性和优惠金额由服务端确认。</text>
                     <text v-if="couponLoading" class="account-muted">正在获取可用优惠券…</text>
-                    <!-- 使用空按钮覆盖整张选项卡；uni-app x 不允许 button 包含这些说明文本节点。 -->
-                    <view v-for="coupon in availableCoupons" :key="coupon.userCouponId" class="coupon-option" :class="userCouponId == coupon.userCouponId ? 'coupon-option-selected' : ''">
+                    <!-- 整张选项卡可点选，不再额外铺一层空按钮；原生 button 不承载这些说明文本节点。 -->
+                    <view v-for="coupon in availableCoupons" :key="coupon.userCouponId" class="coupon-option" :class="userCouponId == coupon.userCouponId ? 'coupon-option-selected' : ''" @click="selectCoupon(coupon)">
                         <view class="coupon-option-copy"><text class="coupon-option-title">{{ coupon.title }}</text><text class="coupon-option-detail">¥{{ coupon.discountAmount.toFixed(2) }} · 满 ¥{{ coupon.minSpend.toFixed(2) }} 可用</text><text class="coupon-option-detail">{{ couponScopeLabel(coupon) }}</text></view>
                         <text class="coupon-option-action">{{ userCouponId == coupon.userCouponId ? '已选择' : '选择' }}</text>
-                        <button class="coupon-option-hitbox" :aria-label="'优惠券：' + coupon.title + (userCouponId == coupon.userCouponId ? '，已选择' : '，点击选择')" @click="selectCoupon(coupon)"></button>
                     </view>
                     <text v-if="couponError.length > 0" class="account-error">{{ couponError }}</text>
                     <text v-if="couponError.length > 0" class="account-note">回到列表顶部下拉可重试优惠券查询。</text>
@@ -445,13 +439,12 @@ onUnload(() => {
     .coupon-picker-note { padding-top: 0; padding-bottom: 8px; }
     .coupon-option { position: relative; display: flex; flex-direction: row; width: 100%; align-items: center; justify-content: space-between; margin-top: 7px; padding: 10px; border: 1px solid #F1E5DA; border-radius: 12px; background-color: #FFFCF9; text-align: left; }
     .coupon-option-selected { border-color: #E4572E; background-color: #FFF4EB; }
-    .coupon-option-hitbox { position: absolute; top: 0; right: 0; bottom: 0; left: 0; margin: 0; padding: 0; border-width: 0; border-radius: 12px; background-color: transparent; }
     .coupon-option-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
     .coupon-option-title { font-size: 13px; line-height: 19px; font-weight: bold; color: #211C18; }
     .coupon-option-detail { margin-top: 3px; font-size: 11px; line-height: 16px; color: #7A6C60; }
     .coupon-option-action { flex-shrink: 0; margin-left: 8px; font-size: 12px; line-height: 20px; font-weight: bold; color: #C2410C; }
     .coupon-empty { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 4px; }
     /* #ifdef WEB */
-    .coupon-option-hitbox:focus-visible { outline: 2px solid #8D3C27; outline-offset: 2px; }
+    .coupon-option { cursor: pointer; }
     /* #endif */
 </style>

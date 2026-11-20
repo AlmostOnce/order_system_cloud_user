@@ -15,7 +15,6 @@
         </view>
         <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @scrolltolower="loadMore" @scroll="listScrolled" :lower-threshold="80" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
 <view class="account-content vapor-account-secondary--account-content">
-            <view class="account-banner"><view class="banner-copy"><text class="banner-kicker">校园食堂 · 用餐记录</text><text class="banner-title">这一餐，进行到哪了</text><text class="banner-note">查看订单进度，继续支付或到窗口取餐。</text></view></view>
                 <view v-if="pendingWindowId > 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">有一笔提交结果待确认</text><text class="account-note">继续确认原订单，避免重复下单。</text>
                     <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="resume">继续确认</button>
                 </view>
