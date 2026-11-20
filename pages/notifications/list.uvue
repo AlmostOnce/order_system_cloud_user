@@ -1,9 +1,13 @@
 <template>
-    <view class="account-page conversation-page">
-        <view class="account-status conversation-status" :style="'height:' + statusBarHeight + 'px'"></view>
-        <view class="account-nav conversation-nav"><text class="conversation-page-title">消息</text></view>
-        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#F5F5F5" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMoreChats">
-            <view class="conversation-list">
+    <view class="account-page account-secondary conversation-page">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <view class="account-back vapor-account-secondary--account-back" @click="goBack">
+                <view class="account-back-icon"></view>
+            </view>
+            <text class="account-title">消息通知</text></view>
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMoreChats">
+            <view class="account-content conversation-list">
                 <view class="conversation-entry" hover-class="conversation-entry-pressed" @click="openOrders">
                     <image class="conversation-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image>
                     <view class="conversation-copy">
@@ -15,7 +19,6 @@
                         <view v-if="unreadCount > 0" class="conversation-badge"><text class="conversation-badge-text">{{ unreadCount > 99 ? '99+' : unreadCount }}</text></view>
                     </view>
                 </view>
-                <view class="conversation-divider"></view>
                 <view v-for="chat in chats" :key="chat.conversationUuid" class="conversation-entry" hover-class="conversation-entry-pressed" @click="openChat(chat.conversationUuid)">
                     <business-image class="conversation-avatar" src="" kind="window" :preview="false"></business-image>
                     <view class="conversation-copy"><text class="conversation-name" :max-lines="1">{{ chat.windowName }}</text><text class="conversation-preview" :max-lines="1">{{ chat.preview.length > 0 ? chat.preview : '暂无消息' }}</text><text class="conversation-time" :max-lines="1">订单 {{ chat.orderNo }}</text></view>
@@ -41,7 +44,7 @@ import { NotificationItem, fetchNotifications, parseNotificationPage } from '../
 import { notificationState, startNotificationSession, subscribeNotifications, unsubscribeNotifications, subscribeChat, unsubscribeChat, refreshNotificationCount } from '../../store/notifications.uts'
 import { currentUser } from '../../store/auth.uts'
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
-import { accountDate } from '../../common/account.uts'
+import { accountDate, backToAccount } from '../../common/account.uts'
 
 const state = reactive({ chats: [] as Array<ChatConversation>, chatCursor: '', chatMore: false, chatLoading: false, chatError: '', statusBarHeight: 0, userUuid: '', version: 0, loading: false, loaded: false, refreshing: false, currentRefreshTime: '', errorText: '', latest: null as NotificationItem | null })
 const { chats, chatLoading, chatError, statusBarHeight, loading, refreshing, currentRefreshTime, errorText, latest } = toRefs(state)
@@ -103,6 +106,8 @@ function chatsChanged(): void { if (visible) loadChats(true) }
 function openChat(uuid: string): void { uni.navigateTo({ url: '/pages/notifications/chat?conversationUuid=' + uuid }) }
 function changed(): void { if (visible) load() }
 function openOrders(): void { uni.navigateTo({ url: '/pages/notifications/orders' }) }
+/** 返回上一页；消息通知现在作为「我的」下的二级页，必须有可见返回入口。 */
+function goBack(): void { backToAccount() }
 onPageShow(() => {
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight
     const user = currentUser()
@@ -115,26 +120,22 @@ onUnload(() => { visible = false; state.version++; unsubscribeNotifications(chan
 </script>
 <style>
 @import '../../styles/account.css';
-.conversation-page { background-color: #FFFFFF; }
-.conversation-status { background-color: #F5F5F5; }
-.conversation-nav { height: 52px; padding: 0 16px; background-color: #F5F5F5; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #EAEAEA; }
-.conversation-page-title { color: #202020; font-size: 20px; line-height: 28px; font-weight: bold; }
+.conversation-page { background-color: #FDF6F0; }
+/* 消息通知与其它账户二级页共用骨架：白卡片、16px 圆角、卡片之间留 10px 呼吸。 */
 .conversation-list { padding-bottom: 24px; }
-.conversation-entry { flex-direction: row; align-items: center; width: 100%; min-height: 80px; padding: 14px 16px; background-color: #FFFFFF; }
-.conversation-entry-pressed { background-color: #F2F2F2; }
-.conversation-avatar { width: 50px; height: 50px; border-radius: 10px; flex-shrink: 0; margin-right: 12px; }
+.conversation-entry { flex-direction: row; align-items: center; width: 100%; min-height: 76px; margin-bottom: 10px; padding: 14px; border-radius: 16px; background-color: #FFFFFF; }
+.conversation-entry-pressed { background-color: #F8EFE8; }
+.conversation-avatar { width: 46px; height: 46px; border-radius: 14px; flex-shrink: 0; margin-right: 12px; }
 .conversation-copy { flex: 1; min-width: 0; }
-.conversation-name { color: #202020; font-size: 16px; line-height: 23px; }
-.conversation-preview { color: #888888; font-size: 13px; line-height: 20px; margin-top: 4px; }
-.conversation-meta { width: 72px; height: 47px; flex-shrink: 0; margin-left: 8px; align-items: flex-end; justify-content: space-between; }
-.conversation-time { color: #999999; font-size: 10px; line-height: 16px; }
-.conversation-badge { min-width: 18px; height: 18px; padding: 0 5px; align-items: center; justify-content: center; border-radius: 10px; background-color: #EF4B4B; }
+.conversation-name { color: #211C18; font-size: 15px; line-height: 22px; font-weight: bold; }
+.conversation-preview { color: #7A6C60; font-size: 12px; line-height: 18px; margin-top: 3px; }
+.conversation-meta { width: 72px; height: 44px; flex-shrink: 0; margin-left: 8px; align-items: flex-end; justify-content: space-between; }
+.conversation-time { color: #A2968B; font-size: 10px; line-height: 16px; }
+.conversation-badge { min-width: 18px; height: 18px; padding: 0 5px; align-items: center; justify-content: center; border-radius: 10px; background-color: #C2410C; }
 .conversation-badge-text { color: #FFFFFF; font-size: 10px; line-height: 18px; }
-.conversation-divider { height: 1px; margin-left: 78px; background-color: #EEEEEE; }
-.conversation-error { padding: 14px 16px; color: #B73920; font-size: 12px; line-height: 20px; }
+.conversation-error { padding: 14px; color: #B73920; font-size: 12px; line-height: 20px; }
 /* #ifdef WEB */
-.account-page .conversation-nav, .account-page .conversation-entry { flex-direction: row; }
-.account-page .conversation-nav { height: 52px; padding: 0 16px; min-height: 52px; }
+.account-page .conversation-entry { flex-direction: row; }
 .account-page .conversation-name, .account-page .conversation-preview { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 /* #endif */
 </style>

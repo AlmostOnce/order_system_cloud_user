@@ -8,22 +8,13 @@
             </view>
             <text class="account-title">我的收藏</text>
         </view>
-        <view class="favorite-banner">
-            <view class="favorite-banner-copy">
-                <text class="favorite-kicker">收藏清单</text>
-                <text class="favorite-banner-title">喜欢的店铺与菜品</text>
-                <text class="favorite-banner-note">随时回到熟悉的味道</text>
-            </view>
-            <view class="favorite-banner-mark">
-                <image class="favorite-banner-bookmark" src="/static/favorites/bookmark-filled.svg" mode="aspectFit"></image>
-            </view>
-        </view>
+        <!-- 二级页直接进入分类与列表：不放大块装饰引导，移动端首屏留给收藏内容。 -->
         <view class="favorite-tabs vapor-account-secondary--favorite-tabs">
-            <view class="favorite-tab vapor-account-secondary--favorite-tab" :class="targetType == 'WINDOW' ? 'favorite-tab-on vapor-account-secondary--favorite-tab-on' : ''" @click="selectType('WINDOW')">
-                <text class="favorite-tab-text" :class="targetType == 'WINDOW' ? 'favorite-tab-text-on vapor-account-secondary--favorite-tab-text-on' : ''">店铺</text>
+            <view class="favorite-tab vapor-account-secondary--favorite-tab" :class="targetType == 'WINDOW' ? 'favorite-tab-on vapor-account-secondary--favorite-tab-on' : 'favorite-tab-off'" @click="selectType('WINDOW')">
+                <text class="favorite-tab-text" :class="targetType == 'WINDOW' ? 'favorite-tab-text-on vapor-account-secondary--favorite-tab-text-on' : 'favorite-tab-text-off'">店铺</text>
             </view>
-            <view class="favorite-tab favorite-tab-last vapor-account-secondary--favorite-tab" :class="targetType == 'PRODUCT' ? 'favorite-tab-on vapor-account-secondary--favorite-tab-on' : ''" @click="selectType('PRODUCT')">
-                <text class="favorite-tab-text" :class="targetType == 'PRODUCT' ? 'favorite-tab-text-on vapor-account-secondary--favorite-tab-text-on' : ''">菜品</text>
+            <view class="favorite-tab vapor-account-secondary--favorite-tab" :class="targetType == 'PRODUCT' ? 'favorite-tab-on vapor-account-secondary--favorite-tab-on' : 'favorite-tab-off'" @click="selectType('PRODUCT')">
+                <text class="favorite-tab-text" :class="targetType == 'PRODUCT' ? 'favorite-tab-text-on vapor-account-secondary--favorite-tab-text-on' : 'favorite-tab-text-off'">菜品</text>
             </view>
         </view>
         <scroll-view class="account-scroll favorite-scroll" direction="vertical"
@@ -35,7 +26,6 @@
             @refresherrefresh="refreshPage"
             @scrolltolower="loadMore">
             <view class="account-content vapor-account-secondary--account-content favorite-content">
-                <text class="favorite-intro">{{ targetType == 'WINDOW' ? '收藏的店铺' : '收藏的菜品' }}</text>
                 <view v-if="loading && favoriteItems.length == 0" class="account-card vapor-account-secondary--account-card favorite-state">
                     <text class="account-muted">正在加载收藏…</text>
                 </view>

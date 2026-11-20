@@ -6,23 +6,20 @@
                 <view class="account-back-icon"></view>
             </view>
             <text class="account-title">{{ recordType == 'RECHARGE' ? '充值记录' : (recordType == 'PAY' ? '消费记录' : '余额明细') }}</text></view>
-        <view class="record-tabs vapor-account-secondary--record-tabs">
-            <button class="record-tab vapor-account-secondary--record-tab record-tab-text vapor-account-secondary--record-tab-text button-text button-text-40" :class="[recordType == '' ? 'record-tab-on vapor-account-secondary--record-tab-on' : '', (recordType == '' ? 'vapor-account-secondary--record-tab-on--record-tab-text' : '')]" :disabled="loading" @click="selectType('')">全部</button>
-            <button class="record-tab vapor-account-secondary--record-tab record-tab-text vapor-account-secondary--record-tab-text button-text button-text-40" :class="[recordType == 'RECHARGE' ? 'record-tab-on vapor-account-secondary--record-tab-on' : '', (recordType == 'RECHARGE' ? 'vapor-account-secondary--record-tab-on--record-tab-text' : '')]" :disabled="loading" @click="selectType('RECHARGE')">充值</button>
-            <button class="record-tab vapor-account-secondary--record-tab record-tab-text vapor-account-secondary--record-tab-text button-text button-text-40" :class="[recordType == 'PAY' ? 'record-tab-on vapor-account-secondary--record-tab-on' : '', (recordType == 'PAY' ? 'vapor-account-secondary--record-tab-on--record-tab-text' : '')]" :disabled="loading" @click="selectType('PAY')">消费</button>
+        <!-- 分类筛选统一为分段控件：白色选中块 + 橙色加粗文字，和券页、收藏页一致。 -->
+        <view class="record-tabs">
+            <view class="record-tab" :class="recordType == '' ? 'record-tab-on' : 'record-tab-off'" @click="selectType('')">
+                <text class="record-tab-text" :class="recordType == '' ? 'record-tab-text-on' : 'record-tab-text-off'">全部</text>
+            </view>
+            <view class="record-tab" :class="recordType == 'RECHARGE' ? 'record-tab-on' : 'record-tab-off'" @click="selectType('RECHARGE')">
+                <text class="record-tab-text" :class="recordType == 'RECHARGE' ? 'record-tab-text-on' : 'record-tab-text-off'">充值</text>
+            </view>
+            <view class="record-tab" :class="recordType == 'PAY' ? 'record-tab-on' : 'record-tab-off'" @click="selectType('PAY')">
+                <text class="record-tab-text" :class="recordType == 'PAY' ? 'record-tab-text-on' : 'record-tab-text-off'">消费</text>
+            </view>
         </view>
         <scroll-view class="account-scroll" direction="vertical" @scrolltolower="loadMore" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
 <view class="account-content vapor-account-secondary--account-content">
-            <view class="account-banner">
-                <view class="banner-copy">
-                    <text class="banner-kicker">我的账单</text>
-                    <text class="banner-title">每一笔，都有记录</text>
-                    <text class="banner-note">充值、消费与退款，按时间清晰呈现。</text>
-                </view>
-                    <view class="banner-symbol symbol-ledger">
-                        <view class="symbol-part-one vapor-symbol-ledger--symbol-part-one"></view><view class="symbol-part-two vapor-symbol-ledger--symbol-part-two"></view><view class="symbol-part-three vapor-symbol-ledger--symbol-part-three"></view></view>
-            </view>
-			<text class="records-intro">仅展示已入账的余额变动，最新记录在前</text>
 			<view v-for="item in records" :key="item.recordId" class="record-card vapor-account-secondary--record-card">
 				<view class="record-main"><view class="record-type-mark" :class="item.changeType == 'PAY' ? 'record-mark-pay' : ''"><text :class="(item.changeType == 'PAY' ? 'vapor-record-mark-pay--record-mark-text' : '')" class="record-mark-text">{{ item.changeType == 'PAY' ? '支' : (item.changeType == 'REFUND' ? '退' : '充') }}</text></view><text class="record-name">{{ item.title }}</text><text class="record-amount" :class="item.changeType == 'PAY' ? 'record-expense' : 'record-income'">{{ item.changeType == 'PAY' ? '−' : '+' }}¥{{ item.amountText }}</text></view>
 				<text class="record-date">{{ item.createdAt }}</text>
@@ -185,11 +182,13 @@ onPageShow(() => {
 
 <style>
 	@import '../../styles/account.css';
-	.record-tabs { flex-direction: row; padding: 6px 16px 8px 16px; background-color: #FFFFFF; }
-	.record-tab { display: flex; flex: 1; height: 40px; margin: 0 6px 0 0; padding: 0; border-width: 0; border-radius: 10px; background-color: #F7F2EE; align-items: center; justify-content: center; }
-	.record-tab-on { background-color: #FCE4D8; }
-	.record-tab-text { font-size: 14px; color: #C2410C; }
-	.records-intro { margin-bottom: 14px; font-size: 11px; line-height: 18px; color: #7A6C60; }
+	.record-tabs { display: flex; flex-direction: row; margin: 8px 16px 2px 16px; padding: 4px; border-radius: 14px; background-color: #F3E8DE; }
+	.record-tab { display: flex; flex: 1; height: 40px; margin: 0; padding: 0; border-width: 0; border-radius: 11px; background-color: transparent; align-items: center; justify-content: center; }
+	.record-tab-on { background-color: #FFFFFF; }
+	.record-tab-off { background-color: transparent; }
+	.record-tab-text { font-size: 13px; line-height: 20px; }
+	.record-tab-text-on { font-weight: bold; color: #C2410C; }
+	.record-tab-text-off { color: #7A6C60; }
 	.record-card { margin-bottom: 10px; padding: 14px; border-radius: 16px; background-color: #FFFFFF; }
 	.record-main { flex-direction: row; align-items: center; justify-content: space-between; }
 	.record-name { flex: 1; font-size: 15px; line-height: 24px; font-weight: bold; color: #211C18; }
@@ -204,7 +203,7 @@ onPageShow(() => {
 	.records-end { padding: 12px; font-size: 12px; text-align: center; color: #A2968B; }
 
 	/* #ifdef WEB */
-	.account-page .record-tabs { flex-direction: row;  padding: 6px 16px 8px 16px; }
+	.account-page .record-tabs { flex-direction: row;  margin: 8px 16px 2px 16px;  padding: 4px; }
 	.account-page .record-main { flex-direction: row; }
 	/* #endif */
 </style>

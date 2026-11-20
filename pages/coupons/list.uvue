@@ -2,24 +2,34 @@
     <view class="account-page account-secondary coupon-page">
         <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
         <view class="account-nav vapor-account-secondary--account-nav">
-            <!-- uni-app x 的 button 不可包含图标子节点，因此用空按钮覆盖图标触控区并保留读屏名称。 -->
-            <view class="account-back vapor-account-secondary--account-back">
+            <view class="account-back vapor-account-secondary--account-back" @click="goBack">
                 <view class="account-back-icon"></view>
-                <button class="account-back-hitbox" aria-label="返回" @click="goBack"></button>
             </view>
             <text class="account-title">优惠券</text>
         </view>
+        <!-- 引导条改为当期数据摘要：券数量与最高立减，避免只有一句标语显得空。 -->
         <view class="coupon-banner">
-            <view class="coupon-banner-copy">
-                <text class="coupon-kicker">校园食堂 · 用餐优惠</text>
-                <text class="coupon-banner-title">给下一餐添一点实惠</text>
-                <text class="coupon-banner-note">领券后可在结算时选择，是否适用由服务端下单校验。</text>
+            <view class="coupon-banner-main">
+                <view class="coupon-banner-count-row">
+                    <text class="coupon-banner-count">{{ bannerCountText }}</text>
+                    <text class="coupon-banner-count-unit">{{ activeTab == 'CLAIMABLE' ? '张可领取' : '张可用' }}</text>
+                </view>
+                <text class="coupon-banner-caption">给下一餐添一点实惠</text>
+            </view>
+            <view class="coupon-banner-summary">
+                <text class="coupon-banner-summary-label">最高立减</text>
+                <text class="coupon-banner-summary-value">{{ bannerDiscountText }}</text>
             </view>
             <view class="coupon-banner-mark"><view class="coupon-banner-ticket"><view class="coupon-banner-cut"></view></view></view>
         </view>
+        <!-- 原生端 button 不保证传递动态 class，标签改用 view/text 并分别绑定背景与文字状态类。 -->
         <view class="coupon-tabs">
-            <button class="coupon-tab button-text" :class="activeTab == 'CLAIMABLE' ? 'coupon-tab-active' : ''" @click="selectTab('CLAIMABLE')">可领取</button>
-            <button class="coupon-tab button-text" :class="activeTab == 'MINE' ? 'coupon-tab-active' : ''" @click="selectTab('MINE')">我的券</button>
+            <view class="coupon-tab" :class="activeTab == 'CLAIMABLE' ? 'coupon-tab-selected' : 'coupon-tab-idle'" @click="selectTab('CLAIMABLE')">
+                <text class="coupon-tab-text" :class="activeTab == 'CLAIMABLE' ? 'coupon-tab-text-selected' : 'coupon-tab-text-idle'">可领取</text>
+            </view>
+            <view class="coupon-tab" :class="activeTab == 'MINE' ? 'coupon-tab-selected' : 'coupon-tab-idle'" @click="selectTab('MINE')">
+                <text class="coupon-tab-text" :class="activeTab == 'MINE' ? 'coupon-tab-text-selected' : 'coupon-tab-text-idle'">我的券</text>
+            </view>
         </view>
         <scroll-view class="account-scroll coupon-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
             <view class="account-content vapor-account-secondary--account-content">
@@ -29,8 +39,11 @@
                 <view v-for="coupon in coupons" :key="activeTab == 'MINE' ? coupon.userCouponId : coupon.templateId" class="coupon-card">
                     <view class="coupon-card-face">
                         <text class="coupon-face-label">满减券</text>
-                        <text class="coupon-face-currency">¥</text>
-                        <text class="coupon-face-amount">{{ coupon.discountAmount.toFixed(2) }}</text>
+                        <!-- 币种符号与面额同行显示，避免 ¥ 单独占一行造成错位。 -->
+                        <view class="coupon-face-value">
+                            <text class="coupon-face-currency">¥</text>
+                            <text class="coupon-face-amount">{{ coupon.discountAmount.toFixed(2) }}</text>
+                        </view>
                         <text class="coupon-face-unit">立减</text>
                     </view>
                     <view class="coupon-card-detail">
@@ -40,13 +53,12 @@
                         </view>
                         <text class="coupon-condition">满 ¥{{ coupon.minSpend.toFixed(2) }} 可用</text>
                         <text class="coupon-meta">{{ scopeLabel(coupon) }}</text>
-                        <text class="coupon-meta">使用期限：{{ formatDate(coupon.validFrom) }} 至 {{ formatDate(coupon.validUntil) }}</text>
-                        <text v-if="activeTab == 'CLAIMABLE'" class="coupon-meta">领取时间：{{ formatDate(coupon.claimStartAt) }} 至 {{ formatDate(coupon.claimEndAt) }}</text>
+                        <text class="coupon-meta">有效期：{{ formatRange(coupon.validFrom, coupon.validUntil) }}</text>
+                        <text v-if="activeTab == 'CLAIMABLE'" class="coupon-meta">领取期：{{ formatRange(coupon.claimStartAt, coupon.claimEndAt) }}</text>
                         <view v-if="activeTab == 'CLAIMABLE'" class="coupon-card-footer">
                             <text class="coupon-quantity">剩余 {{ coupon.remainingQuantity }} 张</text>
-                            <button class="coupon-claim button-text" :disabled="claimingTemplateId > 0 || loading || coupon.remainingQuantity <= 0" :class="claimingTemplateId == coupon.templateId ? 'coupon-claim-busy' : (coupon.remainingQuantity <= 0 ? 'coupon-claim-disabled' : '')" @click="claim(coupon)">{{ claimingTemplateId == coupon.templateId ? '领取中…' : (coupon.remainingQuantity <= 0 ? '已领完' : '立即领取') }}</button>
+                            <button class="coupon-claim button-text button-text-44" :disabled="claimingTemplateId > 0 || loading || coupon.remainingQuantity <= 0" :class="claimingTemplateId == coupon.templateId ? 'coupon-claim-busy' : (coupon.remainingQuantity <= 0 ? 'coupon-claim-disabled' : '')" @click="claim(coupon)">{{ claimingTemplateId == coupon.templateId ? '领取中…' : (coupon.remainingQuantity <= 0 ? '已领完' : '立即领取') }}</button>
                         </view>
-                        <text v-else class="coupon-meta coupon-use-hint">结算时选择；订单提交时会重新核验适用范围和门槛。</text>
                     </view>
                 </view>
                 <view v-if="errorText.length > 0" class="account-card vapor-account-secondary--account-card coupon-state-card">
@@ -67,7 +79,7 @@
 </template>
 
 <script setup lang="uts">
-import { reactive, toRefs } from 'vue'
+import { reactive, toRefs, computed } from 'vue'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 import { backToAccount } from '../../common/account.uts'
@@ -102,6 +114,21 @@ const state = reactive({
 })
 const { statusBarHeight, activeTab, coupons, loading, refreshing, currentRefreshTime, errorText, claimingTemplateId } = toRefs(state)
 let requestVersion = 0
+
+/** 引导条券数量文案：加载中或失败且无数据时用占位符，避免把未知状态显示成 0 张。 */
+const bannerCountText = computed((): string => {
+    if (coupons.value.length == 0 && (loading.value || errorText.value.length > 0)) return '—'
+    return coupons.value.length.toString()
+})
+
+/** 引导条最高立减金额：只统计当前标签返回的券，没有数据时不编造优惠。 */
+const bannerDiscountText = computed((): string => {
+    let best = 0
+    for (let i = 0; i < coupons.value.length; i++) {
+        if (coupons.value[i].discountAmount > best) best = coupons.value[i].discountAmount
+    }
+    return best > 0 ? '¥' + best.toFixed(2) : '—'
+})
 
 /** 离开后递增版本，避免旧请求在页面重新进入或切换账号后覆盖当前券列表。 */
 function isCurrentRequest(version: number, owner: string): boolean {
@@ -191,10 +218,18 @@ function scopeLabel(coupon: CustomerCoupon): string {
     return '适用窗口 ID：' + ids
 }
 
-/** ISO 时间使用项目现有的本地展示方式，不在客户端修改券的有效时间边界。 */
+/** 券卡只展示到日期，保证时间行在手机上保持单行；精确到分钟的边界仍由服务端判定。 */
 function formatDate(value: string): string {
     if (value.length == 0) return '时间暂不可用'
-    return value.replace('T', ' ').substring(0, 16)
+    return value.replace('T', ' ').substring(0, 10)
+}
+
+/** 起止同一天时只显示一个日期，避免半年期券重复展示同一个日期。 */
+function formatRange(start: string, end: string): string {
+    const from = formatDate(start)
+    const to = formatDate(end)
+    if (from == to) return from
+    return from + ' 至 ' + to
 }
 
 function refreshPage() {
@@ -266,37 +301,47 @@ onUnload(() => {
 @import '../../styles/account.css';
 @import '../../styles/order.css';
 
-/* 券面金额与规则分栏沿用账户页暖色系；用虚线分界替代 uni-app x 不支持的渐变伪元素。 */
-.coupon-banner { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin: 0 16px 12px 16px; padding: 16px; border-radius: 20px; background-color: #6D3426; }
-.coupon-banner-copy { display: flex; flex: 1; flex-direction: column; min-width: 0; }
-.coupon-kicker { font-size: 11px; line-height: 18px; color: #F3CDB9; }
-.coupon-banner-title { margin-top: 4px; font-size: 20px; line-height: 28px; font-weight: bold; color: #FFFFFF; }
-.coupon-banner-note { margin-top: 6px; max-width: 260px; font-size: 12px; line-height: 18px; color: #F3CDB9; }
-.coupon-banner-mark { display: flex; flex-shrink: 0; width: 52px; height: 52px; margin-left: 10px; align-items: center; justify-content: center; border-radius: 16px; background-color: #8F4B35; }
-.coupon-banner-ticket { position: relative; width: 27px; height: 20px; border: 2px solid #FFE2CC; border-radius: 4px; }
-.coupon-banner-cut { position: absolute; top: -1px; left: 12px; height: 18px; border-left: 1px dashed #FFE2CC; }
+/* 券页摘要条与账户页统一为白卡：浅色底 + 暖色描边，数字与金额用主色强调。 */
+.coupon-banner { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin: 0 16px 10px 16px; padding: 12px 14px; border: 1px solid #F1E5DA; border-radius: 16px; background-color: #FFFFFF; }
+.coupon-banner-main { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+.coupon-banner-count-row { display: flex; flex-direction: row; align-items: flex-end; }
+.coupon-banner-count { font-size: 26px; line-height: 30px; font-weight: bold; color: #C2410C; }
+.coupon-banner-count-unit { margin-left: 4px; margin-bottom: 3px; font-size: 12px; line-height: 16px; color: #7A6C60; }
+.coupon-banner-caption { margin-top: 2px; font-size: 11px; line-height: 16px; color: #7A6C60; }
+.coupon-banner-summary { display: flex; flex-shrink: 0; flex-direction: column; align-items: flex-end; margin-left: 10px; }
+.coupon-banner-summary-label { font-size: 11px; line-height: 16px; color: #7A6C60; }
+.coupon-banner-summary-value { margin-top: 2px; font-size: 17px; line-height: 22px; font-weight: bold; color: #C2410C; }
+.coupon-banner-mark { display: flex; flex-shrink: 0; width: 34px; height: 34px; margin-left: 12px; align-items: center; justify-content: center; border-radius: 10px; background-color: #FCE4D8; }
+.coupon-banner-ticket { position: relative; width: 18px; height: 13px; border: 2px solid #C2410C; border-radius: 3px; }
+.coupon-banner-cut { position: absolute; top: -1px; left: 7px; height: 11px; border-left: 1px dashed #C2410C; }
+/* 标签背景与文字分别使用互斥状态类；原生端 view/text 比 button 的动态 class 更可靠。 */
 .coupon-tabs { display: flex; flex-direction: row; margin: 0 16px 8px 16px; padding: 4px; border-radius: 14px; background-color: #F3E8DE; }
-/* 两个标签和领取操作保留账户页至少44px的触控高度，避免紧凑样式压缩可点区域。 */
-.coupon-tab { display: flex; flex: 1; height: 44px; margin: 0; padding: 0; align-items: center; justify-content: center; border: 0; border-radius: 11px; background-color: transparent; font-size: 13px; line-height: 20px; color: #7A6C60; }
-.coupon-tab-active { background-color: #FFFFFF; font-weight: bold; color: #C2410C; }
+.coupon-tab { display: flex; flex: 1; height: 44px; align-items: center; justify-content: center; border-radius: 11px; }
+.coupon-tab-selected { background-color: #FFFFFF; }
+.coupon-tab-idle { background-color: transparent; }
+.coupon-tab-text { font-size: 13px; line-height: 20px; }
+.coupon-tab-text-selected { color: #C2410C; font-weight: bold; }
+.coupon-tab-text-idle { color: #7A6C60; }
 .coupon-scroll { min-height: 0; }
-.coupon-card { display: flex; flex-direction: row; min-height: 166px; margin-bottom: 10px; overflow: hidden; border: 1px solid #F1E5DA; border-radius: 18px; background-color: #FFFFFF; }
-.coupon-card-face { display: flex; flex-shrink: 0; width: 92px; flex-direction: column; align-items: center; justify-content: center; padding: 12px 8px; border-right: 1px dashed #D8B6A2; background-color: #FCE8D9; }
-.coupon-face-label { font-size: 11px; line-height: 17px; color: #8D3C27; }
-.coupon-face-currency { margin-top: 7px; font-size: 13px; line-height: 16px; font-weight: bold; color: #C2410C; }
-.coupon-face-amount { font-size: 23px; line-height: 28px; font-weight: bold; color: #C2410C; }
+/* 券卡不设固定最小高度，由内容自然撑开，避免单张券占掉大半屏。 */
+.coupon-card { display: flex; flex-direction: row; margin-bottom: 10px; overflow: hidden; border: 1px solid #F1E5DA; border-radius: 16px; background-color: #FFFFFF; }
+.coupon-card-face { display: flex; flex-shrink: 0; width: 88px; flex-direction: column; align-items: center; justify-content: center; padding: 10px 6px; border-right: 1px dashed #D8B6A2; background-color: #FCE8D9; }
+.coupon-face-label { font-size: 11px; line-height: 16px; color: #8D3C27; }
+/* 币种符号与面额同行底对齐，修复 ¥ 独占一行造成的标签错位。 */
+.coupon-face-value { display: flex; flex-direction: row; align-items: flex-end; margin-top: 4px; }
+.coupon-face-currency { margin-bottom: 3px; font-size: 13px; line-height: 16px; font-weight: bold; color: #C2410C; }
+.coupon-face-amount { font-size: 22px; line-height: 26px; font-weight: bold; color: #C2410C; }
 .coupon-face-unit { margin-top: 2px; font-size: 11px; line-height: 16px; color: #8D3C27; }
-.coupon-card-detail { display: flex; flex: 1; min-width: 0; flex-direction: column; padding: 12px 12px 10px 16px; }
+.coupon-card-detail { display: flex; flex: 1; min-width: 0; flex-direction: column; padding: 10px 12px 10px 14px; }
 .coupon-card-heading { display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; }
 .coupon-title { flex: 1; min-width: 0; font-size: 14px; line-height: 20px; font-weight: bold; color: #211C18; }
 .coupon-status { flex-shrink: 0; margin-left: 6px; padding: 2px 7px; border-radius: 9px; background-color: #EEF5E9; font-size: 10px; line-height: 16px; color: #4A6A3B; }
-.coupon-condition { margin-top: 4px; font-size: 12px; line-height: 18px; font-weight: 600; color: #C2410C; }
-.coupon-meta { margin-top: 4px; font-size: 11px; line-height: 16px; color: #7A6C60; }
+.coupon-condition { margin-top: 3px; font-size: 12px; line-height: 18px; font-weight: 600; color: #C2410C; }
+.coupon-meta { margin-top: 3px; font-size: 11px; line-height: 16px; color: #7A6C60; }
 .coupon-card-footer { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 8px; }
 .coupon-quantity { font-size: 11px; line-height: 18px; color: #A2968B; }
 .coupon-claim { min-width: 88px; height: 44px; margin: 0; padding: 0 12px; border: 0; border-radius: 22px; background-color: #E4572E; font-size: 12px; line-height: 44px; font-weight: bold; color: #FFFFFF; }
 .coupon-claim-busy, .coupon-claim-disabled { background-color: #D9C8BB; color: #6B5B50; }
-.coupon-use-hint { margin-top: auto; padding-top: 8px; }
 .coupon-state-card { margin-top: 4px; }
 
 /* #ifdef WEB */

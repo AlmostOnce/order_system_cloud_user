@@ -3,8 +3,6 @@
 .account-status { background-color: #FFFFFF; }
 .account-nav { display: flex; flex-direction: row; align-items: center; padding: 4px 16px 6px 8px; background-color: #FFFFFF; }
 .account-back { position: relative; display: flex; width: 44px; height: 44px; margin: 0; padding: 0; border-width: 0; border-radius: 12px; background-color: #FDF6F0; align-items: center; justify-content: center; }
-/* 空按钮铺满图标容器，为读屏与键盘保留原生按钮语义和完整触控区域。 */
-.account-back-hitbox { position: absolute; top: 0; right: 0; bottom: 0; left: 0; margin: 0; padding: 0; border-width: 0; border-radius: 14px; background-color: transparent; }
 .account-back-icon { width: 10px; height: 10px; margin-left: 4px; border-left-width: 2px; border-left-style: solid; border-left-color: #211C18; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #211C18; transform: rotate(45deg); }
 .account-title { margin-left: 12px; font-size: 18px; line-height: 24px; font-weight: bold; color: #211C18; }
 .account-content { padding: 12px 16px 20px 16px; }
@@ -33,23 +31,16 @@
 
 /* 收藏列表复用账户二级页骨架；两个标签在页面内切换，不新增底部导航层级。 */
 .favorite-page { background-color: #FDF6F0; }
-.favorite-banner { display: flex; flex-direction: row; align-items: center; margin: 12px 16px 10px 16px; padding: 16px; border-radius: 18px; background-color: #31241F; }
-.favorite-banner-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
-.favorite-kicker { font-size: 11px; line-height: 17px; font-weight: bold; color: #FFD5B7; }
-.favorite-banner-title { margin-top: 4px; font-size: 18px; line-height: 25px; font-weight: bold; color: #FFFFFF; }
-.favorite-banner-note { margin-top: 4px; font-size: 12px; line-height: 18px; color: #E7CCBB; }
-.favorite-banner-mark { display: flex; flex-shrink: 0; width: 48px; height: 48px; margin-left: 12px; border-radius: 16px; background-color: #4A352C; align-items: center; justify-content: center; }
-.favorite-banner-bookmark { width: 24px; height: 24px; }
-.favorite-tabs { display: flex; flex-direction: row; padding: 4px 16px 8px 16px; background-color: #FFFFFF; }
-.favorite-tab { display: flex; flex: 1; height: 40px; margin-right: 8px; border-radius: 12px; background-color: #F2E9E1; align-items: center; justify-content: center; }
-/* uvue 原生 CSS 不支持结构伪类；最后一个标签用专属类清除尾部间距。 */
-.favorite-tab-last { margin-right: 0; }
-.favorite-tab-on { background-color: #E4572E; }
-.favorite-tab-text { font-size: 14px; line-height: 20px; color: #7A6C60; }
-.favorite-tab-text-on { font-weight: bold; color: #FFFFFF; }
+/* 分类切换使用单一分段控件：白色选中块配橙色文字，与券页、评价页保持同一套交互语言。 */
+.favorite-tabs { display: flex; flex-direction: row; margin: 8px 16px 2px 16px; padding: 4px; border-radius: 14px; background-color: #F3E8DE; }
+.favorite-tab { display: flex; flex: 1; height: 40px; border-radius: 11px; background-color: transparent; align-items: center; justify-content: center; }
+.favorite-tab-on { background-color: #FFFFFF; }
+.favorite-tab-off { background-color: transparent; }
+.favorite-tab-text { font-size: 13px; line-height: 20px; color: #7A6C60; }
+.favorite-tab-text-on { font-weight: bold; color: #C2410C; }
+.favorite-tab-text-off { color: #7A6C60; }
 .favorite-scroll { flex: 1; min-height: 0; }
 .favorite-content { padding-top: 12px; }
-.favorite-intro { margin: 0 0 10px 2px; font-size: 12px; line-height: 18px; color: #7A6C60; }
 .favorite-card { margin-bottom: 10px; padding: 12px; border-radius: 16px; background-color: #FFFFFF; }
 .favorite-card-main { display: flex; flex-direction: row; align-items: center; min-height: 72px; }
 .favorite-image { display: flex; flex-shrink: 0; width: 72px; height: 72px; overflow: hidden; border-radius: 12px; background-color: #F2E9E1; }
@@ -70,10 +61,10 @@
 .favorite-card-pressed { opacity: 0.78; }
 
 /* 原生端按显式 vapor-* 类应用共享视觉，Web 端保留与账户二级页同样的选择器。 */
-.vapor-account-secondary--favorite-tabs { background-color: #FFFFFF; }
-.vapor-account-secondary--favorite-tab { background-color: #F2E9E1; }
-.vapor-account-secondary--favorite-tab-on { background-color: #E4572E; }
-.vapor-account-secondary--favorite-tab-text-on { color: #FFFFFF; font-weight: bold; }
+.vapor-account-secondary--favorite-tabs { background-color: #F3E8DE; border-radius: 14px; }
+.vapor-account-secondary--favorite-tab { background-color: transparent; }
+.vapor-account-secondary--favorite-tab-on { background-color: #FFFFFF; }
+.vapor-account-secondary--favorite-tab-text-on { color: #C2410C; font-weight: bold; }
 .vapor-account-secondary--favorite-card { border-width: 1px; border-style: solid; border-color: #F1E5DA; border-radius: 18px; }
 
 /* #ifdef WEB */
@@ -85,7 +76,7 @@
 .account-page button::after { border: none; }
 .favorite-page view { box-sizing: border-box; }
 .favorite-page text { text-align: left; }
-.favorite-page .favorite-banner, .favorite-page .favorite-card-main, .favorite-page .favorite-card-bottom, .favorite-page .favorite-tabs { flex-direction: row; }
+.favorite-page .favorite-card-main, .favorite-page .favorite-card-bottom, .favorite-page .favorite-tabs { flex-direction: row; }
 .account-page .account-nav, .account-page .account-entry { flex-direction: row;  padding: 10px 12px;  min-height: 56px; }
 .account-page .account-entry-title, .account-page .account-entry-note { text-align: left;  font-size: 12px; }
 /* #endif */
@@ -114,13 +105,11 @@
 .vapor-symbol-ledger--symbol-part-one { left: 13px; top: 12px; width: 28px; height: 37px; border-radius: 5px; }
 .vapor-symbol-ledger--symbol-part-two { left: 20px; top: 24px; width: 14px; height: 2px; border-width: 0; background-color: #C2410C; }
 .vapor-symbol-ledger--symbol-part-three { left: 20px; top: 33px; width: 10px; height: 2px; border-width: 0; background-color: #C2410C; }
-.vapor-account-secondary--recharge-summary { background-color: #31241F; border-color: #31241F; }
-.vapor-account-secondary--recharge-summary--account-muted { color: #F4DCCB; }
-.vapor-account-secondary--recharge-summary--recharge-balance { color: #FFFFFF; font-size: 32px; line-height: 40px; }
-.vapor-account-secondary--recharge-summary--recharge-label { align-self: flex-start; padding: 4px 10px; border-radius: 6px; background-color: #4A352C; color: #FFD5B7; }
-.vapor-account-secondary--recharge-summary--account-note,.vapor-account-secondary--recharge-summary--account-link-text { color: #E7CCBB; }
-.vapor-account-secondary--amount-choice { height: 44px; border-radius: 12px; }
-.vapor-account-secondary--amount-choice-on { border-width: 2px; background-color: #FFF0E5; }
+/* 余额摘要卡使用与个人资料一致的浅橙底，余额数字用正文色，突出金额但不脱离暖色体系。 */
+.vapor-account-secondary--recharge-summary { background-color: #FBE3D5; border-color: #FBE3D5; }
+.vapor-account-secondary--recharge-summary--recharge-balance { color: #211C18; font-size: 36px; line-height: 44px; }
+.vapor-account-secondary--amount-choice { height: 54px; border-radius: 14px; }
+.vapor-account-secondary--amount-choice-on { border-color: #E4572E; background-color: #FDF0E8; }
 .vapor-account-secondary--record-tabs { background-color: #FDF6F0; }
 .vapor-account-secondary--record-tab { background-color: #F2E9E1; border-radius: 12px; }
 .vapor-account-secondary--record-tab-on { background-color: #E4572E; }
@@ -165,13 +154,10 @@
 .symbol-ledger .symbol-part-one { left: 13px; top: 12px; width: 28px; height: 37px; border-radius: 5px; }
 .symbol-ledger .symbol-part-two { left: 20px; top: 24px; width: 14px; height: 2px; border-width: 0; background-color: #C2410C; }
 .symbol-ledger .symbol-part-three { left: 20px; top: 33px; width: 10px; height: 2px; border-width: 0; background-color: #C2410C; }
-.account-secondary .recharge-summary { background-color: #31241F; border-color: #31241F; }
-.account-secondary .recharge-summary .account-muted { color: #F4DCCB; }
-.account-secondary .recharge-summary .recharge-balance { color: #FFFFFF; font-size: 38px; line-height: 50px; }
-.account-secondary .recharge-summary .recharge-label { align-self: flex-start; padding: 4px 10px; border-radius: 6px; background-color: #4A352C; color: #FFD5B7; }
-.account-secondary .recharge-summary .account-note, .account-secondary .recharge-summary .account-link-text { color: #E7CCBB; }
-.account-secondary .amount-choice { height: 56px; border-radius: 12px; }
-.account-secondary .amount-choice-on { border-width: 2px; background-color: #FFF0E5; }
+.account-secondary .recharge-summary { background-color: #FBE3D5; border-color: #FBE3D5; }
+.account-secondary .recharge-summary .recharge-balance { color: #211C18; font-size: 36px; line-height: 44px; }
+.account-secondary .amount-choice { height: 54px; border-radius: 14px; }
+.account-secondary .amount-choice-on { border-color: #E4572E; background-color: #FDF0E8; }
 .account-secondary .record-tabs { background-color: #FDF6F0; }
 .account-secondary .record-tab { background-color: #F2E9E1; border-radius: 12px; }
 .account-secondary .record-tab-on { background-color: #E4572E; }

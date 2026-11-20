@@ -18,10 +18,9 @@
         </view>
         <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || (!loading && !ratingLoading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMore" :scroll-top="reviewScrollTop" @scroll="reviewListScrolled">
             <view class="review-feed-content">
-                <!-- 概览使用独立列表样式，压缩介绍留白，不影响发布评价页的表单密度。 -->
-                <view class="review-overview">
-                    <!-- 菜品/店铺都是左介绍右评分。店铺标题就是店名，不再在下面重复写一遍店铺名称。 -->
-                    <view v-if="productId > 0 || windowId > 0" class="review-overview-main">
+                <!-- 概览只在店铺/菜品语境使用：左侧对象、右侧真实评分，不写装饰性文案。 -->
+                <view v-if="productId > 0 || windowId > 0" class="review-overview">
+                    <view class="review-overview-main">
                         <view class="review-subject">
                             <view class="review-subject-image"><business-image :src="contextImageUrl" :kind="productId > 0 ? 'product' : 'window'"></business-image></view>
                             <view class="review-subject-copy">
@@ -36,15 +35,15 @@
                             <text class="review-overview-count">{{ ratingReady && reviewCount == 0 ? '还没有评分' : (ratingReady ? reviewCount + ' 条' : (ratingLoading ? '获取中…' : '暂不可用')) }}</text>
                         </view>
                     </view>
-                    <view v-else class="review-subject-copy">
-                        <text class="review-overview-label">我的用餐足迹</text>
-                        <text class="review-overview-title">每一餐，都有回味</text>
-                        <text class="review-overview-note">记录你对店铺与菜品的评价</text>
-                    </view>
                 </view>
-                <view v-if="productId == 0 && windowId == 0" class="review-tags">
-                    <button class="review-tag-button review-tag-label button-text button-text-44" @click="selectMine(true)">店铺评价</button>
-                    <button class="review-tag-button review-tag-label button-text button-text-44" @click="selectMine(false)">菜品评价</button>
+                <!-- 我的评价：店铺/菜品评价用分段控件表达互斥选择；原先两个同款按钮看不出当前项。 -->
+                <view v-if="productId == 0 && windowId == 0" class="review-segment">
+                    <view class="review-segment-tab" :class="showWindowReviews ? 'review-segment-tab-on' : 'review-segment-tab-off'" @click="selectMine(true)">
+                        <text class="review-segment-text" :class="showWindowReviews ? 'review-segment-text-on' : 'review-segment-text-off'">店铺评价</text>
+                    </view>
+                    <view class="review-segment-tab" :class="showWindowReviews ? 'review-segment-tab-off' : 'review-segment-tab-on'" @click="selectMine(false)">
+                        <text class="review-segment-text" :class="showWindowReviews ? 'review-segment-text-off' : 'review-segment-text-on'">菜品评价</text>
+                    </view>
                 </view>
                 <text v-if="ratingError.length > 0" class="account-error">{{ ratingError }}</text>
                 <!-- 原生标签直接绑定当前查询分数；好评/差评数量只出现在分类标签上，不再用条形图占概览。 -->
@@ -58,7 +57,8 @@
                         <text v-if="ratingReady && (productId > 0 || windowId > 0)" class="review-score-tab-count" :class="photoOnly ? 'review-score-label-selected' : 'review-score-label-idle'">{{ imageCount == null ? '--' : imageCount }}</text>
                     </view>
                 </view>
-                <view class="review-feed-heading"><text class="review-feed-heading-title">{{ productId > 0 || windowId > 0 ? '用餐评价' : (showWindowReviews ? '店铺评价' : '菜品评价') }}</text><text class="review-feed-heading-note">同学们的用餐记录</text></view>
+                <!-- 语境页保留列表小标题；我的评价已由上方分段控件说明类别，不再重复标题。 -->
+                <view v-if="productId > 0 || windowId > 0" class="review-feed-heading"><text class="review-feed-heading-title">用餐评价</text><text class="review-feed-heading-note">同学们的用餐记录</text></view>
                 <view v-for="review in reviews" :key="review.commentId" class="review-feed-card">
                     <!-- 星级与昵称分行，系统大字体及长昵称不挤压星星；时间保留独立次级层次。 -->
                     <view class="review-feed-author-row"><view class="review-feed-avatar"><business-image :src="review.authorAvatarUrl" kind="avatar"></business-image></view><view class="review-author"><text class="review-feed-author-name" :max-lines="1">{{ review.authorName }}</text><text class="review-feed-date">{{ formatDate(review.createdAt) }}</text></view></view>
@@ -332,7 +332,14 @@ onPageShow(() => {
 .review-overview-score { font-size: 26px; line-height: 30px; font-weight: bold; color: #C2410C; }
 .review-overview-max { margin-bottom: 2px; margin-left: 2px; font-size: 11px; line-height: 16px; color: #A2968B; }
 .review-overview-count { margin-top: 2px; font-size: 11px; line-height: 16px; color: #8D7B6E; }
-.review-overview-note { margin-top: 8px; font-size: 10px; line-height: 15px; color: #9C8B7D; }
+/* 我的评价的类别切换：与收藏页、券页同款分段控件，选中项白底橙字。 */
+.review-segment { display: flex; flex-direction: row; padding: 4px; border-radius: 14px; background-color: #F3E8DE; }
+.review-segment-tab { display: flex; flex: 1; height: 40px; align-items: center; justify-content: center; border-radius: 11px; }
+.review-segment-tab-on { background-color: #FFFFFF; }
+.review-segment-tab-off { background-color: transparent; }
+.review-segment-text { font-size: 13px; line-height: 20px; }
+.review-segment-text-on { color: #C2410C; font-weight: bold; }
+.review-segment-text-off { color: #7A6C60; }
 .review-feed-heading { flex-direction: row; align-items: center; justify-content: space-between; margin-top: 12px; margin-bottom: 6px; }
 .review-feed-heading-title { font-size: 13px; line-height: 18px; font-weight: bold; color: #332820; }
 .review-feed-heading-note { font-size: 10px; line-height: 16px; color: #A09083; }
@@ -347,7 +354,7 @@ onPageShow(() => {
 /* 最多三张缩略图；窄屏可换行，保持图片预览和正文阅读宽度。 */
 .review-feed-photo { width: 64px; height: 64px; margin-right: 5px; margin-bottom: 5px; border-radius: 8px; background-color: #F6EEE7; }
 /* #ifdef WEB */
-.account-page .review-overview-main, .account-page .review-overview-number, .account-page .review-feed-heading, .account-page .review-feed-author-row, .account-page .review-feed-rating { flex-direction: row; }
+.account-page .review-overview-main, .account-page .review-overview-number, .account-page .review-feed-heading, .account-page .review-feed-author-row, .account-page .review-feed-rating, .account-page .review-segment, .account-page .review-segment-tab { flex-direction: row; }
 /* #endif */
 
 /* 图片和店铺构成评价对象的视觉锚点；介绍失败时仍可阅读评价。 */

@@ -5,7 +5,6 @@
 			<view class="mine-hero">
 				<text class="mine-eyebrow">校园食堂 · 账户中心</text>
 				<text class="mine-title">我的</text>
-				<text class="mine-subtitle">用餐、账单与账号信息，都在这里</text>
 			</view>
 			<view class="mine-content">
                 <view class="profile-card" @click="openProfile">
@@ -41,49 +40,54 @@
                         </view>
                     </view>
                 </view>
-                <view v-if="roleCode == 'CUSTOMER'" class="entry-group">
-                    <view class="account-entry" @click="openReviews">
-                        <view class="account-entry-icon"><image class="review-entry-icon" src="/static/review/star-outline.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的评价</text><text class="account-entry-note">回顾用餐感受，查看已发布评价</text></view><view class="account-arrow"></view>
-                    </view>
-                    <view class="entry-divider"></view>
-                    <view class="account-entry" @click="openFavorites">
-                        <view class="account-entry-icon"><image class="review-entry-icon" src="/static/favorites/bookmark-filled.svg"></image></view><view class="account-entry-body"><text class="account-entry-title">我的收藏</text><text class="account-entry-note">查看收藏的店铺与菜品</text></view><view class="account-arrow"></view>
-                    </view>
-                    <view class="entry-divider"></view>
-                    <view class="account-entry" @click="openCoupons">
-                        <view class="account-entry-icon"><view class="coupon-entry-icon"><view class="coupon-entry-notch"></view></view></view><view class="account-entry-body"><text class="account-entry-title">我的优惠券</text><text class="account-entry-note">领取优惠，结算时选择使用</text></view><view class="account-arrow"></view>
+                <!-- 服务入口改为三列宫格：图标在上、标题在下，填充横向空间且不增加说明文案。 -->
+                <view v-if="roleCode == 'CUSTOMER'" class="entry-group service-group">
+                    <view class="service-grid">
+                        <view class="service-cell" @click="openReviews">
+                            <view class="service-icon"><image class="review-entry-icon" src="/static/review/star-outline.svg"></image></view>
+                            <text class="service-label">我的评价</text>
+                        </view>
+                        <view class="service-cell" @click="openFavorites">
+                            <view class="service-icon"><image class="review-entry-icon" src="/static/favorites/bookmark-filled.svg"></image></view>
+                            <text class="service-label">我的收藏</text>
+                        </view>
+                        <view class="service-cell" @click="openCoupons">
+                            <view class="service-icon"><view class="coupon-entry-icon"><view class="coupon-entry-notch"></view></view></view>
+                            <text class="service-label">我的优惠券</text>
+                        </view>
                     </view>
                 </view>
                 <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">我的钱包</text>
 				<view v-if="roleCode == 'CUSTOMER'" class="entry-group">
                     <view class="account-entry" @click="openWallet">
                         <view class="account-entry-icon"><view class="wallet-icon-outline"></view><view class="wallet-icon-pocket"></view></view>
-                        <view class="account-entry-body"><text class="account-entry-title">余额与充值</text><text class="account-entry-note">查看账户余额，进入钱包充值</text></view>
+                        <view class="account-entry-body"><text class="account-entry-title">余额与充值</text></view>
+                        <text class="entry-value">{{ balanceReady ? '¥' + balanceText : '--' }}</text>
                         <view class="account-arrow"></view>
                     </view>
                     <view class="entry-divider"></view>
                     <view class="account-entry" @click="openRechargeRecords">
-                        <view class="account-entry-icon"><view class="flow-stem"></view><view class="flow-tip"></view></view><view class="account-entry-body"><text class="account-entry-title">充值记录</text><text class="account-entry-note">查看每一笔到账与余额</text></view><view class="account-arrow"></view>
+                        <view class="account-entry-icon"><view class="flow-stem"></view><view class="flow-tip"></view></view><view class="account-entry-body"><text class="account-entry-title">充值记录</text></view><view class="account-arrow"></view>
                     </view>
 					<view class="entry-divider"></view>
                     <view class="account-entry" @click="openPayRecords">
-                        <view class="account-entry-icon"><view class="flow-stem"></view><view class="flow-tip flow-tip-out"></view></view><view class="account-entry-body"><text class="account-entry-title">消费记录</text><text class="account-entry-note">查看余额支付支出</text></view><view class="account-arrow"></view>
+                        <view class="account-entry-icon"><view class="flow-stem"></view><view class="flow-tip flow-tip-out"></view></view><view class="account-entry-body"><text class="account-entry-title">消费记录</text></view><view class="account-arrow"></view>
 				</view>
                 </view>
 				<text v-if="roleCode == 'STALL_MANAGER' || roleCode == 'RESTAURANT_MANAGER'" class="account-section-label">窗口管理</text>
                 <view v-if="roleCode == 'STALL_MANAGER' || roleCode == 'RESTAURANT_MANAGER'" class="entry-group">
                     <view class="account-entry" @click="openPickupVerification">
-                        <view class="account-entry-icon"><view class="center-receipt"></view></view><view class="account-entry-body"><text class="account-entry-title">取餐核销</text><text class="account-entry-note">输入顾客取餐码，确认餐品交付</text></view><view class="account-arrow"></view>
+                        <view class="account-entry-icon"><view class="center-receipt"></view></view><view class="account-entry-body"><text class="account-entry-title">取餐核销</text></view><view class="account-arrow"></view>
                     </view>
                     <view class="entry-divider"></view>
                     <view class="account-entry" @click="openImageManagement">
-                        <view class="account-entry-icon"><view class="account-icon-line"></view><view class="account-icon-line"></view></view><view class="account-entry-body"><text class="account-entry-title">窗口与菜品图片</text><text class="account-entry-note">上传封面，维护菜品展示图片</text></view><view class="account-arrow"></view>
+                        <view class="account-entry-icon"><view class="account-icon-line"></view><view class="account-icon-line"></view></view><view class="account-entry-body"><text class="account-entry-title">窗口与菜品图片</text></view><view class="account-arrow"></view>
                     </view>
                 </view>
                 <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">账号与安全</text>
 				<view v-if="roleCode == 'CUSTOMER'" class="entry-group">
                     <view v-if="roleCode == 'CUSTOMER'" class="account-entry" @click="openPayPassword">
-                        <view class="account-entry-icon"><view class="lock-hoop"></view><view class="lock-body"></view></view><view class="account-entry-body"><text class="account-entry-title">支付密码</text><text class="account-entry-note">{{ payPasswordSet ? '修改独立支付密码' : '设置后可充值和使用余额' }}</text></view><view class="account-arrow"></view>
+                        <view class="account-entry-icon"><view class="lock-hoop"></view><view class="lock-body"></view></view><view class="account-entry-body"><text class="account-entry-title">支付密码</text></view><text class="entry-badge" :class="payPasswordSet ? 'entry-badge-on' : 'entry-badge-off'">{{ payPasswordSet ? '已设置' : '未设置' }}</text><view class="account-arrow"></view>
 				</view>
                 </view>
                 <view class="signout-button" hover-class="signout-button-pressed" @click="confirmSignOut">
@@ -311,7 +315,6 @@ onPageShow(() => {
 	.mine-hero { background-color: #E4572E; padding: 12px 20px 14px 20px; }
 	.mine-eyebrow { font-size: 12px; line-height: 18px; color: #FFE3D6; }
 	.mine-title { margin-top: 4px; font-size: 24px; line-height: 32px; font-weight: bold; color: #FFFFFF; }
-	.mine-subtitle { margin-top: 4px; font-size: 12px; line-height: 18px; color: #FFE3D6; }
 	.mine-content { padding: 12px 16px 20px 16px; }
 	.profile-card { display: flex; width: 100%; text-align: left; line-height: 22px; flex-direction: row; align-items: center; margin: 0 0 12px 0; padding: 14px 12px; border-width: 0; border-radius: 18px; background-color: #FFFFFF; }
 	.mine-avatar { flex-shrink: 0; width: 52px; height: 52px; border-radius: 18px; background-color: #FDF0E8; align-items: center; justify-content: center; overflow: hidden; }
@@ -322,6 +325,17 @@ onPageShow(() => {
 	.profile-note { margin-top: 4px; font-size: 12px; line-height: 18px; color: #C2410C; }
 	.entry-group { margin-bottom: 14px; border-radius: 16px; overflow: hidden; }
 	.entry-divider { height: 1px; margin-left: 60px; margin-right: 16px; background-color: #F4EBE4; }
+	/* 服务宫格：三列等宽，图标托底放大，用布局密度填充横向留白而不增加说明文案。 */
+	.service-group { background-color: #FFFFFF; padding: 4px; }
+	.service-grid { display: flex; flex-direction: row; }
+	.service-cell { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: center; padding: 12px 0 10px 0; border-radius: 12px; }
+	.service-icon { display: flex; width: 44px; height: 44px; border-radius: 14px; background-color: #FDF0E8; align-items: center; justify-content: center; }
+	.service-label { margin-top: 8px; font-size: 12px; line-height: 18px; color: #211C18; text-align: center; }
+	/* 行尾直接展示真实数据或状态，替代原先的解释性副标题。 */
+	.entry-value { margin-left: 8px; font-size: 13px; line-height: 20px; font-weight: bold; color: #C2410C; }
+	.entry-badge { margin-left: 8px; padding: 2px 8px; border-radius: 7px; font-size: 11px; line-height: 17px; }
+	.entry-badge-on { background-color: #FBE3D5; color: #C2410C; }
+	.entry-badge-off { background-color: #F2E9E1; color: #7A6C60; }
 	.flow-stem { position: absolute; left: 15px; top: 8px; width: 2px; height: 15px; background-color: #C2410C; }
 	.flow-tip { position: absolute; left: 12px; top: 15px; width: 6px; height: 6px; border-right-width: 2px; border-right-style: solid; border-right-color: #C2410C; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #C2410C; transform: rotate(45deg); }
 	.flow-tip-out { top: 9px; transform: rotate(225deg); }
@@ -364,6 +378,7 @@ onPageShow(() => {
     .center-check { position: absolute; left: 17px; top: 17px; width: 10px; height: 6px; border-left-width: 2px; border-left-style: solid; border-left-color: #C2410C; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #C2410C; transform: rotate(-45deg); }
     /* #ifdef WEB */
     .account-page .order-center-heading, .account-page .order-center-shortcuts { flex-direction: row;  padding-top: 4px; }
+    .account-page .service-grid { flex-direction: row; }
     .order-center-all::after, .order-center-shortcut::after { border: none; }
     /* #endif */
     .center-cross { position: absolute; left: 16px; top: 21px; width: 12px; height: 2px; border-radius: 1px; background-color: #C2410C; transform: rotate(45deg); }

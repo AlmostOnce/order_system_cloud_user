@@ -17,7 +17,6 @@
                         </view>
                     <text class="profile-identity-name">{{ username }}</text>
                     <text class="profile-role-badge">{{ roleName }}</text>
-                    <text class="profile-identity-note">你的校园用餐账号</text>
                 </view>
                 <view class="account-card vapor-account-secondary--account-card">
                         <view class="profile-card-header"><text class="account-heading">账号资料</text></view>
