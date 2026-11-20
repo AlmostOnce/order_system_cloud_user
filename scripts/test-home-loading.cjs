@@ -6,6 +6,10 @@ const source=fs.readFileSync('pages/home/home.uvue','utf8');
 const create=()=>loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1],p=>{
  if(p.includes('store/notifications'))return{startNotificationSession(){}};
  if(p.includes('store/auth'))return{isLoggedIn:()=>true,currentUser:()=>({userUuid:owner,roleCode:'CUSTOMER'})};
+ // 推荐与月售已拆分到独立接口：补齐桩，避免首页初始化时因缺函数中断。
+ if(p.includes('common/storage'))return{getSessionVersion:()=>1};
+ if(p.includes('api/recommendations'))return{fetchHomeRecommendations:async()=>({ok:true,message:'',data:{recommendationId:'test',algorithmVersion:'v1',mode:'FALLBACK',generatedAt:'',items:[]}})};
+ if(p.includes('api/statistics'))return{fetchMonthlyWindowSales:async()=>({ok:true,items:[]})};
  if(p.includes('api/product'))return{
   listActiveRestaurants:async()=>{requests++;return{ok:!fail,message:'offline',items:[{restaurantId:1,restaurantName:'一食堂'}]}},
   listActiveWindows:async()=>{requests++;return{ok:true,items:[{windowId:1,restaurantId:1,windowName:'窗口'}]}}

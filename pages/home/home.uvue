@@ -2,27 +2,25 @@
 	<view class="page">
 		<!-- 状态栏底色与品牌区同色，避免顶部出现米色缝隙 -->
 		<view class="statusfill" :style="'height:' + statusBarHeight + 'px'"></view>
-        <scroll-view class="home-scroll" direction="vertical" :refresher-enabled="roleCode == 'CUSTOMER' && !pickerVisible && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
-		<!-- 品牌区：柿子橙实色块 + 半透明几何圆，控件与标题错峰上浮 -->
+        <scroll-view class="home-scroll" direction="vertical" :refresher-enabled="roleCode == 'CUSTOMER' && (refreshing || !loading)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
+		<!-- 品牌区：只保留一行品牌字与搜索入口，压缩首屏高度，把空间留给推荐和档口 -->
 		<view class="hero">
 			<view class="hero-shape hero-shape-1" :class="heroShapesEntered ? '' : 'hero-shape-1-pre'"></view>
 			<view class="hero-shape hero-shape-2" :class="heroShapesEntered ? '' : 'hero-shape-2-pre'"></view>
 			<view class="hero-body">
-				<!-- 左上角餐厅选择入口：点击后从底部弹出餐厅列表 -->
 				<view class="hero-top" :class="entered ? '' : 'hero-top-pre'">
+					<text class="hero-brand">校园食堂</text>
+					<!-- 餐厅筛选入口：只占一个胶囊，点开后所有食堂在底部面板纵向排列，数量再多也不必横向滑动 -->
 					<view
-						v-if="roleCode == 'CUSTOMER'"
-						class="picker"
-						hover-class="picker-hover"
+						v-if="roleCode == 'CUSTOMER' && restaurants.length > 0"
+						class="hero-picker"
+						hover-class="hero-picker-hover"
 						@click="togglePicker"
 					>
-						<text class="picker-text">{{ selectedRestaurantName }}</text>
-						<text class="picker-arrow" :class="pickerVisible ? 'picker-arrow-open' : ''">⌄</text>
+						<text class="hero-picker-text" :max-lines="1">{{ selectedRestaurantName }}</text>
+						<text class="hero-picker-arrow" :class="pickerVisible ? 'hero-picker-arrow-open' : ''">⌄</text>
 					</view>
-					<text class="hero-eyebrow">CAMPUS CANTEEN</text>
 				</view>
-				<text class="hero-greeting" :class="entered ? '' : 'hero-greeting-pre'">{{ greeting }}</text>
-				<text class="hero-desc" :class="entered ? '' : 'hero-desc-pre'">看看今天哪个档口合胃口</text>
 				<!-- 菜品搜索入口：点击进入独立搜索页，仅学生角色可见 -->
 				<view
 					v-if="roleCode == 'CUSTOMER'"
@@ -38,6 +36,7 @@
 				</view>
 			</view>
 		</view>
+
         <!-- 推荐独立于目录加载；卡片只进入既有菜单，不直接加购或复用历史规格。 -->
         <view v-if="roleCode == 'CUSTOMER'" class="section">
             <view class="section-head">
@@ -58,16 +57,23 @@
             </view>
             <view v-else>
                 <text v-if="recommendationError.length > 0" class="recommendation-error">{{ recommendationError }}</text>
+                <!-- 图片 + 一行菜名 + 档口 + 价格；压缩到 166px 高，一屏可露出第三张卡提示横向可滑 -->
                 <scroll-view class="recommendation-scroll" direction="horizontal">
-                    <view class="recommendation-list" :style="'width: ' + (recommendationItems.length * 164) + 'px'">
+                    <view class="recommendation-list" :style="'width: ' + (recommendationItems.length * 134) + 'px'">
                         <view v-for="item in recommendationItems" :key="item.productId" class="recommendation-card" hover-class="recommendation-card-hover" @click="openRecommendation(item)">
-                            <view class="recommendation-image"><business-image :src="item.imageUrl" kind="product" :preview="false"></business-image></view>
+                            <view class="recommendation-image">
+                                <business-image :src="item.imageUrl" kind="product" :preview="false"></business-image>
+                                <!-- 推荐理由收敛为图片角标，避免在窄卡里再占一行正文 -->
+                                <view class="recommendation-reason">
+                                    <text class="recommendation-reason-text" :max-lines="1">{{ recommendationReason(item.reasonCode) }}</text>
+                                </view>
+                            </view>
                             <view class="recommendation-body">
                                 <text class="recommendation-name" :max-lines="1">{{ item.productName }}</text>
-                                <text class="recommendation-reason" :max-lines="1">{{ recommendationReason(item.reasonCode) }}</text>
+                                <text v-if="recommendationWindowName(item).length > 0" class="recommendation-window" :max-lines="1">{{ recommendationWindowName(item) }}</text>
                                 <view class="recommendation-price-row">
                                     <text class="recommendation-price">¥{{ recommendationPrice(item) }}</text>
-                                    <text class="recommendation-specification">{{ item.hasSpecifications ? '选规格' : '去看看' }}</text>
+                                    <text class="recommendation-arrow">›</text>
                                 </view>
                             </view>
                         </view>
@@ -111,12 +117,18 @@
 						<business-image :src="item.imageUrl" kind="window" :preview="false"></business-image>
 					</view>
 					<view class="stall-body">
-						<text class="stall-name">{{ item.windowName }}</text>
-						<text class="stall-meta">{{ stallMeta(item) }}</text>
-						<view class="stall-metrics">
-							<text class="stall-rating">{{ cardRatingText(windowRatings, item.windowId) }}</text>
-							<text class="stall-month-sales">月售 {{ monthlyWindowSalesText(item.windowId) }} 份</text>
+						<!-- 第一行只放档口名和评分徽标，第二行合并月售、食堂与楼层，减少一行空白 -->
+						<view class="stall-line">
+							<text class="stall-name" :max-lines="1">{{ item.windowName }}</text>
+							<view
+								v-if="stallRatingBadge(item).length > 0"
+								class="stall-rating-badge"
+								:class="stallRatingBadge(item) == '暂无评分' ? 'stall-rating-badge-none' : ''"
+							>
+								<text class="stall-rating-badge-text" :class="stallRatingBadge(item) == '暂无评分' ? 'stall-rating-badge-text-none' : ''">{{ stallRatingBadge(item) }}</text>
+							</view>
 						</view>
+						<text class="stall-meta" :max-lines="1">{{ stallMetaLine(item) }}</text>
 					</view>
 					<text class="stall-arrow">›</text>
 				</view>
@@ -129,7 +141,7 @@
                 <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
             </view>
         </scroll-view>
-		<!-- 餐厅选择面板：遮罩淡入，面板自底部上滑；关闭时先回落再卸载节点 -->
+		<!-- 餐厅选择面板：遮罩淡入，面板自底部上滑；食堂较多时面板内部纵向滚动，不影响页面本身 -->
 		<view
 			v-if="pickerVisible"
 			class="mask"
@@ -138,7 +150,7 @@
 		></view>
 		<view v-if="pickerVisible" class="sheet" :class="pickerReady ? '' : 'sheet-pre'">
 			<text class="sheet-title">选择餐厅</text>
-            <scroll-view class="sheet-list" direction="vertical" :style="sheetListStyle()">
+			<scroll-view class="sheet-list" direction="vertical" :style="sheetListStyle()">
 				<view
 					class="sheet-item"
 					hover-class="sheet-item-hover"
@@ -182,58 +194,13 @@ import { getSessionVersion } from '../../common/storage.uts';
 import { fetchHomeRecommendations, HomeRecommendationItem, HomeRecommendationResult } from '../../api/recommendations.uts';
 // 导入商品查询与结果类型：档口列表、餐厅列表及其返回结构。
 import { listActiveWindows, listActiveRestaurants, WindowItem, WindowListResult, RestaurantItem, RestaurantListResult } from '../../api/product.uts';
-import { CardRating, fetchCardRatings, cardRatingText } from '../../api/comments.uts';
+import { CardRating, fetchCardRatings } from '../../api/comments.uts';
 import { fetchMonthlyWindowSales, MonthlyWindowSalesItem } from '../../api/statistics.uts';
 /** 表示「全部餐厅」的哨兵值，与任何真实餐厅 ID 都不会冲突。 */
 const ALL_RESTAURANTS: number = 0;
 /** 「全部餐厅」的展示名称。 */
 const ALL_RESTAURANTS_NAME: string = '全部餐厅';
 const initialMonthlyWindowSales: Array<MonthlyWindowSalesItem> = [];
-/**
- * 按当前时刻生成问候语。
- *
- * 首页不再展示任何个人信息，问候语只按时段变化，不拼用户名。
- *
- * @return 纯时段问候语
- */
-function buildGreeting(): string {
-    // 取本机当前小时数，用于选择时段问候语。
-    const hour = new Date().getHours();
-    // 默认按晚间问候，再由时段判断覆盖。
-    let prefix = '晚上好';
-    // 深夜 0-5 点。
-    if (hour < 6) {
-        prefix = '夜里好';
-    }
-    else if (hour < 11) {
-        // 早晨 6-10 点。
-        prefix = '早上好';
-    }
-    else if (hour < 14) {
-        // 中午 11-13 点。
-        prefix = '中午好';
-    }
-    else if (hour < 18) {
-        // 下午 14-17 点。
-        prefix = '下午好';
-    }
-    // 直接返回时段问候，不拼接用户名等个人信息。
-    return prefix;
-}
-/**
- * 名称过长时截断，避免把品牌区第一行撑破。
- *
- * @param name 原始名称
- * @return 展示用名称
- */
-function shortenName(name: string): string {
-    // 超过 8 个字符时截断并追加省略号。
-    if (name.length > 8) {
-        return name.substring(0, 8) + '…';
-    }
-    // 未超长则原样返回。
-    return name;
-}
 
 // 档口列表与可见档口共用同一份空数组，避免先渲染时出现 undefined。
 const initialEmptyWindows: Array<WindowItem> = [];
@@ -251,10 +218,6 @@ const initialEmptyRestaurants: Array<RestaurantItem> = [];
 const state = reactive({ refreshing: false, currentRefreshTime: '',
     // 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
     statusBarHeight: 0,
-    // 顶部问候语：初值必须保持为空字符串，不能在此调用依赖当前时间的函数。
-    // H5 端首屏会先做服务端预渲染再在客户端 hydrate，data() 里的 new Date()
-    // 在两端取值可能不一致，会触发 hydration mismatch 警告。
-    greeting: '',
     // 当前角色编码，用于模板判断是否展示档口列表。
     roleCode: '',
     /** 推荐列表及其独立状态；加载失败不会改写目录的 loading/loadError。 */
@@ -271,11 +234,11 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     monthlyWindowSalesReady: false,
     // 按当前选中餐厅筛选后、供页面渲染的档口列表。
     visibleWindows: initialEmptyWindows,
-    // 后端返回的餐厅列表，供选择面板渲染。
+    // 后端返回的餐厅列表，供餐厅选择面板渲染。
     restaurants: initialEmptyRestaurants,
     // 当前选中的餐厅 ID，0 表示「全部餐厅」。
     selectedRestaurantId: ALL_RESTAURANTS,
-    // 当前选中餐厅的展示名称。
+    // 当前选中餐厅的展示名称，用于档口区头标题与空态文案。
     selectedRestaurantName: ALL_RESTAURANTS_NAME,
     // 是否正在加载档口与餐厅数据。
     loading: true,
@@ -292,8 +255,8 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     // 餐厅选择面板是否已进入终态，控制其滑入滑出过渡。
     pickerReady: false })
 
-// 首页模板直接读取推荐模式，因此把它与其它推荐状态一并暴露为响应式引用，避免运行时找不到变量。
-const { refreshing, currentRefreshTime, statusBarHeight, greeting, roleCode, recommendationItems, recommendationLoading, recommendationError, recommendationMode, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, heroShapesEntered, listReady, pickerVisible, pickerReady } = toRefs(state)
+// 首页模板直接读取推荐模式与筛选结果，因此一并暴露为响应式引用，避免运行时找不到变量。
+const { refreshing, currentRefreshTime, statusBarHeight, roleCode, recommendationItems, recommendationLoading, recommendationError, recommendationMode, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, heroShapesEntered, listReady, pickerVisible, pickerReady } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.loading || state.pickerVisible || state.roleCode != 'CUSTOMER')
@@ -329,15 +292,6 @@ function stallDelay(index: number): string {
     return 'transition-delay: ' + delays[index];
 }
 
-function sheetListStyle(): string {
-    // 每项固定 52px，首项是「全部餐厅」，故条目数为餐厅数加一。
-    const total = state.restaurants.length + 1;
-    // 面板最多展示 6 条，超出部分靠内部滚动查看。
-    const visible = total > 6 ? 6 : total;
-    // 按可见条目数换算出面板高度。
-    return 'height: ' + (visible * 52) + 'px';
-}
-
 function listTitle(): string {
     // 选中「全部餐厅」时展示通用标题。
     if (state.selectedRestaurantId == ALL_RESTAURANTS) {
@@ -356,16 +310,42 @@ function emptyHint(): string {
     return state.selectedRestaurantName + ' 暂无营业中的档口';
 }
 
-function stallGlyph(item: WindowItem): string {
-    // 有名称时取首字作为标记。
-    if (item.windowName.length > 0) {
-        return item.windowName.substring(0, 1);
+/**
+ * 档口评分徽标。
+ *
+ * <p>评分是异步补充数据：加载中或接口不可用时返回空串，卡片只显示月售与位置，
+ * 避免每张卡都出现「加载中」这类临时噪声；成功但零评价时显示「暂无评分」，
+ * 让新档口有明确标识而不是空白。</p>
+ *
+ * @param item 当前档口
+ * @return 可直接展示的徽标文案，空串表示本次不展示
+ */
+function stallRatingBadge(item: WindowItem): string {
+    for (let i = 0; i < state.windowRatings.length; i++) {
+        const rating = state.windowRatings[i];
+        if (rating.id != item.windowId) continue;
+        if (!rating.available) return '';
+        if (rating.reviewCount == 0 || rating.averageScore == null) return '暂无评分';
+        return '★ ' + rating.averageScore!.toFixed(1);
     }
-    // 名称为空时用「档」兜底，保证标记区不出现空白。
-    return '档';
+    // 尚未拿到该档口评分时保持留白，等批量评分返回后自然出现。
+    return '';
 }
 
-function stallMeta(item: WindowItem): string {
+/**
+ * 档口卡片的副标题行：月售、食堂与位置合并为一行。
+ *
+ * <p>选中具体食堂时区头已经说明食堂名，卡片内不再重复；
+ * 位置若已包含食堂全称，也不再重复拼接。月售尚未读取完成时省略该段，
+ * 不展示「-- 份」这种占位噪音；全部信息都缺失时给出位置待补充。</p>
+ *
+ * @param item 当前档口
+ * @return 用于单行省略展示的副标题
+ */
+function stallMetaLine(item: WindowItem): string {
+    const parts: Array<string> = [];
+    const sales = monthlyWindowSalesText(item.windowId);
+    if (sales != '--') parts.push('月售 ' + sales + ' 份');
     // 通过所属餐厅 ID 关联完整名称，不使用顶部筛选器的简称。
     let restaurantName = '';
     for (let i = 0; i < state.restaurants.length; i++) {
@@ -374,18 +354,16 @@ function stallMeta(item: WindowItem): string {
             break;
         }
     }
+    // 仅「全部餐厅」范围需要在卡片里提示食堂归属。
+    if (state.selectedRestaurantId == ALL_RESTAURANTS && restaurantName.length > 0) {
+        parts.push(restaurantName);
+    }
     const location = item.location.trim();
-    if (restaurantName.length == 0) {
-        return '食堂待补充 · ' + (location.length > 0 ? location : '楼层待补充');
+    if (location.length > 0 && (restaurantName.length == 0 || location.indexOf(restaurantName) < 0)) {
+        parts.push(location);
     }
-    if (location.length == 0) {
-        return restaurantName + ' · 楼层待补充';
-    }
-    // 位置已包含完整食堂名称时，避免重复拼接。
-    if (location.indexOf(restaurantName) >= 0) {
-        return location;
-    }
-    return restaurantName + ' · ' + location;
+    if (parts.length == 0) return '位置待补充';
+    return parts.join(' · ');
 }
 
 function loadProfile() {
@@ -399,8 +377,6 @@ function loadProfile() {
     }
     // 只保留角色编码用于判断是否展示档口列表，其余个人信息不在首页展示。
     state.roleCode = profile.roleCode;
-    // 每次进入页面按时段刷新问候语。
-    state.greeting = buildGreeting();
     // 仅顾客角色需要拉取档口与餐厅数据。
     if (state.roleCode == 'CUSTOMER') {
         // 新会话即使仍是同一账号也先清理推荐，防止退出重登后短暂显示旧个性化结果。
@@ -450,8 +426,13 @@ function clearRecommendations(): void {
  * 请求版本、会话版本、账号与筛选共同校验，阻止快速切换、退出重登及离页后的晚到响应污染首页。
  */
 function loadRecommendations(): void {
+    // 页面不可见时直接放弃：离页后不应再读取本地登录态或发起请求。
+    if (!homeVisible) {
+        clearRecommendations();
+        return;
+    }
     const profile = currentUser();
-    if (!homeVisible || !isLoggedIn() || profile == null || profile.roleCode != 'CUSTOMER') {
+    if (!isLoggedIn() || profile == null || profile.roleCode != 'CUSTOMER') {
         clearRecommendations();
         return;
     }
@@ -508,6 +489,22 @@ function recommendationPrice(item: HomeRecommendationItem): string {
     return price + ' 基础价';
 }
 
+/**
+ * 把推荐菜品关联到本店档口名。
+ *
+ * <p>推荐接口只返回 windowId，档口名来自同一页面的档口目录；目录尚未返回或档口已下架时
+ * 返回空串，卡片隐藏这一行，不影响菜品名与价格展示。</p>
+ *
+ * @param item 推荐菜品
+ * @return 档口名称，取不到时为空串
+ */
+function recommendationWindowName(item: HomeRecommendationItem): string {
+    for (let i = 0; i < state.windows.length; i++) {
+        if (state.windows[i].windowId == item.windowId) return state.windows[i].windowName.trim();
+    }
+    return '';
+}
+
 /** 推荐只定位当前菜品，不发送购物车写请求；规格仍由顾客在菜单页主动选择。 */
 function openRecommendation(item: HomeRecommendationItem): void {
     const profile = currentUser();
@@ -529,7 +526,7 @@ function loadCatalog(): Promise<void> {
             state.loadError = restaurantResult.message;
             return;
         }
-        // 餐厅数据一次性写入，供选择面板渲染。
+        // 餐厅数据一次性写入，供餐厅选择面板渲染。
         state.restaurants = restaurantResult.items;
         return listActiveWindows().then((windowResult: WindowListResult) => {
             // 档口结果返回后统一结束加载态。
@@ -607,47 +604,81 @@ function buildVisibleWindows() {
     state.visibleWindows = filtered;
 }
 
+/**
+ * 餐厅选择面板列表的高度。
+ *
+ * <p>每项固定 52px，首项是「全部餐厅」，因此条目数为餐厅数加一。面板最多展示 6 条，
+ * 食堂更多时在面板内部纵向滚动，既不会撑高页面，也不要求用户横向滑动筛选条。</p>
+ *
+ * @return 可直接绑定到 scroll-view 的高度样式
+ */
+function sheetListStyle(): string {
+    const total = state.restaurants.length + 1;
+    const visible = total > 6 ? 6 : total;
+    return 'height: ' + (visible * 52) + 'px';
+}
+
+/** 面板展开/收起共用两个计时器；快速重复点击时先取消旧计时器，避免迟到的卸载把新面板关掉。 */
+let pickerShowTimer = 0;
+let pickerHideTimer = 0;
+
+/** 面板已展开时点击胶囊即收起，否则展开。 */
 function togglePicker() {
-    // 面板已展开时点击入口即收起。
     if (state.pickerVisible) {
         closePicker();
         return;
     }
-    // 面板未展开时点击入口即展开。
     openPicker();
 }
 
+/** 先以初始态挂载面板，下一帧切终态，让上滑过渡真正播放。 */
 function openPicker() {
-    // 先置为初始态，保证面板以「未就绪」的样子挂载。
+    if (pickerHideTimer > 0) {
+        clearTimeout(pickerHideTimer);
+        pickerHideTimer = 0;
+    }
     state.pickerReady = false;
-    // 挂载面板节点（此时还是初始态）。
     state.pickerVisible = true;
-    // 下一帧切到终态，属性变化驱动滑入过渡。
-    setTimeout(() => {
+    if (pickerShowTimer > 0) clearTimeout(pickerShowTimer);
+    pickerShowTimer = setTimeout(() => {
+        pickerShowTimer = 0;
         state.pickerReady = true;
     }, 30);
 }
 
+/** 先回落到初始态触发滑出，等过渡结束后再卸载节点，避免动画被截断。 */
 function closePicker() {
-    // 面板本就未显示时无需处理。
     if (!state.pickerVisible) {
         return;
     }
-    // 先回落到初始态，触发滑出过渡。
+    if (pickerShowTimer > 0) {
+        clearTimeout(pickerShowTimer);
+        pickerShowTimer = 0;
+    }
     state.pickerReady = false;
-    // 等过渡播放完毕（240ms）再卸载节点，避免动画被截断。
-    setTimeout(() => {
+    if (pickerHideTimer > 0) clearTimeout(pickerHideTimer);
+    pickerHideTimer = setTimeout(() => {
+        pickerHideTimer = 0;
         state.pickerVisible = false;
     }, 240);
 }
 
+/**
+ * 餐厅选择面板的点击处理。
+ *
+ * <p>先收起面板再切换数据；切换食堂会同步影响档口列表和推荐范围，因此清空旧推荐并废弃在途请求，
+ * 避免短暂展示其他食堂的菜品。重复点击当前食堂只收起面板，不重复请求、也不重播列表动画。</p>
+ *
+ * @param restaurantId 目标食堂 ID，0 表示全部餐厅
+ * @param restaurantName 目标食堂名称，用于区头与空态文案
+ */
 function selectRestaurant(restaurantId: number, restaurantName: string) {
-    // 选中后立即收起选择面板。
+    // 无论是否切换都先收起面板，保持点选的即时反馈。
     closePicker();
-    // 记录选中的餐厅 ID。
+    // 已选中同一食堂时无需刷新。
+    if (state.selectedRestaurantId == restaurantId) return;
     state.selectedRestaurantId = restaurantId;
-    // 名称过长时截断后再展示。
-    state.selectedRestaurantName = shortenName(restaurantName);
+    state.selectedRestaurantName = restaurantName;
     // 餐厅是推荐的硬范围，切换时立即清空旧卡片并废弃旧请求，不能短暂展示其他餐厅结果。
     clearRecommendations();
     loadRecommendations();
@@ -687,8 +718,26 @@ function replayHeroShapes() {
         if (homeVisible) state.heroShapesEntered = true;
     }, 60);
 }
-onPageHide(() => { homeVisible = false; recommendationRequestVersion++; state.recommendationLoading = false; stopHeroShapes(); });
-onUnload(() => { homeVisible = false; clearRecommendations(); stopHeroShapes(); });
+onPageHide(() => {
+    homeVisible = false;
+    recommendationRequestVersion++;
+    state.recommendationLoading = false;
+    // 离开页面时立即收起餐厅面板并取消延迟计时器，返回首页不残留遮罩。
+    if (pickerShowTimer > 0) { clearTimeout(pickerShowTimer); pickerShowTimer = 0; }
+    if (pickerHideTimer > 0) { clearTimeout(pickerHideTimer); pickerHideTimer = 0; }
+    state.pickerVisible = false;
+    state.pickerReady = false;
+    stopHeroShapes();
+});
+onUnload(() => {
+    homeVisible = false;
+    clearRecommendations();
+    if (pickerShowTimer > 0) { clearTimeout(pickerShowTimer); pickerShowTimer = 0; }
+    if (pickerHideTimer > 0) { clearTimeout(pickerHideTimer); pickerHideTimer = 0; }
+    state.pickerVisible = false;
+    state.pickerReady = false;
+    stopHeroShapes();
+});
 
 onPageShow(() => {
     homeVisible = true;
@@ -732,12 +781,14 @@ onReady(() => {
 		background-color: #E4572E;
 	}
 
+	/* 品牌区压缩为「一行品牌字 + 一行搜索」，底边圆角让橙色块像一张盖在页面上的封头 */
 	.hero {
 		position: relative;
 		background-color: #E4572E;
-		padding-top: 14px;
-		/* 首页已移除重叠的用户信息卡，底部只留常规留白 */
+		padding-top: 8px;
 		padding-bottom: 16px;
+		border-bottom-left-radius: 24px;
+		border-bottom-right-radius: 24px;
 		overflow: hidden;
 	}
 
@@ -750,12 +801,12 @@ onReady(() => {
 	}
 
 	.hero-shape-1 {
-		width: 156px;
-		height: 156px;
-		right: -54px;
-		top: -42px;
+		width: 128px;
+		height: 128px;
+		right: -44px;
+		top: -52px;
 		background-color: #FFFFFF;
-		opacity: 0.14;
+		opacity: 0.12;
 		transform: scale(1);
 		transition-duration: 0.7s;
 		transition-delay: 0.06s;
@@ -768,10 +819,10 @@ onReady(() => {
 
 	/* 琥珀色实心小圆作为点睛，避免整块纯橙过于单调 */
 	.hero-shape-2 {
-		width: 28px;
-		height: 28px;
-		right: 36px;
-		top: 54px;
+		width: 22px;
+		height: 22px;
+		right: 104px;
+		top: 14px;
 		background-color: #F2A93B;
 		opacity: 1;
 		transform: scale(1);
@@ -789,7 +840,6 @@ onReady(() => {
 		padding-right: 20px;
 	}
 
-	/* 第一行：左侧餐厅选择入口，右侧品牌小字，整行一起上浮入场 */
 	.hero-top {
 		flex-direction: row;
 		align-items: center;
@@ -806,103 +856,31 @@ onReady(() => {
 		transform: translateY(12px);
 	}
 
-	/* 餐厅选择胶囊：半透明白底压在橙色块上；底色不在过渡列表内，按下立即变化 */
-	.picker {
-		flex-direction: row;
-		align-items: center;
-		padding-left: 12px;
-		padding-right: 10px;
-		padding-top: 7px;
-		padding-bottom: 7px;
-		border-radius: 999px;
-		background-color: rgba(255, 255, 255, 0.22);
-	}
-
-	.picker-hover {
-		background-color: rgba(255, 255, 255, 0.42);
-	}
-
-	.picker-text {
-		font-size: 13px;
+	/* 品牌字：首页唯一保留的标题，占满左侧把筛选胶囊推到右边 */
+	.hero-brand {
+		flex: 1;
+		font-size: 18px;
 		font-weight: bold;
 		color: #FFFFFF;
+		letter-spacing: 2px;
 	}
 
-	.picker-arrow {
-		margin-left: 6px;
-		font-size: 12px;
-		color: #FFD9C7;
-		transform: rotate(0deg);
-		transition-property: transform;
-		transition-duration: 0.25s;
-		transition-timing-function: ease-out;
-	}
-
-	.picker-arrow-open {
-		transform: rotate(180deg);
-	}
-
-	.hero-eyebrow {
-		margin-left: 10px;
-		font-size: 11px;
-		color: #FFD9C7;
-		letter-spacing: 3px;
-		font-weight: bold;
-	}
-
-	.hero-greeting {
-		margin-top: 8px;
-		font-size: 24px;
-		font-weight: bold;
-		color: #FFFFFF;
-		letter-spacing: 1px;
-		opacity: 1;
-		transform: translateY(0);
-		transition-property: opacity, transform;
-		transition-duration: 0.55s;
-		/* 短语到位时略过冲再回落，避免机械的匀速滑入 */
-		transition-timing-function: cubic-bezier(0.22, 1.3, 0.36, 1);
-		transition-delay: 0.14s;
-	}
-
-	.hero-greeting-pre {
-		opacity: 0;
-		transform: translateY(16px);
-	}
-
-	.hero-desc {
-		margin-top: 8px;
-		font-size: 12px;
-		color: #FFD9C7;
-		opacity: 1;
-		transform: translateY(0);
-		transition-property: opacity, transform;
-		transition-duration: 0.5s;
-		transition-timing-function: ease-out;
-		transition-delay: 0.20s;
-	}
-
-	.hero-desc-pre {
-		opacity: 0;
-		transform: translateY(14px);
-	}
-
-	/* 搜索入口：白底胶囊压在橙色块上，与餐厅选择胶囊形成层次 */
+	/* 搜索入口：白底圆角块压在橙色封头上 */
 	.search-entry {
 		flex-direction: row;
 		align-items: center;
-		margin-top: 16px;
-		height: 42px;
+		margin-top: 12px;
+		height: 40px;
 		padding-left: 14px;
 		padding-right: 14px;
-		border-radius: 999px;
+		border-radius: 14px;
 		background-color: #FFFFFF;
 		opacity: 1;
 		transform: translateY(0);
 		transition-property: opacity, transform;
 		transition-duration: 0.5s;
 		transition-timing-function: ease-out;
-		transition-delay: 0.26s;
+		transition-delay: 0.20s;
 	}
 
 	.search-entry-pre {
@@ -943,10 +921,50 @@ onReady(() => {
 		color: #A2968B;
 	}
 
+	/* ---------- 餐厅筛选入口 ---------- */
+
+	/* 筛选胶囊：只显示当前食堂，点开后在底部面板里纵向选择，食堂再多也不横向滚动 */
+	.hero-picker {
+		flex-shrink: 0;
+		flex-direction: row;
+		align-items: center;
+		max-width: 176px;
+		height: 30px;
+		padding-left: 12px;
+		padding-right: 10px;
+		border-radius: 999px;
+		background-color: rgba(255, 255, 255, 0.22);
+	}
+
+	.hero-picker-hover {
+		background-color: rgba(255, 255, 255, 0.42);
+	}
+
+	.hero-picker-text {
+		flex-shrink: 1;
+		font-size: 13px;
+		font-weight: bold;
+		color: #FFFFFF;
+	}
+
+	.hero-picker-arrow {
+		margin-left: 6px;
+		font-size: 12px;
+		color: #FFD9C7;
+		transform: rotate(0deg);
+		transition-property: transform;
+		transition-duration: 0.25s;
+		transition-timing-function: ease-out;
+	}
+
+	.hero-picker-arrow-open {
+		transform: rotate(180deg);
+	}
+
 	/* ---------- 档口列表 ---------- */
 
 	.section {
-		margin-top: 16px;
+		margin-top: 18px;
 		padding-left: 16px;
 		padding-right: 16px;
 	}
@@ -1040,44 +1058,60 @@ onReady(() => {
 	}
 
 	.stalls {
-		margin-top: 14px;
+		margin-top: 12px;
 	}
 
-    /* 推荐横向浏览，固定图片和卡片高度，不让十条推荐把原有档口列表挤到多屏之后。 */
-    .recommendation-scroll { width: 100%; height: 230px; margin-top: 14px; }
-    .recommendation-list { flex-direction: row; }
-    .recommendation-card {
-        width: 152px;
-        height: 214px;
-        margin-right: 12px;
-        flex-shrink: 0;
-        border-radius: 18px;
-        border-width: 1px;
-        border-style: solid;
-        border-color: #EFE1D6;
-        background-color: #FFFFFF;
-        overflow: hidden;
-    }
-    .recommendation-card-hover { background-color: #FDF0E8; border-color: #E4572E; }
-    .recommendation-image { width: 150px; height: 108px; flex-shrink: 0; background-color: #FDF0E8; overflow: hidden; }
-    .recommendation-body { flex: 1; padding: 10px; }
-    .recommendation-name { font-size: 15px; font-weight: bold; color: #211C18; text-overflow: ellipsis; }
-    .recommendation-reason { margin-top: 6px; font-size: 11px; color: #7A6C60; text-overflow: ellipsis; }
-    .recommendation-price-row { flex-direction: row; align-items: center; justify-content: space-between; margin-top: auto; }
-    .recommendation-price { font-size: 14px; font-weight: bold; color: #C2410C; }
-    .recommendation-specification { margin-left: 4px; font-size: 11px; color: #7A6C60; }
-    .recommendation-state { height: 230px; margin-top: 14px; padding: 20px; border-radius: 18px; background-color: #FFFFFF; justify-content: center; align-items: center; }
-    .recommendation-error { margin-top: 10px; font-size: 12px; color: #7A6C60; }
+	/* 推荐横向浏览：124px 窄卡只留图片、菜名、档口和价格，十条推荐不再挤占整屏 */
+	.recommendation-scroll { width: 100%; height: 180px; margin-top: 12px; }
+	.recommendation-list { flex-direction: row; }
+	.recommendation-card {
+		width: 124px;
+		height: 166px;
+		margin-right: 10px;
+		flex-shrink: 0;
+		border-radius: 16px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #F1E5DA;
+		background-color: #FFFFFF;
+		overflow: hidden;
+	}
+	.recommendation-card-hover { background-color: #FDF0E8; border-color: #E4572E; }
+	.recommendation-image { position: relative; width: 100%; height: 90px; flex-shrink: 0; background-color: #FDF0E8; overflow: hidden; }
+	/* 推荐理由做成图片左下角的白色小角标，不再占正文行高 */
+	.recommendation-reason {
+		position: absolute;
+		left: 7px;
+		bottom: 7px;
+		max-width: 108px;
+		flex-direction: row;
+		align-items: center;
+		padding-left: 6px;
+		padding-right: 6px;
+		padding-top: 3px;
+		padding-bottom: 3px;
+		border-radius: 6px;
+		background-color: rgba(255, 255, 255, 0.92);
+	}
+	.recommendation-reason-text { font-size: 9px; color: #C2410C; }
+	.recommendation-body { flex: 1; padding-left: 9px; padding-right: 9px; padding-top: 7px; padding-bottom: 8px; }
+	.recommendation-name { font-size: 13px; font-weight: bold; color: #211C18; text-overflow: ellipsis; }
+	.recommendation-window { margin-top: 3px; font-size: 10px; color: #A2968B; text-overflow: ellipsis; }
+	.recommendation-price-row { flex-direction: row; align-items: center; justify-content: space-between; margin-top: auto; }
+	.recommendation-price { font-size: 14px; font-weight: bold; color: #C2410C; }
+	.recommendation-arrow { font-size: 15px; color: #D8C6B8; }
+	.recommendation-state { height: 110px; margin-top: 12px; padding: 20px; border-radius: 16px; background-color: #FFFFFF; justify-content: center; align-items: center; }
+	.recommendation-error { margin-top: 10px; font-size: 12px; color: #7A6C60; }
 
 	/* 每张卡片的延展时间由 stallDelay 以行内样式给出，实现由上到下依次浮入 */
 	.stall {
 		flex-direction: row;
 		align-items: center;
 		background-color: #FFFFFF;
-		border-radius: 18px;
+		border-radius: 16px;
 		border-width: 1px;
 		border-style: solid;
-		border-color: #EFE1D6;
+		border-color: #F1E5DA;
 		padding: 12px;
 		margin-bottom: 8px;
 		opacity: 1;
@@ -1101,20 +1135,14 @@ onReady(() => {
 	}
 
 	.stall-badge {
-        overflow: hidden;
-        flex-shrink: 0;
+		overflow: hidden;
+		flex-shrink: 0;
 		width: 44px;
 		height: 44px;
-		border-radius: 15px;
+		border-radius: 14px;
 		background-color: #FDF0E8;
 		align-items: center;
 		justify-content: center;
-	}
-
-	.stall-badge-text {
-		font-size: 19px;
-		font-weight: bold;
-		color: #E4572E;
 	}
 
 	.stall-body {
@@ -1122,15 +1150,40 @@ onReady(() => {
 		margin-left: 12px;
 	}
 
+	.stall-line {
+		flex-direction: row;
+		align-items: center;
+	}
+
 	.stall-name {
+		flex: 1;
 		font-size: 15px;
 		font-weight: bold;
 		color: #211C18;
 	}
 
-	.stall-metrics { margin-top: 4px; flex-direction: row; align-items: center; }
-	.stall-rating { font-size: 12px; color: #C2410C; }
-	.stall-month-sales { margin-left: 8px; font-size: 11px; color: #7A6C60; }
+	/* 评分收紧成小徽标，和档口名同一行，省掉一整行指标区 */
+	.stall-rating-badge {
+		flex-shrink: 0;
+		flex-direction: row;
+		align-items: center;
+		margin-left: 8px;
+		padding-left: 6px;
+		padding-right: 6px;
+		padding-top: 2px;
+		padding-bottom: 2px;
+		border-radius: 6px;
+		background-color: #FDF0E8;
+	}
+	.stall-rating-badge-text { font-size: 10px; font-weight: bold; color: #C2410C; }
+
+	/* 零评价使用中性底色，不伪装成有分数的热门档口 */
+	.stall-rating-badge-none {
+		background-color: #F7F1EB;
+	}
+	.stall-rating-badge-text-none { color: #A2968B; }
+
+	/* 月售、食堂与楼层合并为一行，超长时单行省略 */
 	.stall-meta {
 		margin-top: 5px;
 		font-size: 11px;
@@ -1144,17 +1197,14 @@ onReady(() => {
 
 	/* ---------- 餐厅选择面板 ---------- */
 
-	/* 遮罩：铺满全屏，点击即收起面板 */
+	/* 半透明遮罩：点击空白处关闭，淡入淡出与面板同步 */
 	.mask {
 		position: fixed;
 		left: 0;
 		right: 0;
 		top: 0;
 		bottom: 0;
-		/* 原生 tabBar 的层级固定为 998（H5 端 .uni-tabbar），遮罩必须高于它，
-		   否则面板展开时底部一条会被 tabBar 盖住，且 tabBar 仍可点击 */
-		z-index: 999;
-		background-color: rgba(33, 28, 24, 0.45);
+		background-color: rgba(33, 28, 24, 0.36);
 		opacity: 1;
 		transition-property: opacity;
 		transition-duration: 0.24s;
@@ -1165,23 +1215,23 @@ onReady(() => {
 		opacity: 0;
 	}
 
-	/* 面板：自底部上滑到位时略过冲再回落 */
+	/* 底部面板：圆角白卡 + 拖拽条，内部列表按食堂数量决定高度并纵向滚动 */
 	.sheet {
 		position: fixed;
 		left: 0;
 		right: 0;
 		bottom: 0;
-		/* 层级需同时高于 tabBar(998) 与遮罩(999)，面板底部才不会被 tabBar 遮挡 */
-		z-index: 1000;
 		background-color: #FFFFFF;
-		border-top-left-radius: 22px;
-		border-top-right-radius: 22px;
-		padding-top: 18px;
-		padding-bottom: 24px;
+		border-top-left-radius: 24px;
+		border-top-right-radius: 24px;
+		padding-top: 10px;
+		padding-bottom: 22px;
+		padding-left: 16px;
+		padding-right: 16px;
 		transform: translateY(0);
 		transition-property: transform;
-		transition-duration: 0.3s;
-		transition-timing-function: cubic-bezier(0.22, 1.3, 0.36, 1);
+		transition-duration: 0.24s;
+		transition-timing-function: ease-out;
 	}
 
 	.sheet-pre {
@@ -1189,24 +1239,25 @@ onReady(() => {
 	}
 
 	.sheet-title {
-		padding-left: 22px;
+		align-self: center;
 		font-size: 13px;
 		font-weight: bold;
 		color: #211C18;
-		letter-spacing: 1px;
 	}
 
 	.sheet-list {
-		margin-top: 8px;
+		margin-top: 10px;
 	}
 
-	/* 面板条目：底色不在过渡列表内，按下立即给出反馈 */
 	.sheet-item {
 		flex-direction: row;
 		align-items: center;
 		height: 52px;
-		padding-left: 22px;
-		padding-right: 22px;
+		padding-left: 8px;
+		padding-right: 8px;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-color: #F7EFE7;
 	}
 
 	.sheet-item-hover {
@@ -1224,7 +1275,7 @@ onReady(() => {
 
 	.sheet-item-name-on {
 		font-weight: bold;
-		color: #E4572E;
+		color: #C2410C;
 	}
 
 	.sheet-item-loc {
@@ -1234,7 +1285,7 @@ onReady(() => {
 	}
 
 	.sheet-item-tick {
-		font-size: 14px;
+		font-size: 15px;
 		font-weight: bold;
 		color: #E4572E;
 	}
@@ -1255,11 +1306,10 @@ onReady(() => {
     .home-scroll { flex: 1; min-height: 0; width: 100%; }
     /* #ifdef WEB */
     .page { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-    .recommendation-list { display: flex; }
-    .recommendation-card { display: flex; flex-direction: column; cursor: pointer; }
-    .recommendation-body { display: flex; flex-direction: column; }
-    .recommendation-name { white-space: nowrap; overflow: hidden; }
-    .recommendation-reason { white-space: nowrap; overflow: hidden; }
-    .recommendation-price-row { display: flex; }
+    .hero-body { display: flex; flex-direction: column; }
+    .hero-top, .search-entry, .hero-picker, .stall-line, .recommendation-list, .recommendation-price-row, .sheet-item { display: flex; flex-direction: row; }
+    .hero-picker { align-items: center; }
+    .recommendation-card, .recommendation-body, .sheet-item-body { display: flex; flex-direction: column; }
+    .recommendation-name, .recommendation-window, .stall-name, .stall-meta, .hero-picker-text { white-space: nowrap; overflow: hidden; }
     /* #endif */
 </style>
