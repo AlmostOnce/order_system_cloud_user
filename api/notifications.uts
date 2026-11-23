@@ -1,7 +1,7 @@
 import { httpGet, httpPost, HttpResult } from '../common/http.uts'
 import { jsonArray, jsonBoolean, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
 
-export type NotificationItem = { notificationId: string, title: string, content: string, orderId: number, createdAt: string, readAt: string }
+export type NotificationItem = { notificationId: string, title: string, content: string, orderId: number, bizType: string, bizId: string, createdAt: string, readAt: string }
 export type NotificationPage = { items: Array<NotificationItem>, nextCursor: string, hasMore: boolean }
 export function fetchNotifications(cursor: string): Promise<HttpResult> {
     return httpGet('/notifications?limit=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : ''), true)
@@ -23,7 +23,7 @@ export function parseNotificationPage(result: HttpResult): NotificationPage | nu
         if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) return null
         const row = rows[i] as UTSJSONObject; const id = jsonString(row, 'notificationId') ?? ''
         if (id.length == 0) return null
-        items.push({ notificationId: id, title: jsonString(row, 'title') ?? '', content: jsonString(row, 'content') ?? '', orderId: jsonNumber(row, 'orderId') ?? 0, createdAt: jsonString(row, 'createdAt') ?? '', readAt: jsonString(row, 'readAt') ?? '' })
+        items.push({ notificationId: id, title: jsonString(row, 'title') ?? '', content: jsonString(row, 'content') ?? '', orderId: jsonNumber(row, 'orderId') ?? 0, bizType: jsonString(row, 'bizType') ?? '', bizId: jsonString(row, 'bizId') ?? '', createdAt: jsonString(row, 'createdAt') ?? '', readAt: jsonString(row, 'readAt') ?? '' })
     }
     return { items: items, nextCursor: cursor, hasMore: more }
 }
