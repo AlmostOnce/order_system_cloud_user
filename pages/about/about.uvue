@@ -1,0 +1,105 @@
+<template>
+	<view class="account-page account-secondary">
+		<view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+		<view class="account-nav vapor-account-secondary--account-nav">
+			<view class="account-back vapor-account-secondary--account-back" @click="goBack">
+				<view class="account-back-icon"></view>
+			</view>
+			<text class="account-title">关于我们</text>
+		</view>
+		<scroll-view class="account-scroll" direction="vertical">
+			<view class="account-content vapor-account-secondary--account-content">
+				<view class="account-card vapor-account-secondary--account-card">
+					<text class="account-heading">{{ APP_DISPLAY_NAME }}</text>
+					<text class="about-version">版本 {{ appVersion }}</text>
+					<text class="account-note">面向在校学生的校园食堂点餐服务，由{{ SERVICE_PROVIDER }}提供。</text>
+				</view>
+				<text class="account-section-label">关于与协议</text>
+				<view class="about-group">
+					<view class="account-entry" @click="openTerms">
+						<view class="account-entry-body"><text class="account-entry-title">用户协议</text></view>
+						<text class="about-entry-value">{{ LEGAL_VERSION }}</text>
+						<view class="account-arrow"></view>
+					</view>
+					<view class="about-divider"></view>
+					<view class="account-entry" @click="openPrivacy">
+						<view class="account-entry-body"><text class="account-entry-title">隐私政策</text></view>
+						<text class="about-entry-value">{{ LEGAL_VERSION }}</text>
+						<view class="account-arrow"></view>
+					</view>
+				</view>
+				<view class="account-card vapor-account-secondary--account-card">
+					<text class="account-heading">联系我们</text>
+					<text class="account-note">如对账号、订单、隐私政策或用户协议有疑问，可通过“我的-帮助与反馈”提交工单，或联系{{ SERVICE_PROVIDER }}。</text>
+				</view>
+				<text class="about-footer">湖北经济学院 · 食堂管理中心</text>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import { backToAccount } from '../../common/account.uts'
+import { APP_DISPLAY_NAME, LEGAL_VERSION, SERVICE_PROVIDER } from '../../common/legal.uts'
+
+/**
+ * 版本号兜底值。
+ *
+ * 与 manifest.json 的 versionName 保持一致；仅在系统信息接口不可用或未返回
+ * 版本号时使用，避免“关于”页出现空白版本信息。
+ */
+const APP_VERSION_FALLBACK = '1.0.0'
+
+/**
+ * 读取当前 App 版本号。
+ *
+ * 运行时版本可能与 manifest 不同（例如 HBuilder 调试基座），因此优先使用
+ * 系统信息接口的返回值；读取失败时回退到兜底值，不阻塞页面展示。
+ */
+function readAppVersion(): string {
+	try {
+		const info = uni.getSystemInfoSync()
+		if (info.appVersion.length > 0)
+			return info.appVersion
+	} catch (_error) {
+		// 部分平台不提供完整系统信息，忽略后使用兜底版本。
+	}
+	return APP_VERSION_FALLBACK
+}
+
+/**
+ * 页面状态：状态栏高度用于顶部留白，版本号在进入页面时读取一次。
+ */
+const state = reactive({ statusBarHeight: 0, appVersion: readAppVersion() })
+
+const { statusBarHeight, appVersion } = toRefs(state)
+
+function goBack() {
+	backToAccount()
+}
+
+/** 用户协议属于公开说明，不需要登录态即可查看。 */
+function openTerms() {
+	uni.navigateTo({ url: '/pages/about/legal?type=terms' })
+}
+
+/** 隐私政策与用户协议共用渲染页面，通过 type 区分。 */
+function openPrivacy() {
+	uni.navigateTo({ url: '/pages/about/legal?type=privacy' })
+}
+
+onLoad(() => {
+	state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+})
+</script>
+
+<style>
+	@import '../../styles/account.css';
+
+	.about-version { margin-top: 4px; font-size: 13px; line-height: 20px; font-weight: bold; color: #C2410C; }
+	.about-group { margin-bottom: 10px; border-width: 1px; border-style: solid; border-color: #F1E5DA; border-radius: 20px; background-color: #FFFFFF; overflow: hidden; }
+	.about-divider { height: 1px; margin-left: 16px; background-color: #F2E9E1; }
+	.about-entry-value { margin-left: 8px; font-size: 12px; line-height: 18px; color: #7A6C60; }
+	.about-footer { margin: 4px 0 16px 2px; text-align: center; font-size: 12px; line-height: 18px; color: #7A6C60; }
+</style>

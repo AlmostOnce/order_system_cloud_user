@@ -1,0 +1,65 @@
+<template>
+	<view class="account-page account-secondary">
+		<view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+		<view class="account-nav vapor-account-secondary--account-nav">
+			<view class="account-back vapor-account-secondary--account-back" @click="goBack">
+				<view class="account-back-icon"></view>
+			</view>
+			<text class="account-title">{{ doc.title }}</text>
+		</view>
+		<scroll-view class="account-scroll" direction="vertical">
+			<view class="account-content vapor-account-secondary--account-content">
+				<view class="account-card vapor-account-secondary--account-card">
+					<text class="account-heading">{{ doc.title }}</text>
+					<!-- 版本与更新日期直接来自协议内容模块，和文本修改保持同步。 -->
+					<text class="legal-meta">版本 {{ doc.version }} · 更新日期 {{ doc.updatedAt }}</text>
+					<text class="legal-intro">{{ doc.intro }}</text>
+				</view>
+				<view class="account-card vapor-account-secondary--account-card">
+					<view v-for="(section, sectionIndex) in doc.sections" :key="sectionIndex" class="legal-section">
+						<text class="legal-section-title">{{ section.title }}</text>
+						<text v-for="(paragraph, paragraphIndex) in section.paragraphs" :key="paragraphIndex" class="legal-paragraph">{{ paragraph }}</text>
+					</view>
+				</view>
+				<text class="legal-footer">{{ SERVICE_PROVIDER }}</text>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import { backToAccount } from '../../common/account.uts'
+import { legalDocument, LegalDocument, SERVICE_PROVIDER } from '../../common/legal.uts'
+
+/**
+ * 页面状态。
+ *
+ * doc 初始为隐私政策，onLoad 读取 type 参数后切换；协议属于静态文案，不需要
+ * 登录态和网络请求，因此未登录用户也可以直接打开查看。
+ */
+const state = reactive({ statusBarHeight: 0, doc: legalDocument('privacy') })
+
+const { statusBarHeight, doc } = toRefs(state)
+
+function goBack() {
+	backToAccount()
+}
+
+onLoad((options: OnLoadOptions) => {
+	state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+	// 只识别 terms/privacy，其他值由 legalDocument 回退到隐私政策。
+	state.doc = legalDocument(options['type'] ?? 'privacy')
+})
+</script>
+
+<style>
+	@import '../../styles/account.css';
+
+	.legal-meta { margin-top: 6px; font-size: 12px; line-height: 18px; color: #7A6C60; }
+	.legal-intro { margin-top: 10px; font-size: 13px; line-height: 21px; color: #4A4038; }
+	.legal-section { margin-top: 18px; }
+	.legal-section-title { font-size: 14px; line-height: 20px; font-weight: bold; color: #211C18; }
+	.legal-paragraph { margin-top: 8px; font-size: 13px; line-height: 21px; color: #4A4038; }
+	.legal-footer { margin: 4px 0 16px 2px; font-size: 12px; line-height: 18px; color: #7A6C60; }
+</style>

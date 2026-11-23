@@ -79,6 +79,14 @@
 			"style": { "navigationStyle": "custom" }
 		},
 		{
+			"path": "pages/about/about",
+			"style": { "navigationStyle": "custom" }
+		},
+		{
+			"path": "pages/about/legal",
+			"style": { "navigationStyle": "custom" }
+		},
+		{
 			"path": "pages/account/email-verification",
             "style": { "navigationStyle": "custom" }
         },
