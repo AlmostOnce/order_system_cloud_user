@@ -1,0 +1,503 @@
+<template>
+    <view class="account-page account-secondary support-page">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <view class="account-back vapor-account-secondary--account-back" @click="goBack">
+                <view class="account-back-icon"></view>
+            </view>
+            <text class="account-title">反馈详情</text>
+        </view>
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!loading && !submitting && !closing && !imageBusy" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
+            <view class="account-content vapor-account-secondary--account-content">
+                <!-- 详情加载失败时只给出重试，不展示不完整的时间线。 -->
+                <view v-if="detail == null && errorText.length > 0" class="support-card">
+                    <text class="account-heading">反馈暂时无法加载</text>
+                    <text class="account-error">{{ errorText }}</text>
+                    <view class="favorite-retry" @click="retry">
+                        <text class="favorite-retry-text">重新加载</text>
+                    </view>
+                </view>
+                <view v-else-if="detail == null" class="support-card">
+                    <text class="support-hint">正在加载反馈详情…</text>
+                </view>
+
+                <view v-else>
+                    <!-- 状态头：状态、类型与展示编号，进入详情即可确认处理阶段。 -->
+                    <view class="support-detail-status">
+                        <view class="support-detail-status-row">
+                            <text class="support-detail-status-label">{{ detail!.statusLabel }}</text>
+                            <view class="support-type-tag" :class="detail!.type == 'DINING' ? 'support-type-dining' : 'support-type-software'">
+                                <text>{{ detail!.typeLabel }}</text>
+                            </view>
+                        </view>
+                        <text class="support-detail-no">编号 #{{ detail!.displayNo.length > 0 ? detail!.displayNo : detail!.ticketId }}</text>
+                        <text class="support-detail-time">提交于 {{ formatFullTime(detail!.createdAt) }}</text>
+                    </view>
+
+                    <!-- 基础信息与关联对象，均为提交时的快照。 -->
+                    <view class="support-card">
+                        <view class="support-info-row">
+                            <text class="support-info-label">问题类型</text>
+                            <text class="support-info-value">{{ detail!.typeLabel }}</text>
+                        </view>
+                        <view class="support-info-row">
+                            <text class="support-info-label">问题分类</text>
+                            <text class="support-info-value">{{ detail!.categoryLabel }}</text>
+                        </view>
+                        <view class="support-info-row">
+                            <text class="support-info-label">关联对象</text>
+                            <text class="support-info-value">{{ detailTarget(detail!) }}</text>
+                        </view>
+                        <view v-if="detail!.lastReplyAt.length > 0" class="support-info-row">
+                            <text class="support-info-label">最近回复</text>
+                            <text class="support-info-value">{{ formatFullTime(detail!.lastReplyAt) }}</text>
+                        </view>
+                        <view v-if="detail!.closedAt.length > 0" class="support-info-row">
+                            <text class="support-info-label">关闭时间</text>
+                            <text class="support-info-value">{{ formatFullTime(detail!.closedAt) }}</text>
+                        </view>
+                        <view v-if="detail!.deviceInfo.length > 0" class="support-info-row">
+                            <text class="support-info-label">设备信息</text>
+                            <text class="support-info-value">{{ detail!.deviceInfo }}</text>
+                        </view>
+                    </view>
+
+                    <!-- 问题描述与提交时的图片。 -->
+                    <view class="support-card">
+                        <text class="support-label">问题描述</text>
+                        <text class="support-desc">{{ detail!.description }}</text>
+                        <view v-if="detail!.imageUrls.length > 0" class="support-photos">
+                            <view v-for="(url, index) in detail!.imageUrls" :key="url" class="support-photo-cell">
+                                <image class="support-photo" :src="photoSource(url)" mode="aspectFill" @click="() => previewDetailImage(index)"></image>
+                            </view>
+                        </view>
+                    </view>
+
+                    <!-- 时间线：员工回复靠左、学生补充靠右、系统事件居中。 -->
+                    <view class="support-card">
+                        <view class="support-card-head">
+                            <text class="support-label">处理进度</text>
+                            <text class="support-hint">{{ detail!.messages.length > 0 ? detail!.messages.length + ' 条记录' : '等待处理' }}</text>
+                        </view>
+                        <view class="support-timeline">
+                            <view v-for="message in detail!.messages" :key="message.messageId" class="support-msg-row" :class="'support-msg-row-' + supportSenderTone(message.senderType)">
+                                <view v-if="message.senderType == 'SYSTEM'" class="support-msg-system">
+                                    <text class="support-msg-system-text">{{ message.content }}</text>
+                                </view>
+                                <view v-else class="support-msg-block" :class="'support-msg-block-' + supportSenderTone(message.senderType)">
+                                    <text class="support-msg-meta">{{ message.senderLabel }} · {{ formatTime(message.createdAt) }}</text>
+                                    <view v-if="message.content.length > 0" class="support-msg-bubble" :class="'support-msg-bubble-' + supportSenderTone(message.senderType)">
+                                        <text class="support-msg-text" :class="'support-msg-text-' + supportSenderTone(message.senderType)">{{ message.content }}</text>
+                                    </view>
+                                    <view v-if="message.imageUrls.length > 0" class="support-msg-photos">
+                                        <image v-for="(url, imageIndex) in message.imageUrls" :key="url" class="support-msg-photo" :src="photoSource(url)" mode="aspectFill" @click="() => previewMessageImage(message, imageIndex)"></image>
+                                    </view>
+                                </view>
+                            </view>
+                        </view>
+                    </view>
+
+                    <!-- 未关闭时允许补充说明；关闭后只保留只读时间线。 -->
+                    <view v-if="detail!.status != 'CLOSED'" class="support-card support-compose">
+                        <view class="support-card-head"><text class="support-label">补充说明</text></view>
+                        <textarea class="support-textarea" v-model="draft" :maxlength="1000" :disabled="submitting || closing || imageBusy" placeholder="补充现场情况或回答员工的追问" aria-label="补充说明"></textarea>
+                        <text class="support-counter">{{ draft.length }} / 1000</text>
+                        <view class="support-photos">
+                            <view v-for="(photo, index) in photos" :key="photo.fileKey" class="support-photo-cell">
+                                <image class="support-photo" :src="photoSource(photo.url)" mode="aspectFill" @click="previewPhoto(index)"></image>
+                                <view v-if="!submitting && !closing" class="support-photo-remove" @click="removePhoto(index)">
+                                    <text class="support-photo-remove-text">移除</text>
+                                </view>
+                            </view>
+                            <view v-if="photos.length < 3 && !submitting && !closing" class="support-add-photo" @click="() => { if (!(imageBusy)) addPhoto() }" :style="imageBusy ? 'opacity:0.5' : ''">
+                                <text class="support-add-mark">＋</text>
+                                <text class="support-add-note">{{ imageBusy ? '上传中…' : photos.length + '/3' }}</text>
+                            </view>
+                        </view>
+                        <text v-if="composeError.length > 0" class="account-error">{{ composeError }}</text>
+                        <button class="support-submit support-submit-text button-text button-text-50" :class="(submitting || imageBusy) ? 'support-submit-busy' : ''" :disabled="submitting || closing || imageBusy" @click="submitMessage">{{ submitting ? '正在发送…' : '发送补充说明' }}</button>
+                    </view>
+
+                    <view v-if="detail!.status != 'CLOSED'" class="support-danger-action" @click="askClose">
+                        <text class="support-danger-text">问题已解决，关闭本次反馈</text>
+                    </view>
+                    <view v-else class="support-closed-note">
+                        <text class="support-closed-note-text">该反馈已关闭。如问题再次出现，请提交新的反馈。</text>
+                    </view>
+                </view>
+            </view>
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            </view>
+        </scroll-view>
+
+        <!-- 关闭操作二次确认，避免误触后无法继续补充。 -->
+        <confirm-dialog v-if="confirming" title="关闭反馈" message="关闭后本次反馈不能再补充说明。若问题已解决，确认关闭；若仍存在问题，请继续等待员工处理。" cancel-text="再等等" confirm-text="确认关闭" busy-text="正在关闭…" :busy="closing" @cancel="cancelClose" @confirm="submitClose"></confirm-dialog>
+    </view>
+</template>
+
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+import ConfirmDialog from '../../components/confirm-dialog/confirm-dialog.uvue'
+import { currentUser } from '../../store/auth.uts'
+import { backToAccount } from '../../common/account.uts'
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
+import { toast } from '../../common/feedback.uts'
+import { chooseLocalImage } from '../../common/image-picker.uts'
+import { imageSource } from '../../common/images.uts'
+import { jsonString } from '../../common/json.uts'
+import { addSupportMessage, closeSupportTicket, fetchSupportTicket, parseSupportDetail, supportPayload, supportSenderTone, uploadSupportImage, SupportMessage, SupportTicketDetail } from '../../api/support.uts'
+
+type SupportPhoto = { fileKey: string, url: string }
+
+const state = reactive({
+    /** 状态栏高度，保持账户二级页一致的安全区。 */
+    statusBarHeight: 0,
+    /** 页面路由中的公开工单标识。 */
+    ticketId: '',
+    /** 当前登录学生标识；异步响应只允许写回发起请求的账号。 */
+    userUuid: '',
+    /** 页面是否可见；离开后拒绝迟到响应。 */
+    pageVisible: false,
+    /** 工单详情；为空表示加载中或加载失败。 */
+    detail: null as SupportTicketDetail | null,
+    /** 是否已有成功加载记录，用于区分重试提示。 */
+    loading: false,
+    /** 详情级错误提示。 */
+    errorText: '',
+    /** 下拉刷新状态。 */
+    refreshing: false,
+    currentRefreshTime: '',
+    /** 补充说明正文。 */
+    draft: '',
+    /** 补充说明待上传图片。 */
+    photos: [] as Array<SupportPhoto>,
+    /** 图片上传中，禁止重复选图与提交。 */
+    imageBusy: false,
+    /** 补充说明提交中。 */
+    submitting: false,
+    /** 本次补充说明的幂等键；内容变化时重新生成。 */
+    messageKey: '',
+    /** 幂等键对应的内容签名，用于判断能否安全复用。 */
+    messageSignature: '',
+    /** 补充说明级错误。 */
+    composeError: '',
+    /** 关闭确认弹窗是否显示。 */
+    confirming: false,
+    /** 关闭请求进行中。 */
+    closing: false
+})
+
+const { statusBarHeight, detail, loading, errorText, refreshing, currentRefreshTime, draft, photos, imageBusy, submitting, composeError, confirming, closing } = toRefs(state)
+
+let requestVersion = 0
+
+/** 判断响应是否仍属于当前页面、当前账号和当前请求轮次。 */
+function isCurrent(version: number, owner: string): boolean {
+    return state.pageVisible && requestVersion == version && currentUser()?.userUuid == owner
+}
+
+/** 生成 UUID v4 形式的幂等键；仅防重复提交，不参与鉴权。 */
+function newSupportKey(): string {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (value: string): string => {
+        const random = Math.floor(Math.random() * 16)
+        return (value == 'x' ? random : (random & 3) | 8).toString(16)
+    })
+}
+
+/** 时间线使用到分钟，避免同一分钟内的多条系统记录挤占宽度。 */
+function formatTime(value: string): string {
+    if (value.length == 0) return '时间暂不可用'
+    return value.replace('T', ' ').substring(0, 16)
+}
+
+/** 状态头与信息区使用完整到秒的时间。 */
+function formatFullTime(value: string): string {
+    if (value.length == 0) return '—'
+    return value.replace('T', ' ').substring(0, 19)
+}
+
+/** 生成关联对象文案：用餐问题合并窗口与订单，软件问题固定文案。 */
+function detailTarget(value: SupportTicketDetail): string {
+    if (value.type == 'SOFTWARE') return '客户端使用问题'
+    let text = value.windowName
+    if (value.orderNo.length > 0) text += (text.length > 0 ? ' · ' : '') + '订单 ' + value.orderNo
+    return text.length > 0 ? text : '用餐记录'
+}
+
+/** 把后端相对图片地址转换为网关绝对地址。 */
+function photoSource(url: string): string {
+    return imageSource(url, 'product')
+}
+
+/** 预览问题描述中的图片。 */
+function previewDetailImage(index: number): void {
+    if (state.detail == null) return
+    const urls = state.detail.imageUrls.map((url: string): string => photoSource(url))
+    if (index >= 0 && index < urls.length) uni.previewImage({ current: urls[index], urls: urls })
+}
+
+/** 预览某条消息中的图片。 */
+function previewMessageImage(message: SupportMessage, index: number): void {
+    const urls = message.imageUrls.map((url: string): string => photoSource(url))
+    if (index >= 0 && index < urls.length) uni.previewImage({ current: urls[index], urls: urls })
+}
+
+/** 预览补充说明中尚未发送的图片。 */
+function previewPhoto(index: number): void {
+    const urls = state.photos.map((photo: SupportPhoto): string => photoSource(photo.url))
+    if (index >= 0 && index < urls.length) uni.previewImage({ current: urls[index], urls: urls })
+}
+
+/**
+ * 加载详情。
+ *
+ * 每次加载都从服务端取完整时间线：学生端读取详情时后端会清零未读标记，
+ * 因此返回列表后列表页刷新即可去掉「新回复」提示。
+ */
+async function loadDetail(): Promise<void> {
+    if (state.loading || state.ticketId.length == 0 || state.userUuid.length == 0) return
+    const version = ++requestVersion
+    const owner = state.userUuid
+    state.loading = true
+    state.errorText = ''
+    try {
+        const result = await fetchSupportTicket(state.ticketId)
+        if (!isCurrent(version, owner)) return
+        const raw = supportPayload(result)
+        const parsed = raw == null ? null : parseSupportDetail(raw)
+        if (parsed == null) {
+            state.errorText = result.message.length > 0 ? result.message : '反馈详情暂时无法获取'
+            return
+        }
+        state.detail = parsed
+    } catch (_error) {
+        if (isCurrent(version, owner)) state.errorText = '反馈详情暂时无法获取，请稍后重试'
+    } finally {
+        if (isCurrent(version, owner)) state.loading = false
+    }
+}
+
+/** 详情加载失败后的重试。 */
+function retry(): void {
+    loadDetail()
+}
+
+/** 逐张选择并上传补充图片，最多 3 张。 */
+async function addPhoto(): Promise<void> {
+    if (state.submitting || state.closing || state.imageBusy || state.photos.length >= 3) return
+    state.imageBusy = true
+    state.composeError = ''
+    try {
+        const choice = await chooseLocalImage()
+        if (choice.error.length > 0) { toast(choice.error); return }
+        if (choice.path.length == 0) return
+        const result = await uploadSupportImage(choice.path)
+        const raw = supportPayload(result)
+        const fileKey = raw == null ? '' : (jsonString(raw, 'fileKey') ?? '')
+        if (!result.ok || !/^[a-f0-9]{32}$/.test(fileKey)) {
+            toast(result.message.length > 0 ? result.message : '图片上传失败，请重试')
+            return
+        }
+        state.photos.push({ fileKey: fileKey, url: '/api/files/' + fileKey + '/content' })
+    } finally {
+        state.imageBusy = false
+    }
+}
+
+function removePhoto(index: number): void {
+    if (state.submitting || state.closing || state.imageBusy) return
+    if (index >= 0 && index < state.photos.length) state.photos.splice(index, 1)
+}
+
+/** 只取文件键数组，请求体不携带展示地址。 */
+function photoKeys(): Array<string> {
+    const keys: Array<string> = []
+    for (let i = 0; i < state.photos.length; i++) keys.push(state.photos[i].fileKey)
+    return keys
+}
+
+/**
+ * 发送补充说明。
+ *
+ * 幂等键按内容签名管理：内容未变时重试复用原键，网络失败不会重复追加消息；
+ * 内容变化时换新键，避免后端判定「同键不同内容」。成功响应直接携带最新详情，
+ * 用其替换页面数据，省掉一次额外请求。
+ */
+async function submitMessage(): Promise<void> {
+    if (state.submitting || state.closing || state.imageBusy || state.detail == null) return
+    state.composeError = ''
+    const content = state.draft.trim()
+    if (content.length == 0) { state.composeError = '请输入补充说明'; return }
+    if (content.length > 1000) { state.composeError = '补充说明不能超过 1000 字'; return }
+    if (state.photos.length > 3) { state.composeError = '最多上传 3 张图片'; return }
+
+    const body: UTSJSONObject = { content: content, imageFileKeys: photoKeys() }
+    const signature = JSON.stringify(body)
+    if (state.messageSignature != signature || state.messageKey.length == 0) {
+        state.messageKey = newSupportKey()
+        state.messageSignature = signature
+    }
+    state.submitting = true
+    try {
+        const result = await addSupportMessage(state.ticketId, body, state.messageKey)
+        const raw = supportPayload(result)
+        const parsed = raw == null ? null : parseSupportDetail(raw)
+        if (parsed != null) {
+            state.detail = parsed
+            state.draft = ''
+            state.photos = []
+            state.messageKey = ''
+            state.messageSignature = ''
+            toast('已补充说明')
+            return
+        }
+        if (result.ok) {
+            // 后端已受理但响应结构异常：重新拉取详情，避免用户误以为发送失败而重复提交。
+            state.draft = ''
+            state.photos = []
+            state.messageKey = ''
+            state.messageSignature = ''
+            toast('已补充说明')
+            loadDetail()
+            return
+        }
+        state.composeError = result.message.length > 0 ? result.message : '发送失败，请稍后重试'
+    } catch (_error) {
+        state.composeError = '发送结果暂时无法确认，请重试'
+    } finally {
+        state.submitting = false
+    }
+}
+
+/** 打开关闭确认弹窗；关闭请求进行中不允许重复打开。 */
+function askClose(): void {
+    if (state.submitting || state.imageBusy || state.closing || state.detail == null) return
+    if (state.detail.status == 'CLOSED') return
+    state.confirming = true
+}
+
+/** 取消关闭：请求进行中不可关闭弹窗，避免用户误以为已中止服务端操作。 */
+function cancelClose(): void {
+    if (!state.closing) state.confirming = false
+}
+
+/**
+ * 确认关闭反馈。
+ *
+ * 关闭是幂等操作，重复点击由 busy 拦截；成功后用响应详情直接刷新页面，
+ * 隐藏补充输入区并展示关闭说明。失败只提示，不改变本地状态。
+ */
+async function submitClose(): Promise<void> {
+    if (state.closing || state.detail == null) return
+    state.closing = true
+    try {
+        const result = await closeSupportTicket(state.ticketId, '学生确认问题已解决')
+        const raw = supportPayload(result)
+        const parsed = raw == null ? null : parseSupportDetail(raw)
+        if (parsed != null) {
+            state.detail = parsed
+            state.confirming = false
+            toast('反馈已关闭')
+            return
+        }
+        if (result.ok) {
+            state.confirming = false
+            toast('反馈已关闭')
+            loadDetail()
+            return
+        }
+        toast(result.message.length > 0 ? result.message : '关闭失败，请稍后重试')
+    } catch (_error) {
+        toast('关闭结果暂时无法确认，请稍后重试')
+    } finally {
+        state.closing = false
+    }
+}
+
+/** 下拉刷新详情，保留尚未发送的补充文字与图片。 */
+function refreshPage(): void {
+    if (state.refreshing || state.loading || state.submitting || state.closing || state.imageBusy) return
+    state.refreshing = true
+    const startedAt = Date.now()
+    state.currentRefreshTime = refreshTimeLabel(startedAt)
+    loadDetail().then(() => {
+        finishPullRefresh(startedAt, state.errorText.length == 0, (time: string) => {
+            if (time.length > 0) state.currentRefreshTime = time
+            state.refreshing = false
+        })
+    }).catch(() => {
+        finishPullRefresh(startedAt, false, (_time: string) => { state.refreshing = false })
+    })
+}
+
+function goBack(): void {
+    if (state.closing) return
+    backToAccount()
+}
+
+/** 读取路由参数；参数只作为查询键，真实归属由后端按 JWT 校验。 */
+onLoad((options: OnLoadOptions) => {
+    state.ticketId = options['ticketId'] ?? ''
+})
+
+/**
+ * 页面显示时校验登录与角色并刷新详情。
+ *
+ * 从图片预览或系统设置返回时也重新拉取，确保员工新回复及时出现；
+ * 切换账号时清空旧详情与草稿，避免把上一个账号的数据展示给新账号。
+ */
+onPageShow(() => {
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+    const user = currentUser()
+    if (user == null) {
+        state.pageVisible = false
+        requestVersion++
+        uni.reLaunch({ url: '/pages/login/login' })
+        return
+    }
+    if (user.roleCode != 'CUSTOMER') {
+        state.pageVisible = false
+        requestVersion++
+        uni.switchTab({ url: '/pages/home/home' })
+        return
+    }
+    if (state.userUuid.length > 0 && state.userUuid != user.userUuid) {
+        state.detail = null
+        state.draft = ''
+        state.photos = []
+        state.messageKey = ''
+        state.messageSignature = ''
+        state.composeError = ''
+        state.errorText = ''
+    }
+    state.userUuid = user.userUuid
+    state.pageVisible = true
+    if (state.ticketId.length == 0) {
+        state.errorText = '缺少反馈编号，请从「我的反馈」重新进入'
+        return
+    }
+    loadDetail()
+})
+
+/** 页面隐藏时使进行中的请求失效，迟到响应不再写入。 */
+onPageHide(() => {
+    state.pageVisible = false
+    requestVersion++
+    state.loading = false
+    state.refreshing = false
+})
+
+onUnload(() => {
+    state.pageVisible = false
+    requestVersion++
+    state.loading = false
+    state.refreshing = false
+})
+</script>
+
+<style>
+@import '../../styles/account.css';
+@import '../../styles/support.css';
+</style>

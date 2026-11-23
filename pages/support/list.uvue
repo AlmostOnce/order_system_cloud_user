@@ -1,0 +1,314 @@
+<template>
+    <view class="account-page account-secondary support-page">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <view class="account-back vapor-account-secondary--account-back" @click="goBack">
+                <view class="account-back-icon"></view>
+            </view>
+            <text class="account-title">帮助与反馈</text>
+            <view class="support-nav-action" @click="openSubmit">
+                <text class="support-nav-action-text">我要反馈</text>
+            </view>
+        </view>
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!loading && !loadingMore" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMore" :lower-threshold="80">
+            <view class="account-content vapor-account-secondary--account-content">
+                <view class="support-intro">
+                    <text class="support-eyebrow">需要帮助</text>
+                    <text class="support-title">先看看常见问题</text>
+                    <text class="support-subtitle">用餐问题由食堂处理，软件问题由技术侧处理；提交后可在下方跟踪进度。</text>
+                </view>
+
+                <!-- 分类指引只做分流说明，点击直接进入带类型的提交页。 -->
+                <view class="support-card">
+                    <view class="support-card-head"><text class="support-label">问题类型</text></view>
+                    <view class="support-link-row support-row" @click="() => openSubmitWithType('DINING')">
+                        <view class="support-type-tag support-type-dining"><text>用餐问题</text></view>
+                        <text class="support-link-text">卫生、出餐、态度、等待时间、分量价格</text>
+                        <view class="account-arrow"></view>
+                    </view>
+                    <view class="support-divider"></view>
+                    <view class="support-link-row support-row" @click="() => openSubmitWithType('SOFTWARE')">
+                        <view class="support-type-tag support-type-software"><text>软件问题</text></view>
+                        <text class="support-link-text">闪退、支付、下单、页面显示、登录账号</text>
+                        <view class="account-arrow"></view>
+                    </view>
+                    <text class="support-note-text">退款、漏发与金额问题请优先使用订单详情中的「退款与售后」。</text>
+                </view>
+
+                <view class="support-card">
+                    <view class="support-card-head">
+                        <text class="support-label">我的反馈</text>
+                        <text class="support-hint">{{ loaded ? '共 ' + totalLabel : '正在加载' }}</text>
+                    </view>
+
+                    <!-- 首屏失败且无缓存时给出明确重试入口。 -->
+                    <view v-if="errorText.length > 0 && items.length == 0" class="support-state-card">
+                        <text class="account-error">{{ errorText }}</text>
+                        <view class="favorite-retry" @click="retry">
+                            <text class="favorite-retry-text">重新加载</text>
+                        </view>
+                    </view>
+
+                    <!-- 空态：只给提交入口，不堆叠说明。 -->
+                    <view v-else-if="loaded && items.length == 0" class="support-empty">
+                        <text class="support-empty-title">还没有提交过反馈</text>
+                        <text class="support-empty-note">遇到问题可以随时提交，处理结果会在这里展示。</text>
+                        <view class="support-empty-action" @click="openSubmit">
+                            <text class="support-empty-action-text">提交第一条反馈</text>
+                        </view>
+                    </view>
+
+                    <view v-else>
+                        <view v-for="ticket in items" :key="ticket.ticketId" class="support-list-card" :class="ticket.customerUnread ? 'support-list-card-unread' : ''" @click="() => openDetail(ticket.ticketId)">
+                            <view class="support-list-head">
+                                <view class="support-type-tag" :class="ticket.type == 'DINING' ? 'support-type-dining' : 'support-type-software'">
+                                    <text>{{ ticket.typeLabel }}</text>
+                                </view>
+                                <text class="support-list-category">{{ ticket.categoryLabel }}</text>
+                                <view class="support-status-chip" :class="'support-status-' + supportStatusTone(ticket.status)">
+                                    <text>{{ ticket.statusLabel }}</text>
+                                </view>
+                            </view>
+                            <text class="support-list-target">{{ targetText(ticket) }}</text>
+                            <text class="support-list-desc">{{ ticket.description }}</text>
+                            <view class="support-list-foot">
+                                <text class="support-list-time">{{ ticket.displayNo.length > 0 ? '#' + ticket.displayNo + ' · ' : '' }}{{ formatTime(ticket.createdAt) }}</text>
+                                <view v-if="ticket.customerUnread" class="support-unread">
+                                    <view class="support-unread-dot"></view>
+                                    <text class="support-unread-text">有新回复</text>
+                                </view>
+                                <text v-else class="support-list-time">{{ ticket.status == 'CLOSED' ? '已结束' : '查看详情' }}</text>
+                            </view>
+                        </view>
+
+                        <!-- 增量失败保留已加载内容，只在尾部提示，避免整页报错。 -->
+                        <view v-if="errorText.length > 0" class="support-state-card">
+                            <text class="account-error">{{ errorText }}</text>
+                            <view class="favorite-retry" @click="loadMore">
+                                <text class="favorite-retry-text">继续加载</text>
+                            </view>
+                        </view>
+                        <view v-else-if="loading || loadingMore" class="support-page-hint">
+                            <text class="support-hint">{{ loading ? '正在加载…' : '正在加载更多…' }}</text>
+                        </view>
+                        <text v-else-if="loaded && !hasMore" class="support-end">没有更多反馈了</text>
+                    </view>
+                </view>
+            </view>
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            </view>
+        </scroll-view>
+    </view>
+</template>
+
+<script setup lang="uts">
+import { reactive, toRefs, computed } from 'vue'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+import { currentUser } from '../../store/auth.uts'
+import { backToAccount } from '../../common/account.uts'
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
+import { toast } from '../../common/feedback.uts'
+import { fetchSupportTickets, parseSupportPage, supportPayload, supportStatusTone, SupportTicket } from '../../api/support.uts'
+
+const state = reactive({
+    /** 状态栏高度，保持账户二级页一致的安全区。 */
+    statusBarHeight: 0,
+    /** 当前登录学生标识；异步响应只允许写回发起请求的账号。 */
+    userUuid: '',
+    /** 页面是否可见；离开后拒绝迟到响应。 */
+    pageVisible: false,
+    /** 已加载的反馈列表，按提交时间倒序。 */
+    items: [] as Array<SupportTicket>,
+    /** 下一页游标；空串表示从第一页开始。 */
+    nextCursor: '',
+    /** 是否还有下一页。 */
+    hasMore: false,
+    /** 首屏或下拉刷新进行中。 */
+    loading: false,
+    /** 触底加载更多进行中；与 loading 分开以复用不同提示。 */
+    loadingMore: false,
+    /** 是否已成功加载过至少一页，用于区分空态与加载中。 */
+    loaded: false,
+    /** 列表级错误提示。 */
+    errorText: '',
+    /** 下拉刷新状态。 */
+    refreshing: false,
+    currentRefreshTime: ''
+})
+
+const { statusBarHeight, items, hasMore, loading, loadingMore, loaded, errorText, refreshing, currentRefreshTime } = toRefs(state)
+
+/** 进度条右侧的数量文案；未加载完成时不显示具体数量，避免短暂显示 0。 */
+const totalLabel = computed((): string => state.hasMore ? state.items.length + '+' : state.items.length.toString())
+
+let requestVersion = 0
+
+/** 判断响应是否仍属于当前页面、当前账号和当前请求轮次。 */
+function isCurrent(version: number, owner: string): boolean {
+    return state.pageVisible && requestVersion == version && currentUser()?.userUuid == owner
+}
+
+/** 展示时间去掉秒，保持列表底部单行。 */
+function formatTime(value: string): string {
+    if (value.length == 0) return '时间暂不可用'
+    return value.replace('T', ' ').substring(0, 16)
+}
+
+/** 生成关联对象文案：用餐问题优先窗口，其次订单；软件问题不展示空字段。 */
+function targetText(ticket: SupportTicket): string {
+    if (ticket.type == 'SOFTWARE') return '客户端使用问题'
+    let text = ticket.windowName
+    if (ticket.orderNo.length > 0) text += (text.length > 0 ? ' · ' : '') + '订单 ' + ticket.orderNo
+    return text.length > 0 ? text : '用餐记录'
+}
+
+/**
+ * 加载一页反馈。
+ *
+ * reset 为 true 时从第一页重新拉取，成功后整体替换；否则按游标追加。
+ * 首屏失败且无缓存时展示整页错误；增量失败只提示尾部错误并保留已加载项。
+ *
+ * @param reset 是否重置为第一页
+ */
+async function loadPage(reset: boolean): Promise<void> {
+    if (state.loading || state.loadingMore || state.userUuid.length == 0) return
+    const version = ++requestVersion
+    const owner = state.userUuid
+    if (reset) state.loading = true
+    else state.loadingMore = true
+    state.errorText = ''
+    try {
+        const result = await fetchSupportTickets(reset ? '' : state.nextCursor)
+        if (!isCurrent(version, owner)) return
+        const raw = supportPayload(result)
+        const page = raw == null ? null : parseSupportPage(raw)
+        if (page == null) {
+            state.errorText = result.message.length > 0 ? result.message : '反馈列表暂时无法获取'
+            if (state.items.length > 0) toast(state.errorText)
+            return
+        }
+        // 分页契约要求 hasMore 时游标非空；这里再判一次，防止后端异常造成死循环。
+        if (page.hasMore && page.nextCursor == (reset ? '' : state.nextCursor)) {
+            state.errorText = '分页数据异常，请下拉刷新'
+            return
+        }
+        if (reset) state.items = page.items
+        else state.items = state.items.concat(page.items)
+        state.nextCursor = page.nextCursor
+        state.hasMore = page.hasMore
+        state.loaded = true
+    } catch (_error) {
+        if (isCurrent(version, owner)) {
+            state.errorText = '反馈列表暂时无法获取，请稍后重试'
+            if (state.items.length > 0) toast(state.errorText)
+        }
+    } finally {
+        if (isCurrent(version, owner)) {
+            state.loading = false
+            state.loadingMore = false
+        }
+    }
+}
+
+/** 触底加载下一页；没有更多或正在请求时忽略。 */
+function loadMore(): void {
+    if (!state.hasMore || state.loading || state.loadingMore || state.userUuid.length == 0) return
+    loadPage(false)
+}
+
+/** 下拉刷新：重新拉取第一页，保留当前列表直到新数据返回。 */
+function refreshPage(): void {
+    if (state.refreshing || state.loading || state.loadingMore || state.userUuid.length == 0) return
+    state.refreshing = true
+    const startedAt = Date.now()
+    state.currentRefreshTime = refreshTimeLabel(startedAt)
+    loadPage(true).then(() => {
+        finishPullRefresh(startedAt, state.errorText.length == 0, (time: string) => {
+            if (time.length > 0) state.currentRefreshTime = time
+            state.refreshing = false
+        })
+    }).catch(() => {
+        finishPullRefresh(startedAt, false, (_time: string) => { state.refreshing = false })
+    })
+}
+
+/** 首屏错误重试。 */
+function retry(): void {
+    if (state.loading) return
+    loadPage(state.items.length == 0)
+}
+
+function openSubmit(): void {
+    uni.navigateTo({ url: '/pages/support/submit' })
+}
+
+/** 按类型直达提交页；提交页当前只有两种类型，参数只作为初始值。 */
+function openSubmitWithType(type: string): void {
+    uni.navigateTo({ url: '/pages/support/submit?type=' + encodeURIComponent(type) })
+}
+
+function openDetail(ticketId: string): void {
+    uni.navigateTo({ url: '/pages/support/detail?ticketId=' + encodeURIComponent(ticketId) })
+}
+
+function goBack(): void {
+    backToAccount()
+}
+
+/**
+ * 页面显示时校验登录与角色，并在返回本页时刷新列表。
+ *
+ * 详情页读取后会把服务端未读标记清零，因此每次显示都重新拉取第一页，
+ * 保证「新回复」提示与员工最新回复同步。
+ */
+onPageShow(() => {
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+    const user = currentUser()
+    if (user == null) {
+        state.pageVisible = false
+        requestVersion++
+        uni.reLaunch({ url: '/pages/login/login' })
+        return
+    }
+    if (user.roleCode != 'CUSTOMER') {
+        state.pageVisible = false
+        requestVersion++
+        uni.switchTab({ url: '/pages/home/home' })
+        return
+    }
+    // 账号切换时丢弃上一个账号的缓存列表，避免短暂显示他人反馈。
+    if (state.userUuid.length > 0 && state.userUuid != user.userUuid) {
+        state.items = []
+        state.nextCursor = ''
+        state.hasMore = false
+        state.loaded = false
+        state.errorText = ''
+    }
+    state.userUuid = user.userUuid
+    state.pageVisible = true
+    loadPage(true)
+})
+
+/** 页面隐藏时使进行中的请求失效，迟到响应不再写入。 */
+onPageHide(() => {
+    state.pageVisible = false
+    requestVersion++
+    state.loading = false
+    state.loadingMore = false
+    state.refreshing = false
+})
+
+onUnload(() => {
+    state.pageVisible = false
+    requestVersion++
+    state.loading = false
+    state.loadingMore = false
+    state.refreshing = false
+})
+</script>
+
+<style>
+@import '../../styles/account.css';
+@import '../../styles/support.css';
+</style>

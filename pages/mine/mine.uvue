@@ -90,6 +90,15 @@
                         <view class="account-entry-icon"><view class="lock-hoop"></view><view class="lock-body"></view></view><view class="account-entry-body"><text class="account-entry-title">支付密码</text></view><text class="entry-badge" :class="payPasswordSet ? 'entry-badge-on' : 'entry-badge-off'">{{ payPasswordSet ? '已设置' : '未设置' }}</text><view class="account-arrow"></view>
 				</view>
                 </view>
+                <!-- 帮助与反馈属于学生服务，独立分组放在账号与安全之后，避免与安全设置混排。 -->
+                <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">帮助与支持</text>
+                <view v-if="roleCode == 'CUSTOMER'" class="entry-group">
+                    <view class="account-entry" @click="openSupport">
+                        <view class="account-entry-icon"><view class="support-entry-hoop"></view><view class="support-entry-dot"></view></view>
+                        <view class="account-entry-body"><text class="account-entry-title">帮助与反馈</text></view>
+                        <view class="account-arrow"></view>
+                    </view>
+                </view>
                 <view class="signout-button" hover-class="signout-button-pressed" @click="confirmSignOut">
                     <view class="signout-icon"><view class="signout-door"></view><view class="signout-shaft"></view><view class="signout-tip"></view></view><text class="signout-label">退出登录</text>
                 </view>
@@ -191,6 +200,11 @@ function openFavorites() {
 function openCoupons() {
     if (state.roleCode != 'CUSTOMER') return;
     uni.navigateTo({ url: '/pages/coupons/list' });
+}
+/** 帮助与反馈是学生服务；管理端反馈队列不在 uni-app 中提供入口。 */
+function openSupport() {
+    if (state.roleCode != 'CUSTOMER') return;
+    uni.navigateTo({ url: '/pages/support/list' });
 }
 function loadUnreadCount(): Promise<void> {
     startNotificationSession();
@@ -341,6 +355,9 @@ onPageShow(() => {
 	.flow-tip-out { top: 9px; transform: rotate(225deg); }
 	.lock-hoop { position: absolute; top: 6px; left: 11px; width: 10px; height: 10px; border-radius: 5px; border-width: 2px; border-style: solid; border-color: #C2410C; }
 	.lock-body { position: absolute; top: 14px; left: 8px; width: 16px; height: 12px; border-radius: 3px; background-color: #C2410C; }
+	/* 帮助入口用圆环加圆点组合成问号轮廓，不新增图片资源。 */
+	.support-entry-hoop { position: absolute; left: 9px; top: 6px; width: 13px; height: 13px; border-radius: 8px; border-width: 2px; border-style: solid; border-color: #C2410C; }
+	.support-entry-dot { position: absolute; left: 14px; top: 24px; width: 4px; height: 4px; border-radius: 2px; background-color: #C2410C; }
 	.signout-button { display: flex; flex-direction: row; width: 100%; min-height: 48px; margin: 4px 0 0 0; padding: 10px 16px; border-width: 1px; border-style: solid; border-color: #E8DCD2; border-radius: 16px; background-color: #FFFFFF; align-items: center; justify-content: center; }
 	.signout-button-pressed { background-color: #FDF0E8; border-color: #C2410C; }
 	.signout-label { margin-left: 10px; font-size: 15px; line-height: 22px; font-weight: 500; color: #7A6C60; }

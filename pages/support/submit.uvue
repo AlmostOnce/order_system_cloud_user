@@ -1,0 +1,681 @@
+<template>
+    <view class="account-page account-secondary support-page">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <view class="account-back vapor-account-secondary--account-back" @click="() => { if (!(submitting || imageBusy)) goBack() }" :style="(submitting || imageBusy) ? 'opacity:0.5' : ''">
+                <view class="account-back-icon"></view>
+            </view>
+            <text class="account-title">提交反馈</text>
+        </view>
+        <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!submitting && !imageBusy && (refreshing || !optionsBusy)" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage">
+            <view class="account-content vapor-account-secondary--account-content">
+                <view class="support-intro">
+                    <text class="support-eyebrow">帮助与反馈</text>
+                    <text class="support-title">把问题讲清楚，处理会更快</text>
+                    <text class="support-subtitle">用餐问题由食堂侧处理，软件问题由技术侧处理。提交后可在「我的反馈」查看进度。</text>
+                </view>
+
+                <!-- 类型切换：保留描述与图片，切换时只清理不再适用的关联对象。 -->
+                <view class="support-segment">
+                    <view class="support-segment-tab" :class="type == 'DINING' ? 'support-segment-tab-on' : 'support-segment-tab-off'" @click="() => { if (!(submitting || imageBusy)) selectType('DINING') }">
+                        <text class="support-segment-text" :class="type == 'DINING' ? 'support-segment-text-on' : 'support-segment-text-off'">用餐问题</text>
+                    </view>
+                    <view class="support-segment-tab" :class="type == 'SOFTWARE' ? 'support-segment-tab-on' : 'support-segment-tab-off'" @click="() => { if (!(submitting || imageBusy)) selectType('SOFTWARE') }">
+                        <text class="support-segment-text" :class="type == 'SOFTWARE' ? 'support-segment-text-on' : 'support-segment-text-off'">软件问题</text>
+                    </view>
+                </view>
+
+                <!-- 用餐问题必须关联订单或窗口，管理端据此确定餐厅数据范围。 -->
+                <view v-if="type == 'DINING'" class="support-card">
+                    <view class="support-card-head">
+                        <text class="support-label">关联用餐记录（必选）</text>
+                    </view>
+                    <view class="support-segment support-row">
+                        <view class="support-segment-tab" :class="linkMode == 'ORDER' ? 'support-segment-tab-on' : 'support-segment-tab-off'" @click="() => { if (!(submitting || imageBusy)) selectLinkMode('ORDER') }">
+                            <text class="support-segment-text" :class="linkMode == 'ORDER' ? 'support-segment-text-on' : 'support-segment-text-off'">选择订单</text>
+                        </view>
+                        <view class="support-segment-tab" :class="linkMode == 'WINDOW' ? 'support-segment-tab-on' : 'support-segment-tab-off'" @click="() => { if (!(submitting || imageBusy)) selectLinkMode('WINDOW') }">
+                            <text class="support-segment-text" :class="linkMode == 'WINDOW' ? 'support-segment-text-on' : 'support-segment-text-off'">选择窗口</text>
+                        </view>
+                    </view>
+
+                    <!-- 订单选择：只读取本人最近一页订单，默认展示前 5 条。 -->
+                    <view v-if="linkMode == 'ORDER'">
+                        <view class="support-select-row">
+                            <view class="support-select-copy">
+                                <text class="support-select-title">关联订单</text>
+                                <text class="support-select-value">{{ selectedOrderId > 0 ? selectedOrderNo + (selectedOrderWindowName.length > 0 ? ' · ' + selectedOrderWindowName : '') : '请选择本人在该窗口的订单' }}</text>
+                            </view>
+                            <text class="support-select-action" @click="() => { if (!(submitting || imageBusy)) toggleOrderList() }">{{ showOrderList ? '收起' : (selectedOrderId > 0 ? '更换' : '选择') }}</text>
+                        </view>
+                        <view v-if="showOrderList || selectedOrderId == 0" class="support-options">
+                            <text v-if="ordersLoading" class="support-hint">正在获取最近订单…</text>
+                            <text v-else-if="ordersError.length > 0" class="account-error">{{ ordersError }}</text>
+                            <view v-for="order in visibleOrders" :key="order.orderId" class="support-option" :class="selectedOrderId == order.orderId ? 'support-option-on' : ''" @click="() => { if (!(submitting || imageBusy)) selectOrder(order) }">
+                                <view class="support-option-copy">
+                                    <text class="support-option-title">{{ order.windowName.length > 0 ? order.windowName : '校园食堂' }}</text>
+                                    <text class="support-option-meta">{{ order.orderNo.length > 0 ? '订单 ' + order.orderNo : '订单 ' + order.orderId }} · {{ formatTime(order.createdAt) }}</text>
+                                </view>
+                                <view class="support-option-right">
+                                    <text class="support-option-status">{{ order.status }}</text>
+                                    <text v-if="selectedOrderId == order.orderId" class="support-option-check">已选择</text>
+                                </view>
+                            </view>
+                            <view v-if="!ordersLoading && orders.length > 5" class="support-option-more" @click="toggleAllOrders">
+                                <text class="support-option-more-text">{{ showAllOrders ? '收起更多订单' : '查看全部 ' + orders.length + ' 笔订单' }}</text>
+                            </view>
+                            <text v-if="!ordersLoading && ordersLoaded && orders.length == 0 && ordersError.length == 0" class="support-hint">暂无可选订单，可切换到「选择窗口」。</text>
+                        </view>
+                    </view>
+
+                    <!-- 窗口选择：读取启用窗口，展示名称与位置。 -->
+                    <view v-else>
+                        <view class="support-select-row">
+                            <view class="support-select-copy">
+                                <text class="support-select-title">关联窗口</text>
+                                <text class="support-select-value">{{ selectedWindowId > 0 ? selectedWindowName : '请选择问题发生的窗口' }}</text>
+                            </view>
+                            <text class="support-select-action" @click="() => { if (!(submitting || imageBusy)) toggleWindowList() }">{{ showWindowList ? '收起' : (selectedWindowId > 0 ? '更换' : '选择') }}</text>
+                        </view>
+                        <view v-if="showWindowList || selectedWindowId == 0" class="support-options">
+                            <text v-if="windowsLoading" class="support-hint">正在获取窗口列表…</text>
+                            <text v-else-if="windowsError.length > 0" class="account-error">{{ windowsError }}</text>
+                            <view v-for="canteen in visibleWindows" :key="canteen.windowId" class="support-option" :class="selectedWindowId == canteen.windowId ? 'support-option-on' : ''" @click="() => { if (!(submitting || imageBusy)) selectWindow(canteen) }">
+                                <view class="support-option-copy">
+                                    <text class="support-option-title">{{ canteen.windowName }}</text>
+                                    <text class="support-option-meta">{{ canteen.location.length > 0 ? canteen.location : '校园食堂' }}</text>
+                                </view>
+                                <view class="support-option-right">
+                                    <text v-if="selectedWindowId == canteen.windowId" class="support-option-check">已选择</text>
+                                </view>
+                            </view>
+                            <view v-if="!windowsLoading && windows.length > 6" class="support-option-more" @click="toggleAllWindows">
+                                <text class="support-option-more-text">{{ showAllWindows ? '收起更多窗口' : '查看全部 ' + windows.length + ' 个窗口' }}</text>
+                            </view>
+                            <text v-if="!windowsLoading && windowsLoaded && windows.length == 0 && windowsError.length == 0" class="support-hint">暂时没有可选窗口，请稍后下拉刷新。</text>
+                        </view>
+                    </view>
+                </view>
+
+                <!-- 分类：由类型决定白名单，切换类型时自动重置。 -->
+                <view class="support-card">
+                    <view class="support-card-head"><text class="support-label">问题分类（必选）</text></view>
+                    <view class="support-categories">
+                        <view v-for="item in categories" :key="item.code" class="support-category" :class="category == item.code ? 'support-category-on' : 'support-category-off'" @click="() => { if (!(submitting || imageBusy)) category = item.code }">
+                            <text class="support-category-text" :class="category == item.code ? 'support-category-text-on' : 'support-category-text-off'">{{ item.label }}</text>
+                        </view>
+                    </view>
+                </view>
+
+                <!-- 描述：10-1000 字，实时计数；客户端校验只用于提前提示，最终以后端为准。 -->
+                <view class="support-card">
+                    <view class="support-card-head"><text class="support-label">问题描述（必填）</text></view>
+                    <textarea class="support-textarea" v-model="description" :maxlength="1000" :disabled="submitting || imageBusy" :placeholder="type == 'DINING' ? '请说明发生时间、窗口与具体情况，至少 10 个字' : '请说明操作步骤、出现的提示与影响范围，至少 10 个字'" aria-label="问题描述"></textarea>
+                    <text class="support-counter">{{ description.length }} / 1000</text>
+                </view>
+
+                <!-- 图片：最多 3 张，先上传取得文件键，提交时只发送文件键。 -->
+                <view class="support-card">
+                    <view class="support-card-head"><text class="support-label">现场图片</text><text class="support-hint">选填，最多 3 张</text></view>
+                    <view class="support-photos">
+                        <view v-for="(photo, index) in photos" :key="photo.fileKey" class="support-photo-cell">
+                            <image class="support-photo" :src="photoSource(photo.url)" mode="aspectFill" @click="previewPhoto(index)"></image>
+                            <view v-if="!submitting" class="support-photo-remove" @click="removePhoto(index)">
+                                <text class="support-photo-remove-text">移除</text>
+                            </view>
+                        </view>
+                        <view v-if="photos.length < 3 && !submitting" class="support-add-photo" @click="() => { if (!(imageBusy)) addPhoto() }" :style="imageBusy ? 'opacity:0.5' : ''">
+                            <text class="support-add-mark">＋</text>
+                            <text class="support-add-note">{{ imageBusy ? '上传中…' : photos.length + '/3' }}</text>
+                        </view>
+                    </view>
+                </view>
+
+                <!-- 软件问题自动附带设备信息，只读展示，不让用户手填。 -->
+                <view v-if="type == 'SOFTWARE'" class="support-card">
+                    <view class="support-card-head"><text class="support-label">设备信息</text></view>
+                    <text class="support-hint">{{ deviceInfo.length > 0 ? deviceInfo : '暂时无法读取设备信息' }}</text>
+                </view>
+
+                <view class="support-note-box">
+                    <text class="support-note-text">{{ type == 'DINING' ? '退款、漏发和金额问题请前往订单详情使用「退款与售后」，反馈工单不会直接发起退款。' : '请勿填写密码、验证码或支付信息；技术同学不会向你索取这些内容。' }}</text>
+                </view>
+
+                <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
+                <button class="support-submit support-submit-text button-text button-text-50" :class="(submitting || imageBusy) ? 'support-submit-busy' : ''" :disabled="submitting || imageBusy" @click="submit">{{ submitting ? '正在提交…' : '提交反馈' }}</button>
+                <text class="support-hint">提交后可在「我的反馈」查看处理进度与回复。</text>
+            </view>
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            </view>
+        </scroll-view>
+    </view>
+</template>
+
+<script setup lang="uts">
+import { reactive, toRefs, computed } from 'vue'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+import { currentUser } from '../../store/auth.uts'
+import { backToAccount } from '../../common/account.uts'
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
+import { toast } from '../../common/feedback.uts'
+import { chooseLocalImage } from '../../common/image-picker.uts'
+import { imageSource } from '../../common/images.uts'
+import { jsonNumber, jsonString, parseJsonObject } from '../../common/json.uts'
+import { fetchOrders, CustomerOrder, orderPayload, parseOrderPage } from '../../api/order.uts'
+import { listActiveWindows, WindowItem } from '../../api/product.uts'
+import { createSupportTicket, supportPayload, uploadSupportImage, parseSupportDetail } from '../../api/support.uts'
+import { HttpResult } from '../../common/http.uts'
+
+type SupportTicketType = 'DINING' | 'SOFTWARE'
+type SupportLinkMode = 'ORDER' | 'WINDOW'
+type SupportPhoto = { fileKey: string, url: string }
+type CategoryOption = { code: string, label: string }
+type SupportDraft = { key: string, signature: string }
+
+/** 用餐问题分类白名单，与后端 SupportCategory 保持一致。 */
+const diningCategories: Array<CategoryOption> = [
+    { code: 'HYGIENE', label: '卫生/异物' },
+    { code: 'WRONG_ITEM', label: '出餐错误' },
+    { code: 'ATTITUDE', label: '服务态度' },
+    { code: 'WAIT_TIME', label: '等待过久' },
+    { code: 'PORTION_PRICE', label: '分量/价格' },
+    { code: 'OTHER', label: '其他' }
+]
+/** 软件问题分类白名单，与后端 SupportCategory 保持一致。 */
+const softwareCategories: Array<CategoryOption> = [
+    { code: 'CRASH', label: '闪退/卡顿' },
+    { code: 'PAYMENT', label: '支付异常' },
+    { code: 'ORDER', label: '下单/订单异常' },
+    { code: 'DISPLAY', label: '页面显示' },
+    { code: 'ACCOUNT', label: '登录/账号' },
+    { code: 'OTHER', label: '其他' }
+]
+/** 本地草稿只接受标准 UUID；后端契约允许 8-64 位字母、数字、下划线与短横线，UUID 是其合法子集。 */
+const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
+
+const state = reactive({
+    /** 状态栏高度，保持账户二级页一致的安全区。 */
+    statusBarHeight: 0,
+    /** 当前登录学生标识；异步响应只允许写回发起请求的账号。 */
+    userUuid: '',
+    /** 页面是否可见；离开后拒绝迟到响应。 */
+    pageVisible: false,
+    /** 当前反馈类型：用餐问题或软件问题。 */
+    type: 'DINING' as SupportTicketType,
+    /** 用餐问题的关联方式：订单或窗口。 */
+    linkMode: 'ORDER' as SupportLinkMode,
+    /** 当前选中的分类编码。 */
+    category: 'HYGIENE',
+    /** 问题描述正文。 */
+    description: '',
+    /** 已上传图片，保存文件键与预览地址。 */
+    photos: [] as Array<SupportPhoto>,
+    /** 最近一页本人订单，作为用餐问题的关联候选。 */
+    orders: [] as Array<CustomerOrder>,
+    ordersLoading: false,
+    ordersLoaded: false,
+    ordersError: '',
+    /** 订单列表是否展开全部，默认只展示前 5 条。 */
+    showAllOrders: false,
+    /** 订单候选区是否展开。 */
+    showOrderList: true,
+    /** 已选订单快照；只保存展示所需字段，避免引用大对象。 */
+    selectedOrderId: 0,
+    selectedOrderNo: '',
+    selectedOrderWindowName: '',
+    /** 启用窗口候选。 */
+    windows: [] as Array<WindowItem>,
+    windowsLoading: false,
+    windowsLoaded: false,
+    windowsError: '',
+    showAllWindows: false,
+    showWindowList: true,
+    /** 已选窗口。 */
+    selectedWindowId: 0,
+    selectedWindowName: '',
+    /** 自动采集的设备信息，仅软件问题时提交。 */
+    deviceInfo: '',
+    /** 提交中禁止返回、改类型、选图与重复提交。 */
+    submitting: false,
+    /** 图片上传中禁止重复选图，也禁止提交。 */
+    imageBusy: false,
+    /** 表单级错误提示。 */
+    errorText: '',
+    /** 下拉刷新状态。 */
+    refreshing: false,
+    currentRefreshTime: ''
+})
+
+const { statusBarHeight, type, linkMode, category, description, photos, orders, ordersLoading, ordersLoaded, ordersError, showAllOrders, showOrderList,
+    selectedOrderId, selectedOrderNo, selectedOrderWindowName, windows, windowsLoading, windowsLoaded, windowsError, showAllWindows, showWindowList,
+    selectedWindowId, selectedWindowName, deviceInfo, submitting, imageBusy, errorText, refreshing, currentRefreshTime } = toRefs(state)
+
+/** 当前类型对应的分类选项。 */
+const categories = computed((): Array<CategoryOption> => state.type == 'DINING' ? diningCategories : softwareCategories)
+/** 默认收起时只展示前 5 条订单，减少长表单高度。 */
+const visibleOrders = computed((): Array<CustomerOrder> => state.showAllOrders ? state.orders : state.orders.slice(0, 5))
+/** 默认收起时只展示前 6 个窗口。 */
+const visibleWindows = computed((): Array<WindowItem> => state.showAllWindows ? state.windows : state.windows.slice(0, 6))
+/** 任一候选数据请求进行中时，禁用下拉刷新避免并发覆盖。 */
+const optionsBusy = computed((): boolean => state.ordersLoading || state.windowsLoading)
+
+let requestVersion = 0
+
+/**
+ * 读取列表页传入的类型预选。
+ *
+ * 只接受后端支持的两个类型；未知参数保持默认的用餐问题，避免把任意字符串
+ * 写入类型字段导致后端校验失败。onLoad 早于 onPageShow 执行，因此这里只设置
+ * 表单初始值，登录校验仍由 onPageShow 统一处理。
+ */
+onLoad((options: OnLoadOptions) => {
+    const preset = options['type'] ?? ''
+    if (preset == 'DINING') {
+        state.type = 'DINING'
+        state.category = diningCategories[0].code
+    } else if (preset == 'SOFTWARE') {
+        state.type = 'SOFTWARE'
+        state.category = softwareCategories[0].code
+    }
+})
+
+/** 生成 UUID v4 形式的请求幂等键；只用于防重复提交，不作为认证凭据。 */
+function newSupportKey(): string {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (value: string): string => {
+        const random = Math.floor(Math.random() * 16)
+        return (value == 'x' ? random : (random & 3) | 8).toString(16)
+    })
+}
+
+/** 草稿只保存幂等键与请求体签名，不保存图片二进制或账号凭据。 */
+function draftStorageKey(): string {
+    return 'support_pending_create_' + state.userUuid
+}
+
+/** 读取未确认的提交记录；格式异常时丢弃，避免把损坏数据带入请求。 */
+function readDraft(): SupportDraft | null {
+    if (state.userUuid.length == 0) return null
+    const raw = uni.getStorageSync(draftStorageKey())
+    if (typeof raw != 'string') return null
+    const parsed = parseJsonObject(raw as string)
+    if (parsed == null) return null
+    const key = jsonString(parsed, 'key') ?? ''
+    const signature = jsonString(parsed, 'signature') ?? ''
+    if (!UUID_PATTERN.test(key) || signature.length == 0) return null
+    return { key: key, signature: signature }
+}
+
+/** 组装设备信息，尽量简短；读取失败时返回空串，不阻塞提交。 */
+function composeDeviceInfo(): string {
+    const parts: Array<string> = []
+    try {
+        // 按计划使用系统信息接口一次性取品牌、型号、系统与 App 版本。
+        const info = uni.getSystemInfoSync()
+        parts.push(info.deviceBrand)
+        parts.push(info.deviceModel)
+        parts.push(info.osName)
+        parts.push(info.osVersion)
+        parts.push('App ' + info.appVersion)
+    } catch (_error) {
+        // 部分平台不提供完整系统信息，忽略即可，后端允许该字段为空。
+    }
+    let text = ''
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i].trim()
+        if (part.length == 0) continue
+        if (text.length > 0) text += ' / '
+        text += part
+    }
+    // 数据库列长度为 255，这里提前收敛，避免提交后被截断得难以阅读。
+    return text.length > 200 ? text.substring(0, 200) : text
+}
+
+/** 切换反馈类型：保留描述与图片，清空不适用的关联选择并重置分类。 */
+function selectType(next: SupportTicketType): void {
+    if (state.submitting || state.imageBusy || state.type == next) return
+    state.type = next
+    state.category = next == 'DINING' ? diningCategories[0].code : softwareCategories[0].code
+    // 软件问题不关联订单与窗口，切换过去时主动清空，避免误提交隐藏字段。
+    if (next == 'SOFTWARE') {
+        state.selectedOrderId = 0
+        state.selectedOrderNo = ''
+        state.selectedOrderWindowName = ''
+        state.selectedWindowId = 0
+        state.selectedWindowName = ''
+    } else {
+        ensureOptions()
+    }
+}
+
+/** 切换关联方式：清空另一边的选择，避免同时提交订单与窗口。 */
+function selectLinkMode(next: SupportLinkMode): void {
+    if (state.submitting || state.imageBusy || state.linkMode == next) return
+    state.linkMode = next
+    if (next == 'ORDER') {
+        state.selectedWindowId = 0
+        state.selectedWindowName = ''
+    } else {
+        state.selectedOrderId = 0
+        state.selectedOrderNo = ''
+        state.selectedOrderWindowName = ''
+    }
+    ensureOptions()
+}
+
+/** 按当前类型与关联方式加载候选数据；已加载成功则不重复请求。 */
+function ensureOptions(): void {
+    if (state.type != 'DINING') return
+    if (state.linkMode == 'ORDER' && !state.ordersLoaded && !state.ordersLoading) loadOrders()
+    if (state.linkMode == 'WINDOW' && !state.windowsLoaded && !state.windowsLoading) loadWindows()
+}
+
+/** 读取本人最近一页订单；失败与空列表分别提示。 */
+async function loadOrders(): Promise<void> {
+    if (state.ordersLoading || state.userUuid.length == 0) return
+    const version = ++requestVersion
+    const owner = state.userUuid
+    state.ordersLoading = true
+    state.ordersError = ''
+    try {
+        const result = await fetchOrders('all', '')
+        if (!isCurrent(version, owner)) return
+        const page = parseOrderPage(result)
+        if (page == null) {
+            state.ordersError = result.message.length > 0 ? result.message : '订单列表暂时无法获取'
+            return
+        }
+        state.orders = page.items
+        state.ordersLoaded = true
+        // 已选订单必须仍在最新列表中；服务端数据变化时清理失效选择，避免提交不存在的订单。
+        if (state.selectedOrderId > 0 && !page.items.some((order: CustomerOrder): boolean => order.orderId == state.selectedOrderId)) {
+            state.selectedOrderId = 0
+            state.selectedOrderNo = ''
+            state.selectedOrderWindowName = ''
+        }
+    } catch (_error) {
+        if (isCurrent(version, owner)) state.ordersError = '订单列表暂时无法获取，请稍后重试'
+    } finally {
+        if (isCurrent(version, owner)) state.ordersLoading = false
+    }
+}
+
+/** 读取启用窗口；只用于用餐问题的窗口关联。 */
+async function loadWindows(): Promise<void> {
+    if (state.windowsLoading || state.userUuid.length == 0) return
+    const version = ++requestVersion
+    const owner = state.userUuid
+    state.windowsLoading = true
+    state.windowsError = ''
+    try {
+        const result = await listActiveWindows()
+        if (!isCurrent(version, owner)) return
+        if (!result.ok) {
+            state.windowsError = result.message.length > 0 ? result.message : '窗口列表暂时无法获取'
+            return
+        }
+        state.windows = result.items
+        state.windowsLoaded = true
+        if (state.selectedWindowId > 0 && !result.items.some((canteen: WindowItem): boolean => canteen.windowId == state.selectedWindowId)) {
+            state.selectedWindowId = 0
+            state.selectedWindowName = ''
+        }
+    } catch (_error) {
+        if (isCurrent(version, owner)) state.windowsError = '窗口列表暂时无法获取，请稍后重试'
+    } finally {
+        if (isCurrent(version, owner)) state.windowsLoading = false
+    }
+}
+
+/** 迟到响应与账号切换的统一拦截。 */
+function isCurrent(version: number, owner: string): boolean {
+    return state.pageVisible && requestVersion == version && currentUser()?.userUuid == owner
+}
+
+/** 选择订单后收起候选列表，并清空窗口选择保持互斥。 */
+function selectOrder(order: CustomerOrder): void {
+    state.selectedOrderId = order.orderId
+    state.selectedOrderNo = order.orderNo
+    state.selectedOrderWindowName = order.windowName
+    state.selectedWindowId = 0
+    state.selectedWindowName = ''
+    state.showOrderList = false
+    state.errorText = ''
+}
+
+/** 选择窗口后收起候选列表。 */
+function selectWindow(canteen: WindowItem): void {
+    state.selectedWindowId = canteen.windowId
+    state.selectedWindowName = canteen.windowName
+    state.selectedOrderId = 0
+    state.selectedOrderNo = ''
+    state.selectedOrderWindowName = ''
+    state.showWindowList = false
+    state.errorText = ''
+}
+
+function toggleOrderList(): void {
+    state.showOrderList = !state.showOrderList
+    if (state.showOrderList) ensureOptions()
+}
+
+function toggleWindowList(): void {
+    state.showWindowList = !state.showWindowList
+    if (state.showWindowList) ensureOptions()
+}
+
+function toggleAllOrders(): void {
+    state.showAllOrders = !state.showAllOrders
+}
+
+function toggleAllWindows(): void {
+    state.showAllWindows = !state.showAllWindows
+}
+
+/** 把后端相对图片地址转换为网关绝对地址。 */
+function photoSource(url: string): string {
+    return imageSource(url, 'product')
+}
+
+/** 逐张选择并上传，成功后只保留 32 位文件键，失败时不占用名额。 */
+async function addPhoto(): Promise<void> {
+    if (state.submitting || state.imageBusy || state.photos.length >= 3) return
+    state.imageBusy = true
+    state.errorText = ''
+    try {
+        const choice = await chooseLocalImage()
+        if (choice.error.length > 0) { toast(choice.error); return }
+        if (choice.path.length == 0) return
+        const result = await uploadSupportImage(choice.path)
+        const raw = supportPayload(result)
+        const fileKey = raw == null ? '' : (jsonString(raw, 'fileKey') ?? '')
+        if (!result.ok || !/^[a-f0-9]{32}$/.test(fileKey)) {
+            toast(result.message.length > 0 ? result.message : '图片上传失败，请重试')
+            return
+        }
+        state.photos.push({ fileKey: fileKey, url: '/api/files/' + fileKey + '/content' })
+    } finally {
+        state.imageBusy = false
+    }
+}
+
+function removePhoto(index: number): void {
+    if (state.submitting || state.imageBusy) return
+    if (index >= 0 && index < state.photos.length) state.photos.splice(index, 1)
+}
+
+function previewPhoto(index: number): void {
+    const urls = state.photos.map((photo: SupportPhoto): string => photoSource(photo.url))
+    if (index >= 0 && index < urls.length) uni.previewImage({ current: urls[index], urls: urls })
+}
+
+/** 展示时间去掉秒，列表保持单行。 */
+function formatTime(value: string): string {
+    if (value.length == 0) return '时间暂不可用'
+    return value.replace('T', ' ').substring(0, 16)
+}
+
+/** 只取数组中的字符串字段，供请求体使用。 */
+function photoKeys(): Array<string> {
+    const keys: Array<string> = []
+    for (let i = 0; i < state.photos.length; i++) keys.push(state.photos[i].fileKey)
+    return keys
+}
+
+/**
+ * 提交反馈。
+ *
+ * 先做客户端可提前发现的校验，再按请求体签名复用或重建幂等键：
+ * 内容未变时沿用原键，网络失败重试不会重复建单；内容已变时换新键，
+ * 避免后端按「同键不同内容」拒绝。提交中与图片上传中均不可重复触发。
+ */
+async function submit(): Promise<void> {
+    if (state.submitting || state.imageBusy) return
+    state.errorText = ''
+    const content = state.description.trim()
+    if (content.length < 10) { state.errorText = '问题描述至少 10 个字'; return }
+    if (content.length > 1000) { state.errorText = '问题描述不能超过 1000 字'; return }
+    if (state.type == 'DINING') {
+        if (state.linkMode == 'ORDER' && state.selectedOrderId <= 0) { state.errorText = '请选择关联订单'; return }
+        if (state.linkMode == 'WINDOW' && state.selectedWindowId <= 0) { state.errorText = '请选择关联窗口'; return }
+    }
+    if (state.photos.length > 3) { state.errorText = '最多上传 3 张图片'; return }
+    if (state.userUuid.length == 0) { state.errorText = '登录状态已失效，请重新登录'; return }
+
+    // 请求体只包含后端 DTO 声明的字段：按三种互斥场景分别构造，避免动态下标赋值。
+    const imageKeys = photoKeys()
+    let body: UTSJSONObject
+    if (state.type == 'DINING' && state.linkMode == 'ORDER') {
+        body = { type: 'DINING', category: state.category, orderId: state.selectedOrderId, description: content, imageFileKeys: imageKeys, deviceInfo: '' }
+    } else if (state.type == 'DINING') {
+        body = { type: 'DINING', category: state.category, windowId: state.selectedWindowId, description: content, imageFileKeys: imageKeys, deviceInfo: '' }
+    } else {
+        body = { type: 'SOFTWARE', category: state.category, description: content, imageFileKeys: imageKeys, deviceInfo: state.deviceInfo }
+    }
+    const signature = JSON.stringify(body)
+    let requestKey = ''
+    const draft = readDraft()
+    if (draft != null && draft.signature == signature) requestKey = draft.key
+    if (requestKey.length == 0) requestKey = newSupportKey()
+    // 发请求前落盘，超时或进程中断后用户重试仍复用同一个幂等键。
+    try {
+        const pending: SupportDraft = { key: requestKey, signature: signature }
+        uni.setStorageSync(draftStorageKey(), JSON.stringify(pending))
+    } catch (_error) {
+        state.errorText = '无法保存提交记录，请检查设备存储空间'
+        return
+    }
+
+    state.submitting = true
+    try {
+        const result = await createSupportTicket(body, requestKey)
+        const raw = supportPayload(result)
+        const detail = raw == null ? null : parseSupportDetail(raw)
+        if (detail != null) {
+            uni.removeStorageSync(draftStorageKey())
+            uni.redirectTo({ url: '/pages/support/detail?ticketId=' + encodeURIComponent(detail.ticketId) })
+            return
+        }
+        if (result.ok) {
+            // 后端已受理但响应结构异常：不再重试，避免重复建单，引导到列表查看。
+            uni.removeStorageSync(draftStorageKey())
+            toast('反馈已提交，请在「我的反馈」查看')
+            uni.redirectTo({ url: '/pages/support/list' })
+            return
+        }
+        // 明确的业务拒绝不会因原样重试而成功，清理草稿让用户修改后用新键提交。
+        if (result.statusCode == 400 || result.statusCode == 403 || result.statusCode == 404 || result.statusCode == 409 || result.statusCode == 422) uni.removeStorageSync(draftStorageKey())
+        state.errorText = result.message.length > 0 ? result.message : '提交失败，请稍后重试'
+    } catch (_error) {
+        // 传输层异常保留草稿，用户可在内容不变时用原键重试。
+        state.errorText = '提交结果暂时无法确认，请重试'
+    } finally {
+        state.submitting = false
+    }
+}
+
+/** 下拉刷新重新拉取当前候选数据，不清理已填写的描述与图片。 */
+function refreshPage(): void {
+    if (state.refreshing || state.submitting || state.imageBusy || optionsBusy.value) return
+    state.refreshing = true
+    const startedAt = Date.now()
+    state.currentRefreshTime = refreshTimeLabel(startedAt)
+    // 软件问题没有候选数据需要刷新，直接结束下拉，避免发出与表单无关的订单请求。
+    const task = state.type != 'DINING' ? Promise.resolve() : (state.linkMode == 'WINDOW' ? loadWindows() : loadOrders())
+    task.then(() => {
+        finishPullRefresh(startedAt, state.ordersError.length == 0 && state.windowsError.length == 0, (time: string) => {
+            if (time.length > 0) state.currentRefreshTime = time
+            state.refreshing = false
+        })
+    }).catch(() => {
+        finishPullRefresh(startedAt, false, (_time: string) => { state.refreshing = false })
+    })
+}
+
+function goBack(): void {
+    if (!state.submitting && !state.imageBusy) backToAccount()
+}
+
+/**
+ * 页面显示时校验登录与角色。
+ *
+ * 切换账号时清空表单与草稿键，避免把上一个账号的输入带到新账号；
+ * 设备信息只在软件问题需要时采集一次，供只读展示与提交复用。
+ */
+onPageShow(() => {
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+    const user = currentUser()
+    if (user == null) {
+        state.pageVisible = false
+        requestVersion++
+        uni.reLaunch({ url: '/pages/login/login' })
+        return
+    }
+    if (user.roleCode != 'CUSTOMER') {
+        state.pageVisible = false
+        requestVersion++
+        uni.switchTab({ url: '/pages/home/home' })
+        return
+    }
+    if (state.userUuid.length > 0 && state.userUuid != user.userUuid) {
+        state.description = ''
+        state.photos = []
+        state.category = state.type == 'DINING' ? diningCategories[0].code : softwareCategories[0].code
+        state.selectedOrderId = 0
+        state.selectedOrderNo = ''
+        state.selectedOrderWindowName = ''
+        state.selectedWindowId = 0
+        state.selectedWindowName = ''
+        state.orders = []
+        state.ordersLoaded = false
+        state.windows = []
+        state.windowsLoaded = false
+    }
+    state.userUuid = user.userUuid
+    state.pageVisible = true
+    if (state.deviceInfo.length == 0) state.deviceInfo = composeDeviceInfo()
+    ensureOptions()
+})
+
+/** 页面隐藏时使进行中的请求失效，迟到响应不再写入。 */
+onPageHide(() => {
+    state.pageVisible = false
+    requestVersion++
+    state.ordersLoading = false
+    state.windowsLoading = false
+    state.refreshing = false
+})
+
+onUnload(() => {
+    state.pageVisible = false
+    requestVersion++
+    state.ordersLoading = false
+    state.windowsLoading = false
+    state.refreshing = false
+})
+</script>
+
+<style>
+@import '../../styles/account.css';
+@import '../../styles/support.css';
+</style>
