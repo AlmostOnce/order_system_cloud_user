@@ -75,6 +75,10 @@
 			"style": { "navigationStyle": "custom" }
 		},
 		{
+			"path": "pages/account/change-password",
+			"style": { "navigationStyle": "custom" }
+		},
+		{
 			"path": "pages/account/email-verification",
             "style": { "navigationStyle": "custom" }
         },

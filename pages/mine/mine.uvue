@@ -86,6 +86,10 @@
                 </view>
                 <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">账号与安全</text>
 				<view v-if="roleCode == 'CUSTOMER'" class="entry-group">
+                    <view v-if="roleCode == 'CUSTOMER'" class="account-entry" @click="openChangePassword">
+                        <view class="account-entry-icon"><view class="lock-hoop"></view><view class="lock-body"></view></view><view class="account-entry-body"><text class="account-entry-title">修改登录密码</text></view><view class="account-arrow"></view>
+                    </view>
+                    <view class="entry-divider"></view>
                     <view v-if="roleCode == 'CUSTOMER'" class="account-entry" @click="openPayPassword">
                         <view class="account-entry-icon"><view class="lock-hoop"></view><view class="lock-body"></view></view><view class="account-entry-body"><text class="account-entry-title">支付密码</text></view><text class="entry-badge" :class="payPasswordSet ? 'entry-badge-on' : 'entry-badge-off'">{{ payPasswordSet ? '已设置' : '未设置' }}</text><view class="account-arrow"></view>
 				</view>
@@ -273,6 +277,10 @@ function openRechargeRecords() {
 
 function openPayRecords() {
     uni.navigateTo({ url: '/pages/wallet/records?type=PAY' });
+}
+
+function openChangePassword() {
+    uni.navigateTo({ url: '/pages/account/change-password' });
 }
 
 function openPayPassword() {

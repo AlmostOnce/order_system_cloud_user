@@ -43,6 +43,15 @@ export function updateMyProfile(username: string): Promise<HttpResult> {
     return httpPut('/users/me/profile', body, true)
 }
 
+/**
+ * 校验当前登录密码后修改登录密码。
+ * 成功后后端递增凭据版本，全部旧会话失效；调用方必须清理本地登录态并回到登录页。
+ */
+export function changeLoginPassword(currentPassword: string, newPassword: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { currentPassword: currentPassword, newPassword: newPassword }
+    return httpPut('/users/me/password', body, true)
+}
+
 export function authorizeEmailChange(loginPassword: string): Promise<HttpResult> {
     const body: UTSJSONObject = { loginPassword: loginPassword }
     return httpPost('/users/me/email/authorization', body, true)
