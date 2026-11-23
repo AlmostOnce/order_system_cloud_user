@@ -1,0 +1,359 @@
+import { httpGet, httpPost, HttpResult } from '../common/http.uts'
+import { jsonArray, jsonBoolean, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
+import { uploadImage } from './files.uts'
+
+/**
+ * 学生反馈工单接口定义。
+ *
+ * 路径与 support-service 的 SupportController 一一对应，经网关统一前缀访问。
+ * 所有请求都要求 CUSTOMER 身份，后端以 JWT 中的用户编号作为数据归属，
+ * 客户端不提交、也不信任任何用户身份参数。
+ *
+ * 约定：本文件的方法只负责发请求与严格解析，不抛异常、不自动重试；
+ * 幂等键由页面生成并持久化，网络失败后由用户主动重试时复用。
+ */
+
+/** 我的反馈列表项，对应后端 SupportTicketSummaryVO。 */
+export type SupportTicket = {
+    /** 公开工单标识，也是详情路由参数与分页游标。 */
+    ticketId: string
+    /** 8 位展示编号，列表与详情用于替代长 UUID。 */
+    displayNo: string
+    /** 类型编码：DINING / SOFTWARE。 */
+    type: string
+    /** 类型中文名称。 */
+    typeLabel: string
+    /** 分类中文名称。 */
+    categoryLabel: string
+    /** 状态编码：PENDING / PROCESSING / CLOSED。 */
+    status: string
+    /** 状态中文名称。 */
+    statusLabel: string
+    /** 关联订单号快照，软件问题为空串。 */
+    orderNo: string
+    /** 窗口名称快照，软件问题为空串。 */
+    windowName: string
+    /** 描述摘要，后端最多返回 60 字。 */
+    description: string
+    /** 是否有员工新回复；进入详情后由后端清零。 */
+    customerUnread: boolean
+    /** 提交时间，格式为 yyyy-MM-ddTHH:mm:ss。 */
+    createdAt: string
+    /** 最近员工回复时间，未回复时为空串。 */
+    lastReplyAt: string
+}
+
+/** 时间线消息，对应后端 SupportTicketMessageVO。 */
+export type SupportMessage = {
+    /** 公开消息标识，列表循环键。 */
+    messageId: string
+    /** 发送方编码：CUSTOMER / STAFF / SYSTEM。 */
+    senderType: string
+    /** 发送方中文名称，由后端统一映射。 */
+    senderLabel: string
+    /** 消息正文。 */
+    content: string
+    /** 图片展示地址，统一为 /api/files/{key}/content。 */
+    imageUrls: Array<string>
+    /** 是否为员工内部备注；学生接口始终为 false。 */
+    internalNote: boolean
+    /** 写入时间。 */
+    createdAt: string
+}
+
+/** 工单详情，对应后端 SupportTicketDetailVO。 */
+export type SupportTicketDetail = {
+    ticketId: string
+    displayNo: string
+    type: string
+    typeLabel: string
+    category: string
+    categoryLabel: string
+    status: string
+    statusLabel: string
+    /** 关联订单编号；软件问题或无订单时为 0。 */
+    orderId: number
+    orderNo: string
+    /** 关联窗口编号；软件问题或无窗口时为 0。 */
+    windowId: number
+    windowName: string
+    /** 完整问题描述。 */
+    description: string
+    /** 描述图片展示地址。 */
+    imageUrls: Array<string>
+    /** 软件问题自动上报的设备信息，可空。 */
+    deviceInfo: string
+    customerUnread: boolean
+    createdAt: string
+    updatedAt: string
+    lastReplyAt: string
+    /** 关闭时间，未关闭时为空串。 */
+    closedAt: string
+    /** 学生可见时间线，已过滤内部备注。 */
+    messages: Array<SupportMessage>
+}
+
+/** 游标分页结果，对应后端 SupportTicketPageVO。 */
+export type SupportPage = {
+    items: Array<SupportTicket>
+    /** 下一页游标；hasMore 为 false 时为空串。 */
+    nextCursor: string
+    hasMore: boolean
+}
+
+/** 从统一响应体中取出 data 对象；失败或数据缺失时返回 null。 */
+export function supportPayload(result: HttpResult): UTSJSONObject | null {
+    return result.ok && result.data != null ? jsonObject(result.data, 'data') : null
+}
+
+/**
+ * 把 JSON 数组字段解析为字符串数组。
+ *
+ * 字段缺失时按空数组处理，因为后端列表与详情允许没有图片；
+ * 一旦数组中出现非字符串元素，说明响应已不可信，返回 null 让整条数据判为异常。
+ *
+ * @param raw  响应对象
+ * @param name 字段名
+ * @return 字符串数组；元素类型异常时返回 null
+ */
+function stringList(raw: UTSJSONObject, name: string): Array<string> | null {
+    const values = jsonArray(raw, name)
+    if (values == null) return []
+    const output: Array<string> = []
+    for (let i = 0; i < values.length; i++) {
+        if (typeof values[i] != 'string') return null
+        output.push(values[i] as string)
+    }
+    return output
+}
+
+/** 判断状态编码是否为当前后端支持的三种状态。 */
+function isKnownStatus(status: string): boolean {
+    return status == 'PENDING' || status == 'PROCESSING' || status == 'CLOSED'
+}
+
+/** 判断发送方编码是否为当前后端支持的三种来源。 */
+function isKnownSender(sender: string): boolean {
+    return sender == 'CUSTOMER' || sender == 'STAFF' || sender == 'SYSTEM'
+}
+
+/**
+ * 解析列表项。
+ *
+ * 工单标识、类型和状态必须存在且合法；展示文案缺失时由调用方使用默认文案，
+ * 这里不伪造状态，避免把异常响应显示成正常工单。
+ *
+ * @param raw 单条工单对象
+ * @return 列表项；关键字段异常时返回 null
+ */
+export function parseSupportTicket(raw: UTSJSONObject): SupportTicket | null {
+    const ticketId = jsonString(raw, 'ticketId') ?? ''
+    const type = jsonString(raw, 'type') ?? ''
+    const status = jsonString(raw, 'status') ?? ''
+    const unread = jsonBoolean(raw, 'customerUnread') ?? false
+    if (ticketId.length == 0 || (type != 'DINING' && type != 'SOFTWARE') || !isKnownStatus(status)) return null
+    return {
+        ticketId: ticketId,
+        displayNo: jsonString(raw, 'displayNo') ?? '',
+        type: type,
+        typeLabel: jsonString(raw, 'typeLabel') ?? (type == 'DINING' ? '用餐问题' : '软件问题'),
+        categoryLabel: jsonString(raw, 'categoryLabel') ?? '其他',
+        status: status,
+        statusLabel: jsonString(raw, 'statusLabel') ?? status,
+        orderNo: jsonString(raw, 'orderNo') ?? '',
+        windowName: jsonString(raw, 'windowName') ?? '',
+        description: jsonString(raw, 'description') ?? '',
+        customerUnread: unread,
+        createdAt: jsonString(raw, 'createdAt') ?? '',
+        lastReplyAt: jsonString(raw, 'lastReplyAt') ?? ''
+    }
+}
+
+/**
+ * 解析时间线消息。
+ *
+ * @param raw 单条消息对象
+ * @return 消息；消息标识或发送方异常时返回 null
+ */
+export function parseSupportMessage(raw: UTSJSONObject): SupportMessage | null {
+    const messageId = jsonString(raw, 'messageId') ?? ''
+    const senderType = jsonString(raw, 'senderType') ?? ''
+    const images = stringList(raw, 'imageUrls')
+    if (messageId.length == 0 || !isKnownSender(senderType) || images == null) return null
+    return {
+        messageId: messageId,
+        senderType: senderType,
+        senderLabel: jsonString(raw, 'senderLabel') ?? '系统',
+        content: jsonString(raw, 'content') ?? '',
+        imageUrls: images,
+        // 学生接口不会返回内部备注；保留字段解析以便统一结构与后续扩展。
+        internalNote: jsonBoolean(raw, 'internalNote') ?? false,
+        createdAt: jsonString(raw, 'createdAt') ?? ''
+    }
+}
+
+/**
+ * 解析列表分页结果。
+ *
+ * 严格校验分页契约：声明还有下一页时，游标必须非空且当前页不能为空，
+ * 否则页面会陷入重复请求同一游标的循环。
+ *
+ * @param raw 分页对象
+ * @return 分页结果；结构异常时返回 null
+ */
+export function parseSupportPage(raw: UTSJSONObject): SupportPage | null {
+    const rows = jsonArray(raw, 'items')
+    const more = jsonBoolean(raw, 'hasMore')
+    const cursor = jsonString(raw, 'nextCursor') ?? ''
+    if (rows == null || more == null || (more && (cursor.length == 0 || rows.length == 0))) return null
+    const items: Array<SupportTicket> = []
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i]
+        if (row == null || typeof row != 'object' || Array.isArray(row)) return null
+        const ticket = parseSupportTicket(row as UTSJSONObject)
+        if (ticket == null) return null
+        items.push(ticket)
+    }
+    return { items: items, nextCursor: cursor, hasMore: more }
+}
+
+/**
+ * 解析工单详情。
+ *
+ * 复用列表项解析保证基础字段一致，再读取描述、关联对象、图片与时间线。
+ * 时间线中的任意一条消息异常都会让整个详情失败，避免展示残缺对话误导用户。
+ *
+ * @param raw 详情对象
+ * @return 详情；结构异常时返回 null
+ */
+export function parseSupportDetail(raw: UTSJSONObject): SupportTicketDetail | null {
+    const base = parseSupportTicket(raw)
+    if (base == null) return null
+    const imageUrls = stringList(raw, 'imageUrls')
+    const rows = jsonArray(raw, 'messages')
+    if (imageUrls == null || rows == null) return null
+    const messages: Array<SupportMessage> = []
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i]
+        if (row == null || typeof row != 'object' || Array.isArray(row)) return null
+        const message = parseSupportMessage(row as UTSJSONObject)
+        if (message == null) return null
+        messages.push(message)
+    }
+    return {
+        ticketId: base.ticketId,
+        displayNo: base.displayNo,
+        type: base.type,
+        typeLabel: base.typeLabel,
+        category: jsonString(raw, 'category') ?? '',
+        categoryLabel: base.categoryLabel,
+        status: base.status,
+        statusLabel: base.statusLabel,
+        orderId: jsonNumber(raw, 'orderId') ?? 0,
+        orderNo: base.orderNo,
+        windowId: jsonNumber(raw, 'windowId') ?? 0,
+        windowName: base.windowName,
+        description: jsonString(raw, 'description') ?? '',
+        imageUrls: imageUrls,
+        deviceInfo: jsonString(raw, 'deviceInfo') ?? '',
+        customerUnread: base.customerUnread,
+        createdAt: base.createdAt,
+        updatedAt: jsonString(raw, 'updatedAt') ?? '',
+        lastReplyAt: base.lastReplyAt,
+        closedAt: jsonString(raw, 'closedAt') ?? '',
+        messages: messages
+    }
+}
+
+/**
+ * 查询本人反馈列表。
+ *
+ * @param cursor 上一页返回的游标，首屏传空串
+ * @return 请求结果
+ */
+export function fetchSupportTickets(cursor: string = ''): Promise<HttpResult> {
+    return httpGet('/support/tickets?limit=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : ''), true)
+}
+
+/**
+ * 查询本人反馈详情。
+ *
+ * @param ticketId 公开工单标识
+ * @return 请求结果
+ */
+export function fetchSupportTicket(ticketId: string): Promise<HttpResult> {
+    return httpGet('/support/tickets/' + encodeURIComponent(ticketId), true)
+}
+
+/**
+ * 提交反馈。
+ *
+ * @param body 请求体，字段与 CreateSupportTicketRequest 一致
+ * @param key  幂等键；请求底座会以 Idempotency-Key 发送
+ * @return 请求结果，成功时 data 为工单详情
+ */
+export function createSupportTicket(body: UTSJSONObject, key: string): Promise<HttpResult> {
+    return httpPost('/support/tickets', body, true, key)
+}
+
+/**
+ * 补充说明。
+ *
+ * @param ticketId 公开工单标识
+ * @param body     补充内容与图片
+ * @param key      本次补充的幂等键
+ * @return 请求结果，成功时 data 为最新工单详情
+ */
+export function addSupportMessage(ticketId: string, body: UTSJSONObject, key: string): Promise<HttpResult> {
+    return httpPost('/support/tickets/' + encodeURIComponent(ticketId) + '/messages', body, true, key)
+}
+
+/**
+ * 关闭本人反馈。
+ *
+ * 关闭是幂等操作，重复调用返回已关闭详情；原因可空，仅用于系统消息说明。
+ *
+ * @param ticketId 公开工单标识
+ * @param reason   关闭原因，可空
+ * @return 请求结果，成功时 data 为最新工单详情
+ */
+export function closeSupportTicket(ticketId: string, reason: string): Promise<HttpResult> {
+    const body: UTSJSONObject = { reason: reason }
+    return httpPost('/support/tickets/' + encodeURIComponent(ticketId) + '/close', body, true)
+}
+
+/**
+ * 以 SUPPORT_IMAGE 类型上传反馈图片。
+ *
+ * 后端要求图片必须由当前学生上传且归属支持类型，提交工单时只传文件键。
+ *
+ * @param filePath 本地临时图片路径
+ * @return 请求结果，成功时 data 含 32 位文件键
+ */
+export function uploadSupportImage(filePath: string): Promise<HttpResult> {
+    return uploadImage(filePath, 'SUPPORT_IMAGE', 0)
+}
+
+/**
+ * 生成状态样式色调，供列表与详情共用以保持视觉一致。
+ *
+ * @param status 状态编码
+ * @return 待受理返回 pending，处理中返回 processing，其余按已关闭展示
+ */
+export function supportStatusTone(status: string): string {
+    if (status == 'PENDING') return 'pending'
+    if (status == 'PROCESSING') return 'processing'
+    return 'closed'
+}
+
+/**
+ * 生成发送方方向样式，用于时间线左右布局。
+ *
+ * @param senderType 发送方编码
+ * @return customer（靠右）/ staff（靠左）/ system（居中）
+ */
+export function supportSenderTone(senderType: string): string {
+    if (senderType == 'CUSTOMER') return 'customer'
+    if (senderType == 'STAFF') return 'staff'
+    return 'system'
+}

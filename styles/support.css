@@ -1,0 +1,188 @@
+/*
+ * 帮助与反馈三个页面共用样式。
+ *
+ * 页面骨架、导航、卡片与表单沿用 account.css 的账户二级页语言；
+ * 这里只补充反馈类型、状态标签、工单列表、时间线与补充输入区。
+ * 色板固定为：底色 #FDF6F0、卡片 #FFFFFF、描边 #F1E5DA、
+ * 主色 #E4572E、强调 #C2410C、正文 #211C18、次要文字 #7A6C60。
+ */
+
+/* ---------- 通用 ---------- */
+
+/* 导航右侧动作：以文字按钮替代图标，避免新增图片资源。 */
+.support-nav-action { display: flex; flex-shrink: 0; min-height: 44px; margin-left: auto; padding: 0 4px 0 12px; align-items: center; justify-content: center; }
+.support-nav-action-text { font-size: 13px; line-height: 20px; font-weight: bold; color: #C2410C; }
+
+.support-intro { margin-bottom: 14px; }
+.support-eyebrow { font-size: 12px; line-height: 20px; color: #C2410C; }
+.support-title { margin-top: 6px; font-size: 23px; line-height: 32px; font-weight: bold; color: #211C18; }
+.support-subtitle { margin-top: 6px; font-size: 13px; line-height: 21px; color: #7A6C60; }
+
+/* 分段控件与收藏、评价、券页保持一致：米色轨道，选中项白底橙字。 */
+.support-segment { display: flex; flex-direction: row; margin-bottom: 10px; padding: 4px; border-radius: 14px; background-color: #F3E8DE; }
+.support-segment-tab { display: flex; flex: 1; height: 42px; align-items: center; justify-content: center; border-radius: 11px; }
+.support-segment-tab-on { background-color: #FFFFFF; }
+.support-segment-tab-off { background-color: transparent; }
+.support-segment-text { font-size: 13px; line-height: 20px; }
+.support-segment-text-on { font-weight: bold; color: #C2410C; }
+.support-segment-text-off { color: #7A6C60; }
+
+/* 表单卡片与标题层级。 */
+.support-card { margin-bottom: 10px; padding: 14px; border-width: 1px; border-style: solid; border-color: #F1E5DA; border-radius: 18px; background-color: #FFFFFF; }
+.support-card-head { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+.support-label { font-size: 14px; line-height: 20px; font-weight: bold; color: #211C18; }
+.support-hint { margin-top: 6px; font-size: 12px; line-height: 18px; color: #7A6C60; }
+.support-divider { height: 1px; margin: 12px 0; background-color: #F4EBE4; }
+
+/* ---------- 类型与状态标签 ---------- */
+
+.support-type-tag { flex-shrink: 0; padding: 2px 8px; border-radius: 8px; font-size: 11px; line-height: 17px; font-weight: bold; }
+.support-type-dining { background-color: #FCE8D9; color: #8D3C27; }
+.support-type-software { background-color: #E7EEF7; color: #3A5A80; }
+
+.support-status-chip { flex-shrink: 0; padding: 2px 8px; border-radius: 8px; font-size: 11px; line-height: 17px; font-weight: bold; }
+.support-status-pending { background-color: #FBF0D8; color: #8A6A1F; }
+.support-status-processing { background-color: #FCE4D8; color: #C2410C; }
+.support-status-closed { background-color: #EFEAE5; color: #7A6C60; }
+
+/* ---------- 分类标签 ---------- */
+
+.support-categories { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 8px; }
+.support-category { display: flex; min-height: 40px; margin: 0 8px 8px 0; padding: 8px 12px; border-width: 1px; border-style: solid; border-color: #E8DED4; border-radius: 10px; background-color: #FFFFFF; align-items: center; justify-content: center; }
+.support-category-on { border-color: #E4572E; background-color: #FFF0E6; }
+.support-category-off { border-color: #E8DED4; background-color: #FFFFFF; }
+.support-category-text { font-size: 12px; line-height: 18px; }
+.support-category-text-on { font-weight: bold; color: #C2410C; }
+.support-category-text-off { color: #7A6C60; }
+
+/* ---------- 关联订单 / 窗口选择 ---------- */
+
+.support-select-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; min-height: 48px; margin-top: 8px; padding: 10px 12px; border-radius: 12px; background-color: #FDF6F0; }
+.support-select-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+.support-select-title { font-size: 13px; line-height: 19px; font-weight: bold; color: #211C18; }
+.support-select-value { margin-top: 2px; font-size: 12px; line-height: 18px; color: #7A6C60; }
+.support-select-action { flex-shrink: 0; margin-left: 10px; font-size: 12px; line-height: 18px; color: #C2410C; }
+
+/* 订单/窗口候选项：紧凑行式，减少长表单占用高度。 */
+.support-options { margin-top: 8px; }
+.support-option { display: flex; flex-direction: row; align-items: center; min-height: 52px; margin-bottom: 6px; padding: 9px 10px; border-width: 1px; border-style: solid; border-color: #F1E5DA; border-radius: 12px; background-color: #FFFFFF; }
+.support-option-on { border-color: #E4572E; background-color: #FFF7F2; }
+.support-option-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+.support-option-title { font-size: 13px; line-height: 19px; color: #211C18; }
+.support-option-meta { margin-top: 2px; font-size: 11px; line-height: 17px; color: #7A6C60; }
+.support-option-right { flex-shrink: 0; margin-left: 8px; text-align: right; }
+.support-option-status { font-size: 11px; line-height: 17px; color: #C2410C; }
+.support-option-check { margin-top: 3px; font-size: 10px; line-height: 15px; color: #7A6C60; }
+.support-option-more { display: flex; min-height: 40px; align-items: center; justify-content: center; }
+.support-option-more-text { font-size: 12px; line-height: 18px; color: #C2410C; }
+
+/* ---------- 描述与图片 ---------- */
+
+.support-textarea { width: 100%; height: 120px; margin-top: 8px; padding: 10px; border-radius: 12px; background-color: #FDF6F0; font-size: 14px; line-height: 22px; color: #211C18; }
+.support-counter { margin-top: 6px; text-align: right; font-size: 11px; line-height: 17px; color: #A2968B; }
+.support-photos { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 10px; }
+.support-photo-cell { width: 84px; margin: 0 8px 8px 0; }
+.support-photo { width: 84px; height: 84px; border-radius: 10px; background-color: #FDF6F0; }
+.support-photo-remove { display: flex; min-height: 40px; align-items: center; justify-content: center; }
+.support-photo-remove-text { font-size: 11px; line-height: 17px; color: #B73920; }
+.support-add-photo { display: flex; width: 84px; height: 84px; margin: 0 8px 8px 0; border-width: 1px; border-style: dashed; border-color: #D7C6B5; border-radius: 10px; background-color: #FDF6F0; align-items: center; justify-content: center; flex-direction: column; }
+.support-add-mark { font-size: 24px; line-height: 28px; color: #C2410C; }
+.support-add-note { font-size: 10px; line-height: 15px; color: #7A6C60; }
+
+/* 隐私与业务提示。 */
+.support-note-box { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background-color: #FFF8F2; }
+.support-note-text { font-size: 11px; line-height: 18px; color: #8A6A56; }
+
+.support-submit { display: flex; height: 50px; margin-top: 4px; border-radius: 14px; background-color: #E4572E; align-items: center; justify-content: center; }
+.support-submit-busy { opacity: 0.6; }
+.support-submit-text { font-size: 15px; line-height: 22px; font-weight: bold; color: #FFFFFF; }
+
+/* ---------- 我的反馈列表 ---------- */
+
+/* 分类指引行：标签 + 说明 + 箭头，整行可点击。 */
+.support-link-row { display: flex; align-items: center; min-height: 44px; padding: 4px 0; }
+.support-link-text { flex: 1; min-width: 0; margin-left: 8px; font-size: 12px; line-height: 18px; color: #7A6C60; }
+
+.support-list-card { margin-bottom: 8px; padding: 12px; border-width: 1px; border-style: solid; border-color: #F1E5DA; border-radius: 14px; background-color: #FFFFFF; }
+/* 有员工新回复时用主色描边提示，不额外增加图标。 */
+.support-list-card-unread { border-color: #E9A78E; }
+.support-list-head { display: flex; flex-direction: row; align-items: center; }
+.support-list-category { flex: 1; min-width: 0; margin-left: 8px; text-align: left; font-size: 13px; line-height: 19px; font-weight: bold; color: #211C18; }
+.support-list-target { margin-top: 6px; font-size: 12px; line-height: 18px; color: #7A6C60; }
+.support-list-desc { margin-top: 4px; font-size: 13px; line-height: 20px; color: #463A32; }
+.support-list-foot { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top-width: 1px; border-top-style: solid; border-top-color: #F4EBE4; }
+.support-list-time { font-size: 11px; line-height: 17px; color: #A2968B; }
+.support-unread { display: flex; flex-direction: row; align-items: center; }
+.support-unread-dot { width: 7px; height: 7px; margin-right: 4px; border-radius: 4px; background-color: #E4572E; }
+.support-unread-text { font-size: 11px; line-height: 17px; color: #C2410C; }
+
+.support-state-card { margin-top: 4px; }
+.support-empty { padding: 36px 20px; align-items: center; }
+.support-empty-title { font-size: 16px; line-height: 24px; font-weight: bold; color: #211C18; }
+.support-empty-note { margin-top: 6px; font-size: 12px; line-height: 19px; color: #7A6C60; text-align: center; }
+.support-empty-action { display: flex; min-height: 44px; margin-top: 14px; padding: 0 18px; border-radius: 12px; background-color: #E4572E; align-items: center; justify-content: center; }
+.support-empty-action-text { font-size: 13px; line-height: 20px; font-weight: bold; color: #FFFFFF; }
+.support-end { padding: 12px 0 20px; text-align: center; font-size: 11px; line-height: 18px; color: #A2968B; }
+.support-page-hint { display: flex; min-height: 40px; align-items: center; justify-content: center; }
+
+/* ---------- 详情页 ---------- */
+
+.support-detail-status { margin-bottom: 10px; padding: 14px; border-radius: 18px; background-color: #FFF0E6; }
+.support-detail-status-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+.support-detail-status-label { font-size: 19px; line-height: 26px; font-weight: bold; color: #8F3B1E; }
+.support-detail-no { margin-top: 6px; font-size: 11px; line-height: 17px; color: #8A6A56; }
+.support-detail-time { margin-top: 2px; font-size: 11px; line-height: 17px; color: #A2968B; }
+
+.support-info-row { display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; margin-top: 8px; }
+.support-info-label { flex-shrink: 0; width: 76px; font-size: 12px; line-height: 19px; color: #7A6C60; }
+.support-info-value { flex: 1; min-width: 0; text-align: right; font-size: 12px; line-height: 19px; color: #211C18; }
+.support-desc { margin-top: 10px; font-size: 14px; line-height: 23px; color: #211C18; }
+
+/* 时间线：学生靠右、员工靠左、系统居中。 */
+.support-timeline { margin-top: 2px; }
+.support-msg-row { display: flex; flex-direction: row; margin-bottom: 12px; }
+.support-msg-row-customer { justify-content: flex-end; }
+.support-msg-row-staff { justify-content: flex-start; }
+.support-msg-row-system { justify-content: center; }
+.support-msg-block { display: flex; flex-direction: column; max-width: 300px; }
+.support-msg-block-customer { align-items: flex-end; }
+.support-msg-block-staff { align-items: flex-start; }
+.support-msg-meta { margin-bottom: 4px; font-size: 10px; line-height: 15px; color: #A2968B; }
+.support-msg-bubble { padding: 9px 12px; border-radius: 14px; }
+.support-msg-bubble-customer { border-top-right-radius: 4px; background-color: #E4572E; }
+.support-msg-bubble-staff { border-top-left-radius: 4px; border-width: 1px; border-style: solid; border-color: #F1E5DA; background-color: #FFFFFF; }
+.support-msg-text { font-size: 13px; line-height: 21px; }
+.support-msg-text-customer { color: #FFFFFF; }
+.support-msg-text-staff { color: #211C18; }
+.support-msg-system { padding: 6px 12px; border-radius: 12px; background-color: #F2EAE2; }
+.support-msg-system-text { font-size: 11px; line-height: 18px; color: #7A6C60; text-align: center; }
+.support-msg-photos { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 6px; }
+.support-msg-photo { width: 64px; height: 64px; margin: 0 5px 5px 0; border-radius: 8px; background-color: #F6EEE7; }
+
+/* 补充说明与关闭操作。 */
+.support-compose { margin-top: 4px; }
+.support-danger-action { display: flex; min-height: 46px; margin-top: 8px; border-width: 1px; border-style: solid; border-color: #EADDD1; border-radius: 13px; background-color: #FFFFFF; align-items: center; justify-content: center; }
+.support-danger-text { font-size: 13px; line-height: 20px; color: #7A6C60; }
+.support-closed-note { margin-top: 10px; padding: 12px; border-radius: 12px; background-color: #F4EFEA; }
+.support-closed-note-text { font-size: 12px; line-height: 19px; color: #7A6C60; text-align: center; }
+
+/* 原生端 view/text 的 flex 方向由类显式声明；这里补充需要横向的容器。 */
+.support-row { flex-direction: row; }
+
+/* #ifdef WEB */
+/* H5 的 view/text 默认布局与原生不同，统一为账户页的盒模型。 */
+.support-page view { box-sizing: border-box; }
+.support-page text { overflow-wrap: anywhere; }
+.support-page button { box-sizing: border-box; }
+.support-page button::after { border: none; }
+.account-page .support-nav-action, .account-page .support-segment, .account-page .support-segment-tab,
+.account-page .support-card-head, .account-page .support-categories, .account-page .support-category,
+.account-page .support-select-row, .account-page .support-option, .account-page .support-option-more,
+.account-page .support-photos, .account-page .support-list-head, .account-page .support-list-foot,
+.account-page .support-unread, .account-page .support-detail-status-row, .account-page .support-info-row,
+.account-page .support-msg-row, .account-page .support-msg-photos, .account-page .support-row { flex-direction: row; }
+.account-page .support-msg-row-customer { justify-content: flex-end; }
+.account-page .support-msg-row-staff { justify-content: flex-start; }
+.account-page .support-msg-row-system { justify-content: center; }
+.support-textarea { box-sizing: border-box; height: 120px; }
+/* #endif */
