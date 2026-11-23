@@ -36,6 +36,9 @@
                 <text class="account-note">订单号 {{ order!.orderNo }}</text><text class="account-note">下单时间 {{ formatDate(order!.createdAt) }}</text>
                 <text v-if="order!.remark.length > 0" class="account-note">备注：{{ order!.remark }}</text>
                     <button v-if="order!.status == '已完成'" class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="loading" @click="reviewWindow">{{ reviewStatusReady ? (orderReviewComplete ? '查看评价' : (orderReviewed ? '查看评价 / 继续评价' : '评价订单')) : '订单评价' }}</button>
+                    <!-- 再来一单仅对已有购买明细且无需继续支付的订单展示；待支付订单重复加购会造成重复下单。 -->
+                    <button v-if="canReorder" class="order-reorder order-reorder-text button-text button-text-50" :disabled="reordering || loading || paying || cancelling" :class="reordering || loading || paying || cancelling ? 'account-disabled' : ''" @click="reorder">{{ reordering ? '正在加入购物车…' : '再来一单' }}</button>
+                    <text v-if="reorderMessage.length > 0" class="account-error">{{ reorderMessage }}</text>
             </view>
             <view v-if="order != null && order!.status == '待支付' && !paymentSuccess" class="account-card vapor-account-secondary--account-card">
                 <text class="account-heading">余额支付</text>
@@ -72,6 +75,7 @@ import { Review, fetchOrderReviews, parseOrderReviews, commentPayload } from '..
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { OrderLine, CustomerOrder, fetchOrder, fetchPickupCode, fetchOrderPayment, payOrder, cancelOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts';
+import { addToCart } from '../../api/cart.uts';
 import { fetchMyBalance, walletPayload } from '../../api/wallet.uts';
 import { HttpResult } from '../../common/http.uts';
 import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts';
@@ -86,11 +90,16 @@ let stopLiveOrders: (() => void) | null = null
 function stopOrderUpdates() {
     if (stopLiveOrders != null) { stopLiveOrders!(); stopLiveOrders = null }
 }
-const state = reactive({ contacting: false, paymentDeadlineKnown: false, paymentExpired: false, remainingPaymentText: '--:--', reviewStatusReady: false, orderReviewed: false, orderReviewComplete: false, pickupCode: '', pickupLoading: false, pickupError: '', refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
+const state = reactive({ reordering: false, reorderMessage: '', contacting: false, paymentDeadlineKnown: false, paymentExpired: false, remainingPaymentText: '--:--', reviewStatusReady: false, orderReviewed: false, orderReviewComplete: false, pickupCode: '', pickupLoading: false, pickupError: '', refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
 
-const { contacting, paymentDeadlineKnown, paymentExpired, remainingPaymentText, reviewStatusReady, orderReviewed, orderReviewComplete, pickupCode, pickupLoading, pickupError, refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
+const { reordering, reorderMessage, contacting, paymentDeadlineKnown, paymentExpired, remainingPaymentText, reviewStatusReady, orderReviewed, orderReviewComplete, pickupCode, pickupLoading, pickupError, refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
 /** 已批准退款的份数不再履约，全部获批时隐藏旧取餐码，最终权限仍由后端核销条件保证。 */
 const canPickup = computed((): boolean => state.order != null && ['已支付', '制作中', '待取货'].includes(state.order!.status) && state.order!.items.some((item: OrderLine): boolean => item.fulfillableQuantity > 0))
+/**
+ * 再来一单的展示条件与后端下单规则保持一致：
+ * 必须已有购买明细；待支付订单继续走原支付流程，避免同一批菜品被重复下单。
+ */
+const canReorder = computed((): boolean => state.order != null && state.order!.items.length > 0 && state.order!.status != '待支付')
 
 
 let paymentClock = 0
@@ -172,6 +181,83 @@ function openOrders() {
 
 function openRecharge() {
     uni.navigateTo({ url: '/pages/wallet/recharge' });
+}
+
+/**
+ * 把订单明细保存的规格键还原为购物车加购所需的选项编号。
+ *
+ * 订单只保存规范键（无规格为 base，其余为升序选项编号以短横线连接），
+ * 购物车接口要求提交编号数组；这里只在本地做格式还原，绝不按规格名称猜测。
+ * 返回 null 表示快照不符合规范，调用方应跳过该项并如实提示，
+ * 不能静默按无规格加购，否则会把错误菜品和价格带进购物车。
+ */
+function selectionOptionIds(selectionKey: string): Array<number> | null {
+    if (selectionKey == 'base') return []
+    const parts = selectionKey.split('-')
+    if (parts.length == 0 || parts.length > 10) return null
+    const ids: Array<number> = []
+    let previous = 0
+    for (let i = 0; i < parts.length; i++) {
+        if (!/^[1-9][0-9]*$/.test(parts[i])) return null
+        const id = Number(parts[i])
+        if (!Number.isSafeInteger(id) || id <= previous) return null
+        previous = id
+        ids.push(id)
+    }
+    return ids
+}
+
+/**
+ * 再来一单：按当前订单快照把菜品重新加入同一窗口购物车，再进入确认订单页。
+ *
+ * 设计要点：
+ * - 购物车加购接口是「累加」语义，并且每次都会由商品服务重新核价、校验窗口与规格，
+ *   因此这里逐项串行提交；并发提交无法定位具体哪一项失效，也更容易在服务端触发限流。
+ * - 历史菜品可能已下架或规格已调整，允许部分成功：成功的菜品继续进入确认页，
+ *   失败的项只做计数提示，不因一项失效阻断整单。
+ * - 全部失败时不跳转，避免把学生带到空购物车；保留失败原因供其决定是否去店铺重选。
+ * - 每次请求前后都校验页面可见性与登录账号，离开页面或切换账号后不再写入购物车，
+ *   也不使用旧账号的响应做跳转。
+ */
+async function reorder(): Promise<void> {
+    if (state.reordering || state.loading || state.paying || state.cancelling || !canReorder.value) return
+    const order = state.order
+    if (order == null) return
+    const owner = currentUser()?.userUuid ?? ''
+    state.reordering = true
+    state.reorderMessage = ''
+    let added = 0
+    let failed = 0
+    let firstFailure = ''
+    try {
+        for (let i = 0; i < order.items.length; i++) {
+            if (!pickupPageVisible || currentUser()?.userUuid != owner) return
+            const item = order.items[i]
+            const optionIds = selectionOptionIds(item.selectionKey)
+            if (optionIds == null) {
+                failed++
+                if (firstFailure.length == 0) firstFailure = item.productName + ' 的规格信息异常，请到店铺重新选择'
+                continue
+            }
+            const result = await addToCart(order.windowId, item.productId, item.quantity, optionIds)
+            if (result.ok) {
+                added++
+            } else {
+                failed++
+                if (firstFailure.length == 0) firstFailure = result.message.length > 0 ? result.message : item.productName + ' 暂不可售'
+            }
+        }
+    } finally {
+        state.reordering = false
+    }
+    if (!pickupPageVisible || currentUser()?.userUuid != owner) return
+    if (added == 0) {
+        state.reorderMessage = firstFailure.length > 0 ? firstFailure : '所选菜品暂不可售，请到店铺重新选择'
+        return
+    }
+    // 部分成功时先说明差异再跳转，学生仍可在确认页调整数量或删除失效菜品。
+    if (failed > 0) toast('已加入 ' + added + ' 件，' + failed + ' 件暂不可售')
+    uni.navigateTo({ url: '/pages/order/confirm?windowId=' + order.windowId + '&windowName=' + encodeURIComponent(order.windowName) })
 }
 
 function openPassword() {
