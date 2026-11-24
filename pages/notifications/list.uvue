@@ -5,7 +5,10 @@
             <view class="account-back vapor-account-secondary--account-back" @click="goBack">
                 <view class="account-back-icon"></view>
             </view>
-            <text class="account-title">消息通知</text></view>
+            <text class="account-title">消息通知</text>
+            <view class="notification-nav-action" @click="openPreferences">
+                <text class="notification-nav-action-text">设置</text>
+            </view></view>
         <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMoreChats">
             <view class="account-content conversation-list">
                 <view class="conversation-entry" hover-class="conversation-entry-pressed" @click="openOrders">
@@ -106,6 +109,8 @@ function chatsChanged(): void { if (visible) loadChats(true) }
 function openChat(uuid: string): void { uni.navigateTo({ url: '/pages/notifications/chat?conversationUuid=' + uuid }) }
 function changed(): void { if (visible) load() }
 function openOrders(): void { uni.navigateTo({ url: '/pages/notifications/orders' }) }
+/** 打开通知设置页；返回时 onPageShow 会重新拉取列表，角标由设置页保存后立即重算。 */
+function openPreferences(): void { uni.navigateTo({ url: '/pages/notifications/preferences' }) }
 /** 返回上一页；消息通知现在作为「我的」下的二级页，必须有可见返回入口。 */
 function goBack(): void { backToAccount() }
 onPageShow(() => {
@@ -134,6 +139,8 @@ onUnload(() => { visible = false; state.version++; unsubscribeNotifications(chan
 .conversation-badge { min-width: 18px; height: 18px; padding: 0 5px; align-items: center; justify-content: center; border-radius: 10px; background-color: #C2410C; }
 .conversation-badge-text { color: #FFFFFF; font-size: 10px; line-height: 18px; }
 .conversation-error { padding: 14px; color: #B73920; font-size: 12px; line-height: 20px; }
+.notification-nav-action { display: flex; flex-shrink: 0; min-height: 44px; margin-left: auto; padding: 0 4px 0 12px; align-items: center; justify-content: center; }
+.notification-nav-action-text { font-size: 13px; line-height: 20px; font-weight: bold; color: #C2410C; }
 /* #ifdef WEB */
 .account-page .conversation-entry { flex-direction: row; }
 .account-page .conversation-name, .account-page .conversation-preview { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }

@@ -1,12 +1,42 @@
-import { httpGet, httpPost, HttpResult } from '../common/http.uts'
+import { httpGet, httpPost, httpPut, HttpResult } from '../common/http.uts'
 import { jsonArray, jsonBoolean, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
 
 export type NotificationItem = { notificationId: string, title: string, content: string, orderId: number, bizType: string, bizId: string, createdAt: string, readAt: string }
 export type NotificationPage = { items: Array<NotificationItem>, nextCursor: string, hasMore: boolean }
+export type NotificationPreference = { category: string, label: string, description: string, enabled: boolean }
 export function fetchNotifications(cursor: string): Promise<HttpResult> {
     return httpGet('/notifications?limit=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : ''), true)
 }
 export function fetchUnreadNotificationCount(): Promise<HttpResult> { return httpGet('/notifications/unread-count', true) }
+/** 读取当前账号的通知分类开关；未保存过的分类由服务端按默认开启返回。 */
+export function fetchNotificationPreferences(): Promise<HttpResult> { return httpGet('/notifications/preferences', true) }
+/** 只提交一个分类的开关，服务端按分类幂等保存并返回保存后的完整列表。 */
+export function updateNotificationPreference(category: string, enabled: boolean): Promise<HttpResult> {
+    return httpPut('/notifications/preferences', { preferences: [{ category: category, enabled: enabled }] }, true)
+}
+/** 校验并解析分类开关列表；响应结构异常时返回 null，由页面保留原状态并提示重试。 */
+export function parseNotificationPreferences(result: HttpResult): Array<NotificationPreference> | null {
+    if (!result.ok || result.data == null) return null
+    const data = jsonArray(result.data, 'data')
+    if (data == null || data.length == 0) return null
+    const items: Array<NotificationPreference> = []
+    for (let i = 0; i < data.length; i++) {
+        const row = data[i]
+        if (row == null || typeof row != 'object' || Array.isArray(row)) return null
+        const obj = row as UTSJSONObject
+        const category = jsonString(obj, 'category') ?? ''
+        const enabled = jsonBoolean(obj, 'enabled')
+        // 分类编码和开关状态是渲染与交互的必要字段，缺失时整页视为异常，避免展示错误状态。
+        if (category.length == 0 || enabled == null) return null
+        items.push({
+            category: category,
+            label: jsonString(obj, 'label') ?? category,
+            description: jsonString(obj, 'description') ?? '',
+            enabled: enabled
+        })
+    }
+    return items
+}
 export function markNotificationRead(id: string): Promise<HttpResult> { return httpPost('/notifications/' + id + '/read', {}, true) }
 export function requestNotificationSocketTicket(): Promise<HttpResult> { return httpPost('/notifications/socket-ticket', {}, true) }
 export function parseNotificationSocketTicket(result: HttpResult): string {

@@ -104,6 +104,7 @@
 		},
 		{ "path": "pages/order/confirm", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/notifications/list", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/notifications/preferences", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/notifications/orders", "style": { "navigationStyle": "custom" } },
         { "path": "pages/order/refunds", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/order/detail", "style": { "navigationStyle": "custom" } },

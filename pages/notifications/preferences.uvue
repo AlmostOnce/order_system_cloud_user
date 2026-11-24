@@ -1,0 +1,144 @@
+<template>
+	<view class="account-page account-secondary">
+		<view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+		<view class="account-nav vapor-account-secondary--account-nav">
+			<view class="account-back vapor-account-secondary--account-back" @click="goBack">
+				<view class="account-back-icon"></view>
+			</view>
+			<text class="account-title">通知设置</text>
+		</view>
+		<scroll-view class="account-scroll" direction="vertical">
+			<view class="account-content vapor-account-secondary--account-content">
+				<view v-if="loading" class="account-card vapor-account-secondary--account-card">
+					<text class="account-heading">正在读取通知设置</text>
+					<text class="account-note">请稍候。</text>
+				</view>
+
+				<view v-else-if="loadError.length > 0" class="account-card vapor-account-secondary--account-card">
+					<text class="account-heading">暂时无法读取通知设置</text>
+					<text class="account-error">{{ loadError }}</text>
+					<button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="load">重新加载</button>
+				</view>
+
+				<view v-else class="account-card vapor-account-secondary--account-card">
+					<text class="account-heading">接收哪些提醒</text>
+					<text class="account-note">关闭后仍可在消息中心查看记录，只是不再实时提示、不再计入未读红点。账号安全类邮件不经过这里，始终发送。</text>
+					<view v-for="item in items" :key="item.category" class="pref-row" @click="toggle(item)">
+						<view class="pref-copy">
+							<text class="pref-label">{{ item.label }}</text>
+							<text class="pref-desc">{{ item.description }}</text>
+							<text v-if="saving == item.category" class="pref-saving">正在保存…</text>
+						</view>
+						<view class="pref-toggle" :class="item.enabled ? 'pref-toggle-on' : 'pref-toggle-off'">
+							<view class="pref-knob"></view>
+						</view>
+					</view>
+					<text class="pref-footnote">设置会立即生效，并在当前账号的所有设备上保持一致。</text>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import { fetchNotificationPreferences, updateNotificationPreference, parseNotificationPreferences, NotificationPreference } from '../../api/notifications.uts'
+import { HttpResult } from '../../common/http.uts'
+import { toast } from '../../common/feedback.uts'
+import { currentUser } from '../../store/auth.uts'
+import { refreshNotificationCount } from '../../store/notifications.uts'
+
+const state = reactive({
+	statusBarHeight: 0,
+	loading: true,
+	loaded: false,
+	loadError: '',
+	saving: '',
+	items: [] as Array<NotificationPreference>
+})
+
+const { statusBarHeight, loading, loadError, saving, items } = toRefs(state)
+
+/** 返回消息通知页；保存中禁止离开，避免用户误以为离开会取消尚未完成的保存。 */
+function goBack(): void {
+	if (state.saving.length > 0) return
+	uni.navigateBack()
+}
+
+/** 读取三类通知开关；未保存过的分类由服务端按默认开启返回。 */
+function load(): void {
+	state.loading = true
+	state.loadError = ''
+	fetchNotificationPreferences().then((result: HttpResult) => {
+		state.loading = false
+		if (!result.ok) {
+			state.loadError = result.message.length > 0 ? result.message : '暂时无法读取通知设置，请稍后重试'
+			return
+		}
+		const parsed = parseNotificationPreferences(result)
+		if (parsed == null) {
+			state.loadError = '通知设置响应异常，请稍后重试'
+			return
+		}
+		state.items = parsed
+		state.loaded = true
+	}).catch(() => {
+		state.loading = false
+		state.loadError = '网络异常，请稍后重试'
+	})
+}
+
+/**
+ * 点击整行切换开关。
+ *
+ * 同一时间只允许一个保存请求，避免快速连点造成请求乱序覆盖；
+ * 保存成功后用服务端返回的完整列表刷新界面，并重算角标。
+ */
+function toggle(item: NotificationPreference): void {
+	if (state.saving.length > 0) return
+	const next = !item.enabled
+	state.saving = item.category
+	updateNotificationPreference(item.category, next).then((result: HttpResult) => {
+		state.saving = ''
+		if (!result.ok) {
+			toast(result.message.length > 0 ? result.message : '保存失败，请稍后重试')
+			return
+		}
+		const parsed = parseNotificationPreferences(result)
+		if (parsed == null) {
+			toast('通知设置响应异常，请稍后重试')
+			return
+		}
+		state.items = parsed
+		// 关闭或开启后未读口径立即变化，重算角标让返回消息页时展示最新数量。
+		refreshNotificationCount()
+	}).catch(() => {
+		state.saving = ''
+		toast('网络异常，请稍后重试')
+	})
+}
+
+onPageShow(() => {
+	state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+	if (currentUser() == null) {
+		uni.reLaunch({ url: '/pages/login/login' })
+		return
+	}
+	// 首次进入才请求；从后台返回时保留用户已看到的开关状态，避免闪烁。
+	if (!state.loaded) load()
+})
+</script>
+
+<style>
+.account-page { background-color: #FDF6F0; }
+.pref-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding-top: 14px; padding-bottom: 14px; }
+.pref-copy { flex: 1; min-width: 0; margin-right: 12px; }
+.pref-label { font-size: 15px; line-height: 22px; font-weight: bold; color: #211C18; }
+.pref-desc { margin-top: 3px; font-size: 12px; line-height: 18px; color: #7A6C60; }
+.pref-saving { margin-top: 3px; font-size: 11px; line-height: 16px; color: #C2410C; }
+.pref-toggle { display: flex; flex-direction: row; align-items: center; flex-shrink: 0; width: 46px; height: 26px; border-radius: 13px; padding: 2px; }
+.pref-toggle-on { background-color: #E4572E; justify-content: flex-end; }
+.pref-toggle-off { background-color: #E3D8CE; justify-content: flex-start; }
+.pref-knob { width: 22px; height: 22px; border-radius: 11px; background-color: #FFFFFF; }
+.pref-footnote { margin-top: 12px; font-size: 11px; line-height: 17px; color: #A2968B; }
+</style>
