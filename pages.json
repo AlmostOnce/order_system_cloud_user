@@ -94,6 +94,14 @@
             "path": "pages/account/email-change",
 			"style": { "navigationStyle": "custom" }
 		},
+		{
+			"path": "pages/account/account-deletion",
+			"style": { "navigationStyle": "custom" }
+		},
+		{
+			"path": "pages/account/deletion-pending",
+			"style": { "navigationStyle": "custom" }
+		},
 		{ "path": "pages/order/confirm", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/notifications/list", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/notifications/orders", "style": { "navigationStyle": "custom" } },

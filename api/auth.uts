@@ -80,6 +80,48 @@ export function confirmPasswordReset(resetToken: string, newPassword: string): P
     return httpPost('/auth/password-reset/confirm', body, false)
 }
 
+/**
+ * 查询本人账号注销资格。
+ *
+ * 只读接口，返回余额、可放弃上限、邮箱验证状态与订单/退款/工单阻断项。
+ * 前端只负责展示，提交时服务端会重新核对。
+ */
+export function fetchAccountDeletionEligibility(): Promise<HttpResult> {
+	return httpGet('/users/me/deletion/eligibility', true)
+}
+
+/** 向当前绑定邮箱发送注销验证码；账号必须已登录且邮箱已验证。 */
+export function sendAccountDeletionCode(): Promise<HttpResult> {
+	return httpPost('/users/me/deletion/verification-code', null, true)
+}
+
+/** 校验注销验证码并换取 10 分钟有效的一次性授权令牌。 */
+export function authorizeAccountDeletion(code: string): Promise<HttpResult> {
+	const body: UTSJSONObject = { code: code }
+	return httpPost('/users/me/deletion/authorization', body, true)
+}
+
+/**
+ * 提交注销申请。
+ *
+ * @param authorizationToken 邮箱验证换取的一次性授权令牌
+ * @param forfeitBalance 是否已确认放弃余额；有余额时必须为 true
+ */
+export function submitAccountDeletion(authorizationToken: string, forfeitBalance: boolean): Promise<HttpResult> {
+	const body: UTSJSONObject = { authorizationToken: authorizationToken, forfeitBalance: forfeitBalance }
+	return httpPost('/users/me/deletion', body, true)
+}
+
+/**
+ * 凭一次性撤回令牌撤回注销申请。
+ *
+ * 注销冷静期内账号没有正常访问令牌，因此该请求不携带旧 Token。
+ */
+export function cancelAccountDeletion(cancelToken: string): Promise<HttpResult> {
+	const body: UTSJSONObject = { cancelToken: cancelToken }
+	return httpPost('/users/me/deletion/cancel', body, false)
+}
+
 /** 注册与旧账号补验均为匿名接口，不携带旧Token或触发续期。 */
 export function sendRegistrationEmailCode(email: string, captchaId: string, captchaCode: string): Promise<HttpResult> {
     const body: UTSJSONObject = { email: email, captchaId: captchaId, captchaCode: captchaCode }

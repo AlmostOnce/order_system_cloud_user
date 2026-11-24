@@ -32,16 +32,43 @@ import { parseTokenPayload, TokenPayload } from '../common/jwt.uts'
  * @param rememberAccount 是否记住登录账号
  * @return 登录结果；需要补验时不保存Access/Refresh Token
  */
-export type LoginResult = { ok: boolean, message: string, emailVerificationRequired: boolean }
+export type LoginResult = { ok: boolean, message: string, emailVerificationRequired: boolean, deletionPending: boolean }
+
+/**
+ * 待注销会话。
+ *
+ * 只保存在内存中，不写入本地存储：撤回令牌是一次性安全凭据，应用重启后必须重新
+ * 登录获取，避免长期落盘被其他页面或脚本读取。
+ */
+export type PendingDeletionSession = { effectiveAt: string, cancelToken: string, expiresIn: number }
+let pendingDeletionSession: PendingDeletionSession | null = null
+
+/** 缓存登录返回的待注销信息与一次性撤回令牌。 */
+export function setPendingDeletionSession(effectiveAt: string, cancelToken: string, expiresIn: number): void {
+	pendingDeletionSession = { effectiveAt: effectiveAt, cancelToken: cancelToken, expiresIn: expiresIn }
+}
+
+/** 读取当前待注销会话；没有时返回 null。 */
+export function getPendingDeletionSession(): PendingDeletionSession | null {
+	return pendingDeletionSession
+}
+
+/** 撤回成功、令牌过期或用户离开待注销页面后清除内存凭据。 */
+export function clearPendingDeletionSession(): void {
+	pendingDeletionSession = null
+}
+
 export function login(account: string, password: string, captchaId: string, captchaCode: string, rememberAccount: boolean): Promise<LoginResult> {
-	// 区分已登录、需补验邮箱和失败，受限补验凭据不能当作登录成功。
+	// 区分已登录、需补验邮箱、待注销和失败，受限凭据不能当作登录成功。
 	return new Promise<LoginResult>((resolve) => {
 		clearEmailOwnershipSession()
+		// 新登录必然替换旧的待注销凭据，先清空内存中的撤回令牌。
+		clearPendingDeletionSession()
 		// 调用认证接口发起登录，验证码与账号密码一并提交。
 		loginApi(account, password, captchaId, captchaCode).then((result: HttpResult) => {
 			// 请求失败：后端 message 已可直接展示，原样返回给页面。
 			if (!result.ok) {
-				resolve({ok: false, message: result.message, emailVerificationRequired: false})
+				resolve({ok: false, message: result.message, emailVerificationRequired: false, deletionPending: false})
 				return
 			}
 
@@ -49,7 +76,7 @@ export function login(account: string, password: string, captchaId: string, capt
 			const envelope = result.data
 			// 成功却没有响应体属于异常响应。
 			if (envelope == null) {
-				resolve({ok: false, message: '登录响应异常，请稍后重试', emailVerificationRequired: false})
+				resolve({ok: false, message: '登录响应异常，请稍后重试', emailVerificationRequired: false, deletionPending: false})
 				return
 			}
 
@@ -57,7 +84,7 @@ export function login(account: string, password: string, captchaId: string, capt
 			const rawPayload = jsonObject(envelope, 'data')
 			// 缺 data 时无法落盘凭据，按失败提示。
 			if (rawPayload == null) {
-				resolve({ok: false, message: '登录响应缺少令牌，请稍后重试', emailVerificationRequired: false})
+				resolve({ok: false, message: '登录响应缺少令牌，请稍后重试', emailVerificationRequired: false, deletionPending: false})
 				return
 			}
 
@@ -66,28 +93,51 @@ export function login(account: string, password: string, captchaId: string, capt
             if (jsonBoolean(payload, 'emailVerificationRequired') == true) {
                 clearTokens(); stopNotificationSession(true)
                 if (jsonString(payload, 'roleCode') != 'CUSTOMER') {
-                    resolve({ ok: false, message: '请前往管理端完成邮箱验证', emailVerificationRequired: false }); return
+                    resolve({ ok: false, message: '请前往管理端完成邮箱验证', emailVerificationRequired: false, deletionPending: false }); return
                 }
                 const token = jsonString(payload, 'emailVerificationToken') ?? ''
                 const expires = jsonNumber(payload, 'emailVerificationExpiresIn') ?? 0
                 if (!setEnrollmentAuthorization(token, expires)) {
-                    resolve({ ok: false, message: '邮箱补验凭据无效，请重新登录', emailVerificationRequired: false }); return
+                    resolve({ ok: false, message: '邮箱补验凭据无效，请重新登录', emailVerificationRequired: false, deletionPending: false }); return
                 }
-                resolve({ ok: false, message: '', emailVerificationRequired: true }); return
+                resolve({ ok: false, message: '', emailVerificationRequired: true, deletionPending: false }); return
             }
+			if (jsonBoolean(payload, 'deletionPending') == true) {
+				// 待注销账号没有正常令牌，先确保旧凭据和通知连接全部清理。
+				clearTokens(); stopNotificationSession(true)
+				const effectiveAt = jsonString(payload, 'deletionEffectiveAt') ?? ''
+				const cancelToken = jsonString(payload, 'deletionCancelToken') ?? ''
+				const expiresIn = jsonNumber(payload, 'deletionCancelExpiresIn') ?? 0
+				if (jsonString(payload, 'roleCode') != 'CUSTOMER') {
+					resolve({ ok: false, message: '请前往管理端处理账号注销', emailVerificationRequired: false, deletionPending: false }); return
+				}
+				if (effectiveAt.length == 0) {
+					resolve({ ok: false, message: '注销信息异常，请稍后重试', emailVerificationRequired: false, deletionPending: false }); return
+				}
+				// 冷静期已结束时后端不再签发撤回令牌；此时仍返回待注销状态，
+				// 由待注销页展示“撤回入口已失效”，不能把用户误判为登录凭据错误。
+				if (cancelToken.length > 0 && cancelToken.length != 64) {
+					resolve({ ok: false, message: '注销撤回凭据无效，请重新登录', emailVerificationRequired: false, deletionPending: false }); return
+				}
+				if (cancelToken.length == 64) {
+					setPendingDeletionSession(effectiveAt, cancelToken, expiresIn)
+				}
+				if (rememberAccount) { setRememberedAccount(account) } else { clearRememberedAccount() }
+				resolve({ ok: false, message: '', emailVerificationRequired: false, deletionPending: true }); return
+			}
 			// 取出访问令牌。
 			const accessToken = jsonString(payload, 'accessToken') ?? ''
 			// 取出刷新令牌。
 			const refreshToken = jsonString(payload, 'refreshToken') ?? ''
 			// 任一令牌缺失都说明登录未真正完成，不能落盘。
 			if (accessToken.length == 0 || refreshToken.length == 0) {
-				resolve({ok: false, message: '登录响应缺少令牌，请稍后重试', emailVerificationRequired: false})
+				resolve({ok: false, message: '登录响应缺少令牌，请稍后重试', emailVerificationRequired: false, deletionPending: false})
 				return
 			}
 
 			if (parseTokenPayload(accessToken) == null) {
 				clearTokens()
-				resolve({ok: false, message: '登录凭据格式不兼容，请确认认证服务已更新后重试', emailVerificationRequired: false})
+				resolve({ok: false, message: '登录凭据格式不兼容，请确认认证服务已更新后重试', emailVerificationRequired: false, deletionPending: false})
 				return
 			}
 
@@ -103,7 +153,7 @@ export function login(account: string, password: string, captchaId: string, capt
 				clearRememberedAccount()
 			}
 			// 返回空串表示登录成功。
-			resolve({ok: true, message: '', emailVerificationRequired: false})
+			resolve({ok: true, message: '', emailVerificationRequired: false, deletionPending: false})
 		})
 	})
 }
@@ -147,6 +197,8 @@ export function logout(): Promise<void> {
         } finally {
             clearTokens()
             clearEmailChangeAuthorization(); clearEmailOwnershipSession()
+            // 退出后不能再凭旧内存令牌撤回，下一次登录会重新签发。
+            clearPendingDeletionSession()
             // 通知 UI 或连接清理失败不能阻止本地退出。
             try { stopNotificationSession(true) } catch (_error) {}
         }

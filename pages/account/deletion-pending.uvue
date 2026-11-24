@@ -1,0 +1,254 @@
+<template>
+	<view class="account-page account-secondary">
+		<view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+		<view class="account-nav vapor-account-secondary--account-nav">
+			<view class="account-back vapor-account-secondary--account-back" @click="leavePage">
+				<view class="account-back-icon"></view>
+			</view>
+			<text class="account-title">账号注销</text>
+		</view>
+		<scroll-view class="account-scroll" direction="vertical">
+			<view class="account-content vapor-account-secondary--account-content">
+				<view class="account-card vapor-account-secondary--account-card">
+					<text class="account-heading">{{ headline }}</text>
+					<text class="account-note">{{ description }}</text>
+
+					<view v-if="showCountdown" class="deletion-countdown">
+						<text class="deletion-countdown-label">距离注销生效</text>
+						<text class="deletion-countdown-value">{{ remainingText }}</text>
+						<text class="deletion-countdown-time">生效时间：{{ effectiveAtText }}</text>
+					</view>
+
+					<text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
+
+					<button v-if="hasSession" class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" :disabled="cancelling" :class="cancelling ? 'account-disabled' : ''" @click="askCancel">{{ cancelling ? '正在撤回…' : '撤回注销申请' }}</button>
+					<button v-if="hasSession" class="action-secondary button-text button-text-46" :disabled="cancelling" @click="forgetSession">放弃撤回，返回登录</button>
+					<button v-if="!hasSession" class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="goLogin">返回登录</button>
+				</view>
+			</view>
+		</scroll-view>
+		<confirm-dialog v-if="cancelConfirm" title="撤回注销申请？" message="撤回后账号恢复正常使用，注销不会生效。" cancel-text="暂不撤回" confirm-text="确认撤回" :busy="cancelling" busy-text="撤回中…" @cancel="cancelConfirm = false" @confirm="doCancel" />
+	</view>
+</template>
+
+<script setup lang="uts">
+import { reactive, toRefs } from 'vue'
+import ConfirmDialog from '../../components/confirm-dialog/confirm-dialog.uvue'
+import { toast, toastSuccess } from '../../common/feedback.uts'
+import { cancelAccountDeletion } from '../../api/auth.uts'
+import { HttpResult } from '../../common/http.uts'
+import { getPendingDeletionSession, clearPendingDeletionSession, PendingDeletionSession } from '../../store/auth.uts'
+
+/**
+ * 待注销页面。
+ *
+ * 两种进入方式：
+ * 1. 提交注销成功后跳转，只展示生效时间，不持有撤回令牌；
+ * 2. 冷静期内重新登录，认证服务返回一次性撤回令牌与生效时间，本页展示倒计时并提供撤回。
+ *
+ * 撤回令牌只保存在内存中，离开页面或应用重启后失效，用户可再次登录获取新令牌。
+ */
+const state = reactive({
+	statusBarHeight: 0,
+	submitted: false,
+	submittedEffectiveAt: '',
+	hasSession: false,
+	showCountdown: false,
+	headline: '账号注销待生效',
+	description: '',
+	effectiveAtText: '--',
+	remainingText: '--',
+	errorText: '',
+	cancelling: false,
+	cancelConfirm: false
+})
+
+const { statusBarHeight, hasSession, showCountdown, headline, description, effectiveAtText, remainingText, errorText, cancelling, cancelConfirm } = toRefs(state)
+
+let session: PendingDeletionSession | null = null
+let countdownTimer: number = 0
+let effectiveAtMillis: number = 0
+
+/**
+ * 把服务端无时区时间按 UTC+8 解析为毫秒。
+ *
+ * 与订单倒计时使用同一规则，避免设备时区变化导致冷静期显示错误。
+ */
+function parseServerTime(value: string): number {
+	let text = value.trim().replace(' ', 'T')
+	// LocalDateTime 序列化在秒为 0 时可能省略秒，这里同时兼容 HH:mm 与 HH:mm:ss。
+	if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(text)) return 0
+	text = text + '+08:00'
+	const millis = Date.parse(text)
+	return Number.isFinite(millis) ? millis : 0
+}
+
+/** 将毫秒时间格式化为可读的本地时间。 */
+function formatTime(millis: number): string {
+	if (millis <= 0) return '--'
+	const date = new Date(millis)
+	const month = (date.getMonth() + 1).toString().padStart(2, '0')
+	const day = date.getDate().toString().padStart(2, '0')
+	const hour = date.getHours().toString().padStart(2, '0')
+	const minute = date.getMinutes().toString().padStart(2, '0')
+	return date.getFullYear().toString() + '-' + month + '-' + day + ' ' + hour + ':' + minute
+}
+
+/** 生成剩余时间文案；只用于展示，是否生效仍由服务端最终判断。 */
+function formatRemaining(millis: number): string {
+	if (millis <= 0) return '即将处理'
+	const totalMinutes = Math.floor(millis / 60000)
+	const days = Math.floor(totalMinutes / 1440)
+	const hours = Math.floor((totalMinutes % 1440) / 60)
+	const minutes = totalMinutes % 60
+	if (days > 0) return days.toString() + ' 天 ' + hours.toString() + ' 小时'
+	if (hours > 0) return hours.toString() + ' 小时 ' + minutes.toString() + ' 分钟'
+	return Math.max(1, minutes).toString() + ' 分钟'
+}
+
+/** 立即刷新倒计时文本，并在到期后停止定时器。 */
+function refreshCountdown(): void {
+	const remaining = effectiveAtMillis - Date.now()
+	state.remainingText = formatRemaining(remaining)
+	if (remaining <= 0 && countdownTimer > 0) {
+		clearInterval(countdownTimer)
+		countdownTimer = 0
+	}
+}
+
+/** 启动每秒倒计时；页面隐藏或卸载时必须清理。 */
+function startCountdown(): void {
+	stopCountdown()
+	if (effectiveAtMillis <= 0) return
+	refreshCountdown()
+	countdownTimer = setInterval(() => { refreshCountdown() }, 1000)
+}
+
+/** 停止倒计时，避免页面离开后继续持有定时器。 */
+function stopCountdown(): void {
+	if (countdownTimer > 0) {
+		clearInterval(countdownTimer)
+		countdownTimer = 0
+	}
+}
+
+/** 返回登录页并清理内存凭据。 */
+function goLogin(): void {
+	clearPendingDeletionSession()
+	session = null
+	uni.reLaunch({ url: '/pages/login/login' })
+}
+
+/** 顶部返回：与返回登录等价，避免回到无令牌的业务页。 */
+function leavePage(): void {
+	if (state.cancelling) return
+	goLogin()
+}
+
+/** 放弃撤回时只清理内存令牌，不调用服务端，注销仍会生效。 */
+function forgetSession(): void {
+	if (state.cancelling) return
+	clearPendingDeletionSession()
+	session = null
+	toast('已离开待注销页面，注销仍会按原时间生效')
+	goLogin()
+}
+
+/** 打开撤回确认弹窗。 */
+function askCancel(): void {
+	if (state.cancelling || session == null) return
+	state.errorText = ''
+	state.cancelConfirm = true
+}
+
+/**
+ * 调用撤回接口。
+ *
+ * 成功清空内存令牌并回到登录页；失败时区分网络异常与令牌过期：
+ * 网络异常保留令牌允许重试，令牌失效则清空并提示重新登录。
+ */
+function doCancel(): void {
+	if (state.cancelling || session == null) return
+	state.cancelling = true
+	state.errorText = ''
+	cancelAccountDeletion(session.cancelToken).then((result: HttpResult) => {
+		state.cancelling = false
+		state.cancelConfirm = false
+		if (!result.ok) {
+			if (result.statusCode == 0) {
+				state.errorText = '网络异常，撤回未完成，请检查网络后重试'
+			} else {
+				state.errorText = result.message.length > 0 ? result.message : '撤回失败，请重新登录获取新的撤回入口'
+				clearPendingDeletionSession()
+				session = null
+				state.hasSession = false
+			}
+			toast(state.errorText)
+			return
+		}
+		clearPendingDeletionSession()
+		session = null
+		toastSuccess('注销已撤回，请重新登录')
+		goLogin()
+	}).catch(() => {
+		state.cancelling = false
+		state.cancelConfirm = false
+		state.errorText = '网络异常，撤回未完成，请检查网络后重试'
+		toast(state.errorText)
+	})
+}
+
+/** 根据进入方式与内存会话刷新页面文案。 */
+function prepare(): void {
+	session = getPendingDeletionSession()
+	state.hasSession = session != null
+	state.showCountdown = false
+	const effectiveText = session != null ? session.effectiveAt : state.submittedEffectiveAt
+	effectiveAtMillis = parseServerTime(effectiveText)
+	state.effectiveAtText = formatTime(effectiveAtMillis)
+	if (state.hasSession) {
+		state.headline = '账号注销待生效'
+		state.description = '注销已申请，账号已退出登录。生效前如仍需使用账号，请点击下方按钮撤回；撤回后本次注销不会执行。'
+		state.showCountdown = true
+		startCountdown()
+	} else if (state.submitted) {
+		state.headline = '注销申请已提交'
+		state.description = '账号将按上方时间正式注销。若需撤回，请在生效前重新登录，登录页会提供撤回入口。'
+		state.showCountdown = true
+		startCountdown()
+	} else {
+		state.headline = '撤回入口已失效'
+		state.description = '当前没有可用的撤回凭据。若账号仍处于注销冷静期，请重新登录获取新的撤回入口；若冷静期已结束，请等待系统完成注销。'
+		state.showCountdown = false
+	}
+}
+
+onLoad((options: OnLoadOptions) => {
+	state.submitted = options['mode'] == 'submitted'
+	// 部分平台不会自动解码 query，这里只还原时间字符串可能出现的百分号编码字符。
+	const rawEffectiveAt = options['effectiveAt'] ?? ''
+	state.submittedEffectiveAt = rawEffectiveAt
+		.replace(/%3A/gi, ':')
+		.replace(/%20/g, ' ')
+		.replace(/%2E/gi, '.')
+		.replace(/%2D/gi, '-')
+})
+
+onPageShow(() => {
+	state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+	// 提交成功进入时没有撤回令牌，避免误显示撤回按钮。
+	prepare()
+})
+
+onPageHide(() => { stopCountdown() })
+onUnload(() => { stopCountdown() })
+</script>
+
+<style>
+	@import '../../styles/account.css';
+	.deletion-countdown { display: flex; flex-direction: column; margin-top: 18px; padding: 16px; border-radius: 14px; background-color: #FAF7F4; }
+	.deletion-countdown-label { font-size: 12px; color: #8C837D; }
+	.deletion-countdown-value { margin-top: 6px; font-size: 24px; line-height: 32px; font-weight: bold; color: #E4572E; }
+	.deletion-countdown-time { margin-top: 6px; font-size: 12px; color: #8C837D; }
+	.action-secondary { margin-top: 10px; height: 46px; line-height: 46px; border-radius: 12px; background-color: #F3F1EF; color: #655D57; font-size: 14px; text-align: center; }
+</style>

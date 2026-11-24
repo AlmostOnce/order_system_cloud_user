@@ -1,0 +1,455 @@
+<template>
+	<view class="account-page account-secondary">
+		<view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+		<view class="account-nav vapor-account-secondary--account-nav">
+			<view class="account-back vapor-account-secondary--account-back" @click="goBack">
+				<view class="account-back-icon"></view>
+			</view>
+			<text class="account-title">注销账号</text>
+		</view>
+		<scroll-view class="account-scroll" direction="vertical">
+			<view class="account-content vapor-account-secondary--account-content">
+				<view v-if="loading" class="account-card vapor-account-secondary--account-card">
+					<text class="account-heading">正在核对注销条件</text>
+					<text class="account-note">请稍候，正在检查订单、退款、工单和余额。</text>
+				</view>
+
+				<view v-else-if="loadError.length > 0" class="account-card vapor-account-secondary--account-card">
+					<text class="account-heading">暂时无法核对注销条件</text>
+					<text class="account-error">{{ loadError }}</text>
+					<button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="loadEligibility">重新核对</button>
+				</view>
+
+				<view v-else-if="pending" class="account-card vapor-account-secondary--account-card">
+					<text class="account-heading">注销申请已提交</text>
+					<text class="account-note">账号将在 {{ pendingEffectiveAtText }} 正式注销。生效前如需继续使用，请退出登录后重新登录，通过登录页的撤回入口撤销申请。</text>
+					<button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="leaveAndLogin">退出并前往登录</button>
+				</view>
+
+				<view v-else class="account-card vapor-account-secondary--account-card">
+					<text class="account-heading">注销账号</text>
+					<text class="account-note">注销申请提交后立即退出登录，并进入 72 小时冷静期。冷静期内可重新登录撤回；到期后账号将不可恢复。</text>
+
+					<view class="rule-box">
+						<text class="rule-title">注销后的数据处置</text>
+						<text class="rule-line">· 个人资料、头像和登录凭据将被匿名化或清除，邮箱可重新注册。</text>
+						<text class="rule-line">· 订单、退款、余额流水和工单记录依法保留，用于交易与审计。</text>
+						<text class="rule-line">· 余额在可放弃上限内将被清零；超过上限时无法自助注销。</text>
+					</view>
+
+					<view class="balance-row">
+						<text class="account-label">当前余额</text>
+						<text class="balance-value">{{ balanceText }}</text>
+					</view>
+					<text v-if="balanceOverLimit" class="account-error">余额超过可放弃上限 {{ maxForfeitableText }} 元，请先消费到上限以内，或通过问题反馈联系我们。</text>
+
+					<view v-if="blockers.length > 0" class="blocker-box">
+						<text class="rule-title">暂时无法注销</text>
+						<view v-for="blocker in blockers" :key="blocker.code" class="blocker-row">
+							<view class="blocker-dot"></view>
+							<text class="blocker-text">{{ blocker.label }}</text>
+						</view>
+					</view>
+
+					<text v-if="rejectedRefundWarning" class="warn-text">存在被拒绝的退款记录。注销后账号不可再用，如仍需申诉请先处理退款问题。</text>
+
+					<view class="email-box">
+						<text class="rule-title">邮箱身份验证</text>
+						<text v-if="!emailVerified" class="account-note">当前账号尚未绑定并验证邮箱，无法通过邮箱验证身份。请先在“账号与安全”中完成邮箱绑定。</text>
+						<view v-else class="email-inner">
+							<text class="account-note">验证码将发送到当前绑定邮箱 {{ maskedEmail }}，用于确认由本人发起注销。</text>
+							<view class="code-row">
+								<input class="account-input code-input" type="number" v-model="code" :maxlength="6" :disabled="submitting || authorized" placeholder="6 位验证码" />
+								<button class="code-button button-text button-text-42" :disabled="sendingCode || cooldown > 0 || authorized" @click="sendCode">{{ codeButtonText }}</button>
+							</view>
+							<button v-if="!authorized" class="action-secondary button-text button-text-44" :disabled="sendingCode || authorizing" @click="authorize">{{ authorizing ? '正在验证…' : '验证邮箱' }}</button>
+							<text v-if="authorized" class="verified-text">邮箱验证通过，请在 10 分钟内提交注销申请。</text>
+						</view>
+					</view>
+
+					<view v-if="canOperate" class="consent-box">
+						<view v-if="balance > 0" class="consent-row" @click="toggleForfeit">
+							<view class="consent-check" :class="forfeitBalance ? 'consent-checked' : ''"><view v-if="forfeitBalance" class="consent-tick"></view></view>
+							<text class="consent-text">我确认放弃当前余额 {{ balanceText }} 元，注销后不再退还。</text>
+						</view>
+						<view class="consent-row" @click="toggleAgree">
+							<view class="consent-check" :class="agreed ? 'consent-checked' : ''"><view v-if="agreed" class="consent-tick"></view></view>
+							<text class="consent-text">我已阅读并理解上述注销规则，确认注销账号且知晓到期后不可恢复。</text>
+						</view>
+					</view>
+
+					<text v-if="actionError.length > 0" class="account-error">{{ actionError }}</text>
+
+					<button v-if="canOperate" class="account-primary danger-primary account-primary-text button-text button-text-50" :disabled="!canSubmit || submitting" :class="(!canSubmit || submitting) ? 'account-disabled' : ''" @click="askSubmit">{{ submitting ? '正在提交…' : '确认注销账号' }}</button>
+				</view>
+			</view>
+		</scroll-view>
+		<confirm-dialog v-if="submitConfirm" title="确认注销账号？" :message="confirmMessage" cancel-text="再想想" confirm-text="确认注销" :busy="submitting" busy-text="提交中…" @cancel="submitConfirm = false" @confirm="doSubmit" />
+	</view>
+</template>
+
+<script setup lang="uts">
+import { reactive, toRefs, computed } from 'vue'
+import ConfirmDialog from '../../components/confirm-dialog/confirm-dialog.uvue'
+import { toast, toastSuccess } from '../../common/feedback.uts'
+import { fetchAccountDeletionEligibility, sendAccountDeletionCode, authorizeAccountDeletion, submitAccountDeletion } from '../../api/auth.uts'
+import { HttpResult } from '../../common/http.uts'
+import { jsonObject, jsonString, jsonNumber, jsonBoolean, jsonArray } from '../../common/json.uts'
+import { isLoggedIn, currentUser, logout } from '../../store/auth.uts'
+import { backToAccount } from '../../common/account.uts'
+
+/** 后端返回的注销阻断项。 */
+type DeletionBlocker = { code: string, label: string, count: number }
+
+const initialBlockers: Array<DeletionBlocker> = []
+const state = reactive({
+	statusBarHeight: 0,
+	loading: true,
+	loadError: '',
+	pending: false,
+	pendingEffectiveAtText: '--',
+	balance: 0,
+	maxForfeitable: 20,
+	balanceOverLimit: false,
+	rejectedRefundWarning: false,
+	maskedEmail: '',
+	emailVerified: false,
+	blockers: initialBlockers,
+	canApply: false,
+	code: '',
+	sendingCode: false,
+	cooldown: 0,
+	authorizing: false,
+	authorized: false,
+	authorizationToken: '',
+	authorizationDeadline: 0,
+	agreed: false,
+	forfeitBalance: false,
+	actionError: '',
+	submitting: false,
+	submitConfirm: false
+})
+
+const { statusBarHeight, loading, loadError, pending, pendingEffectiveAtText, balance, maxForfeitable, balanceOverLimit, rejectedRefundWarning, maskedEmail, emailVerified, blockers, canApply, code, sendingCode, cooldown, authorizing, authorized, agreed, forfeitBalance, actionError, submitting, submitConfirm } = toRefs(state)
+
+let cooldownTimer: number = 0
+
+/** 返回账号与安全页；提交中禁止离开，避免重复操作。 */
+function goBack(): void {
+	if (state.submitting) return
+	backToAccount()
+}
+
+/** 金额展示统一保留两位小数。 */
+function money(value: number): string {
+	return value.toFixed(2)
+}
+
+/** 服务端无时区时间转可读文本，规则与订单倒计时一致。 */
+function serverTimeText(value: string): string {
+	let text = value.trim().replace(' ', 'T')
+	// LocalDateTime 序列化在秒为 0 时可能省略秒，这里同时兼容 HH:mm 与 HH:mm:ss。
+	if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(text)) return '--'
+	text = text + '+08:00'
+	const millis = Date.parse(text)
+	if (!Number.isFinite(millis)) return '--'
+	const date = new Date(millis)
+	const month = (date.getMonth() + 1).toString().padStart(2, '0')
+	const day = date.getDate().toString().padStart(2, '0')
+	const hour = date.getHours().toString().padStart(2, '0')
+	const minute = date.getMinutes().toString().padStart(2, '0')
+	return date.getFullYear().toString() + '-' + month + '-' + day + ' ' + hour + ':' + minute
+}
+
+/** 从统一响应中取出 data 对象。 */
+function payloadOf(result: HttpResult): UTSJSONObject | null {
+	return result.data == null ? null : jsonObject(result.data, 'data')
+}
+
+/**
+ * 查询注销资格。
+ *
+ * 服务端返回余额、可放弃上限、邮箱状态和阻断项；前端只展示，提交时仍由服务端复核。
+ */
+function loadEligibility(): void {
+	state.loading = true
+	state.loadError = ''
+	fetchAccountDeletionEligibility().then((result: HttpResult) => {
+		state.loading = false
+		if (!result.ok) {
+			state.loadError = result.message.length > 0 ? result.message : '暂时无法核对注销条件，请稍后重试'
+			return
+		}
+		const payload = payloadOf(result)
+		if (payload == null) {
+			state.loadError = '注销资格响应异常，请稍后重试'
+			return
+		}
+		state.pending = jsonBoolean(payload, 'pending') == true
+		state.pendingEffectiveAtText = serverTimeText(jsonString(payload, 'effectiveAt') ?? '')
+		state.balance = jsonNumber(payload, 'balance') ?? 0
+		state.maxForfeitable = jsonNumber(payload, 'maxForfeitableBalance') ?? 20
+		state.balanceOverLimit = jsonBoolean(payload, 'balanceOverLimit') == true
+		state.rejectedRefundWarning = jsonBoolean(payload, 'rejectedRefundWarning') == true
+		state.maskedEmail = jsonString(payload, 'maskedEmail') ?? ''
+		state.emailVerified = jsonBoolean(payload, 'emailVerified') == true
+		state.canApply = jsonBoolean(payload, 'canApply') == true
+
+		const rows: Array<DeletionBlocker> = []
+		const rawBlockers = jsonArray(payload, 'blockers')
+		if (rawBlockers != null) {
+			for (let i = 0; i < rawBlockers.length; i++) {
+				const raw = rawBlockers[i]
+				if (raw == null || typeof raw != 'object' || Array.isArray(raw)) continue
+				const item = raw as UTSJSONObject
+				rows.push({ code: jsonString(item, 'code') ?? '', label: jsonString(item, 'label') ?? '暂时无法注销', count: jsonNumber(item, 'count') ?? 0 })
+			}
+		}
+		state.blockers = rows
+	}).catch(() => {
+		state.loading = false
+		state.loadError = '网络异常，请稍后重试'
+	})
+}
+
+/** 发送邮箱验证码并启动 60 秒重发倒计时。 */
+function sendCode(): void {
+	if (state.sendingCode || state.cooldown > 0 || state.authorized) return
+	state.sendingCode = true
+	state.actionError = ''
+	sendAccountDeletionCode().then((result: HttpResult) => {
+		state.sendingCode = false
+		if (!result.ok) {
+			state.actionError = result.message.length > 0 ? result.message : '验证码发送失败，请稍后重试'
+			toast(state.actionError)
+			return
+		}
+		toastSuccess('验证码已发送')
+		startCooldown()
+	}).catch(() => {
+		state.sendingCode = false
+		state.actionError = '网络异常，请稍后重试'
+		toast(state.actionError)
+	})
+}
+
+/** 启动 60 秒发送间隔倒计时，页面卸载时必须清理。 */
+function startCooldown(): void {
+	stopCooldown()
+	state.cooldown = 60
+	cooldownTimer = setInterval(() => {
+		state.cooldown = state.cooldown - 1
+		if (state.cooldown <= 0) stopCooldown()
+	}, 1000)
+}
+
+/** 清理重发倒计时。 */
+function stopCooldown(): void {
+	if (cooldownTimer > 0) {
+		clearInterval(cooldownTimer)
+		cooldownTimer = 0
+	}
+	if (state.cooldown < 0) state.cooldown = 0
+}
+
+/** 邮箱验证码按钮文案。 */
+const codeButtonText = computed((): string => {
+	if (state.authorized) return '已验证'
+	if (state.sendingCode) return '发送中…'
+	if (state.cooldown > 0) return state.cooldown.toString() + 's 后重发'
+	return '发送验证码'
+})
+
+/** 校验验证码并换取一次性授权令牌。 */
+function authorize(): void {
+	if (state.authorizing || state.authorized) return
+	if (state.code.length != 6) {
+		state.actionError = '请输入 6 位邮箱验证码'
+		toast(state.actionError)
+		return
+	}
+	state.authorizing = true
+	state.actionError = ''
+	authorizeAccountDeletion(state.code).then((result: HttpResult) => {
+		state.authorizing = false
+		if (!result.ok) {
+			state.actionError = result.message.length > 0 ? result.message : '验证码错误或已过期'
+			toast(state.actionError)
+			return
+		}
+		const payload = payloadOf(result)
+		const token = payload == null ? '' : (jsonString(payload, 'authorizationToken') ?? '')
+		const expiresIn = payload == null ? 0 : (jsonNumber(payload, 'expiresIn') ?? 0)
+		if (token.length != 64 || expiresIn <= 0) {
+			state.actionError = '授权响应异常，请重新获取验证码'
+			return
+		}
+		state.authorizationToken = token
+		state.authorizationDeadline = Date.now() + expiresIn * 1000
+		state.authorized = true
+		state.code = ''
+		stopCooldown()
+		toastSuccess('邮箱验证通过')
+	}).catch(() => {
+		state.authorizing = false
+		state.actionError = '网络异常，请稍后重试'
+		toast(state.actionError)
+	})
+}
+
+/** 切换“已阅读”确认。 */
+function toggleAgree(): void {
+	if (state.submitting) return
+	state.agreed = !state.agreed
+}
+
+/** 切换余额放弃确认。 */
+function toggleForfeit(): void {
+	if (state.submitting) return
+	state.forfeitBalance = !state.forfeitBalance
+}
+
+/** 只有存在阻断外的可申请状态才展示提交区。 */
+const canOperate = computed((): boolean => {
+	// 仅当服务端确认当前无阻断且邮箱已验证时才展示提交区。
+	return !state.pending && state.emailVerified && state.canApply
+})
+
+/** 提交按钮可用条件：授权有效、已确认、余额已确认放弃。 */
+const canSubmit = computed((): boolean => {
+	if (!state.authorized || !state.agreed) return false
+	if (state.balance > 0 && !state.forfeitBalance) return false
+	return true
+})
+
+/** 确认弹窗正文，明确余额放弃和冷静期规则。 */
+const confirmMessage = computed((): string => {
+	const balancePart = state.balance > 0
+		? '当前余额 ' + money(state.balance) + ' 元将被放弃且不再退还。'
+		: '当前账号没有余额。'
+	return '提交后本机将立即退出登录，账号进入 72 小时冷静期，期间可重新登录撤回。' + balancePart
+})
+
+/** 打开提交确认弹窗。 */
+function askSubmit(): void {
+	if (state.submitting) return
+	state.actionError = ''
+	if (state.authorizationDeadline > 0 && Date.now() >= state.authorizationDeadline) {
+		state.authorized = false
+		state.authorizationToken = ''
+		state.actionError = '邮箱验证已超过 10 分钟，请重新获取验证码'
+		toast(state.actionError)
+		return
+	}
+	if (!state.agreed) {
+		state.actionError = '请先阅读并确认注销规则'
+		return
+	}
+	if (state.balance > 0 && !state.forfeitBalance) {
+		state.actionError = '请先确认放弃当前余额'
+		return
+	}
+	state.submitConfirm = true
+}
+
+/**
+ * 提交注销。
+ *
+ * 成功后立即清理本地登录态，并进入待注销页面展示生效时间；不依赖服务端退出接口，
+ * 因为提交时当前访问令牌已被服务端拉黑，刷新令牌也因凭据版本递增而失效。
+ */
+function doSubmit(): void {
+	if (state.submitting) return
+	state.submitting = true
+	state.actionError = ''
+	submitAccountDeletion(state.authorizationToken, state.forfeitBalance).then((result: HttpResult) => {
+		if (!result.ok) {
+			state.submitting = false
+			state.submitConfirm = false
+			state.actionError = result.message.length > 0 ? result.message : '注销提交失败，请稍后重试'
+			toast(state.actionError)
+			return
+		}
+		const payload = payloadOf(result)
+		const effectiveAt = payload == null ? '' : (jsonString(payload, 'effectiveAt') ?? '')
+		state.authorizationToken = ''
+		state.authorized = false
+		// 服务端已拉黑当前令牌并使刷新令牌失效，这里只需清理本机并跳转。
+		logout().then(() => {
+			state.submitting = false
+			state.submitConfirm = false
+			toastSuccess('注销申请已提交')
+			uni.reLaunch({ url: '/pages/account/deletion-pending?mode=submitted&effectiveAt=' + encodeURIComponent(effectiveAt) })
+		}).catch(() => {
+			state.submitting = false
+			state.submitConfirm = false
+			uni.reLaunch({ url: '/pages/account/deletion-pending?mode=submitted&effectiveAt=' + encodeURIComponent(effectiveAt) })
+		})
+	}).catch(() => {
+		state.submitting = false
+		state.submitConfirm = false
+		state.actionError = '网络异常，注销未提交，请稍后重试'
+		toast(state.actionError)
+	})
+}
+
+/** 已提交但本机仍留有失效令牌时，退出并回登录页。 */
+function leaveAndLogin(): void {
+	logout().then(() => { uni.reLaunch({ url: '/pages/login/login' }) }).catch(() => { uni.reLaunch({ url: '/pages/login/login' }) })
+}
+
+onPageShow(() => {
+	state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+	if (!isLoggedIn()) {
+		uni.reLaunch({ url: '/pages/login/login' })
+		return
+	}
+	const user = currentUser()
+	// 管理角色使用独立管理端，学生端只允许 CUSTOMER。
+	if (user == null || user.roleCode != 'CUSTOMER') {
+		uni.switchTab({ url: '/pages/mine/mine' })
+		return
+	}
+	loadEligibility()
+})
+
+onPageHide(() => {
+	stopCooldown()
+	// 离开页面后重置本地重发提示；服务端 60 秒频控仍会兜底。
+	state.cooldown = 0
+})
+onUnload(() => {
+	stopCooldown()
+	// 页面销毁时清空内存中的一次性授权令牌。
+	state.authorizationToken = ''
+	state.code = ''
+})
+</script>
+
+<style>
+	@import '../../styles/account.css';
+	.rule-box, .blocker-box { display: flex; flex-direction: column; margin-top: 16px; padding: 14px; border-radius: 14px; background-color: #FAF7F4; }
+	/* 邮箱验证区外框统一留白，内层单独竖向排列，避免样式选择器合并后难以覆盖。 */
+	.email-box { display: flex; flex-direction: column; margin-top: 16px; padding: 14px; border-radius: 14px; background-color: #FAF7F4; }
+	.email-inner { display: flex; flex-direction: column; }
+	.rule-title { font-size: 14px; line-height: 20px; font-weight: bold; color: #3F3833; }
+	.rule-line { margin-top: 6px; font-size: 12px; line-height: 19px; color: #786F69; }
+	.balance-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 16px; padding-bottom: 10px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #EFEAE5; }
+	.balance-value { font-size: 20px; font-weight: bold; color: #27221F; }
+	.blocker-row { display: flex; flex-direction: row; align-items: center; margin-top: 8px; }
+	.blocker-dot { width: 6px; height: 6px; margin-right: 8px; border-radius: 3px; background-color: #E4572E; }
+	.blocker-text { flex: 1; font-size: 13px; line-height: 20px; color: #5B534D; }
+	.warn-text { margin-top: 12px; font-size: 12px; line-height: 19px; color: #A66A12; }
+	.code-row { display: flex; flex-direction: row; align-items: center; margin-top: 10px; }
+	.code-input { flex: 1; margin-right: 10px; }
+	.code-button { width: 124px; height: 42px; line-height: 42px; margin: 0; padding: 0; border-width: 0; border-radius: 10px; background-color: #F0E7DF; color: #A24A25; font-size: 13px; text-align: center; }
+	.verified-text { margin-top: 10px; font-size: 13px; line-height: 20px; color: #2E7D4F; }
+	.consent-box { display: flex; flex-direction: column; margin-top: 18px; }
+	.consent-row { display: flex; flex-direction: row; align-items: flex-start; margin-top: 10px; }
+	.consent-check { width: 20px; height: 20px; margin-right: 10px; border-width: 1px; border-style: solid; border-color: #C9C0B8; border-radius: 6px; background-color: #FFFFFF; display: flex; flex-direction: row; align-items: center; justify-content: center; }
+	.consent-checked { border-color: #E4572E; background-color: #E4572E; }
+	.consent-tick { width: 9px; height: 5px; border-left-width: 2px; border-left-style: solid; border-left-color: #FFFFFF; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #FFFFFF; transform: rotate(-45deg); margin-top: -2px; }
+	.consent-text { flex: 1; font-size: 12px; line-height: 20px; color: #655D57; }
+	.action-secondary { margin-top: 10px; height: 44px; line-height: 44px; border-radius: 10px; background-color: #F3F1EF; color: #655D57; font-size: 14px; text-align: center; }
+	.danger-primary { margin-top: 18px; background-color: #C6402A; }
+</style>

@@ -302,6 +302,11 @@ function submit() {
             state.password = ''; state.captchaCode = ''; state.captchaId = ''; state.captchaImage = '';
             uni.navigateTo({ url: '/pages/account/email-verification?mode=enrollment' }); return;
         }
+        // 注销冷静期内不签发正常令牌，只进入待注销页面展示生效时间与撤回入口。
+        if (result.deletionPending) {
+            state.password = ''; state.captchaCode = ''; state.captchaId = ''; state.captchaImage = '';
+            uni.navigateTo({ url: '/pages/account/deletion-pending' }); return;
+        }
         if (!result.ok) {
             toast(result.message);
             // 验证码提交一次即失效，失败后必须换新图，否则再次提交只会提示过期。
