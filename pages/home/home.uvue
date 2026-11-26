@@ -37,6 +37,20 @@
 			</view>
 		</view>
 
+		<!-- 首页公告：独立于推荐与档口加载；没有公告或接口失败时整块不渲染，不占位 -->
+		<view
+			v-if="roleCode == 'CUSTOMER' && announcementVisible"
+			class="announcement-bar"
+			hover-class="announcement-bar-hover"
+			@click="openAnnouncement"
+		>
+			<view class="announcement-badge">
+				<text class="announcement-badge-text">公告</text>
+			</view>
+			<text class="announcement-text" :max-lines="1">{{ announcementTitle }}</text>
+			<text class="announcement-arrow">›</text>
+		</view>
+
         <!-- 推荐独立于目录加载；卡片只进入既有菜单，不直接加购或复用历史规格。 -->
         <view v-if="roleCode == 'CUSTOMER'" class="section">
             <view class="section-head">
@@ -179,6 +193,27 @@
 				</view>
 			</scroll-view>
 		</view>
+		<!-- 公告详情弹层：复用底部面板交互，正文过长时在面板内部纵向滚动 -->
+		<view
+			v-if="announcementSheetVisible"
+			class="mask"
+			:class="announcementSheetReady ? '' : 'mask-pre'"
+			@click="closeAnnouncement"
+		></view>
+		<view
+			v-if="announcementSheetVisible"
+			class="sheet"
+			:class="announcementSheetReady ? '' : 'sheet-pre'"
+		>
+			<text class="sheet-title">公告</text>
+			<view class="announcement-head">
+				<text class="announcement-detail-title">{{ announcementTitle }}</text>
+				<text v-if="announcementTimeText().length > 0" class="announcement-detail-time">{{ announcementTimeText() }} 发布</text>
+			</view>
+			<scroll-view class="announcement-detail" direction="vertical" :style="announcementContentStyle()">
+				<text class="announcement-detail-content">{{ announcementContent }}</text>
+			</scroll-view>
+		</view>
 	</view>
 </template>
 
@@ -193,7 +228,7 @@ import { isLoggedIn, currentUser } from '../../store/auth.uts';
 import { getSessionVersion } from '../../common/storage.uts';
 import { fetchHomeRecommendations, HomeRecommendationItem, HomeRecommendationResult } from '../../api/recommendations.uts';
 // 导入商品查询与结果类型：档口列表、餐厅列表及其返回结构。
-import { listActiveWindows, listActiveRestaurants, WindowItem, WindowListResult, RestaurantItem, RestaurantListResult } from '../../api/product.uts';
+import { listActiveWindows, listActiveRestaurants, WindowItem, WindowListResult, RestaurantItem, RestaurantListResult, fetchHomeAnnouncement, HomeAnnouncementResult } from '../../api/product.uts';
 import { CardRating, fetchCardRatings } from '../../api/comments.uts';
 import { fetchMonthlyWindowSales, MonthlyWindowSalesItem } from '../../api/statistics.uts';
 /** 表示「全部餐厅」的哨兵值，与任何真实餐厅 ID 都不会冲突。 */
@@ -212,6 +247,10 @@ let catalogOwner = '';
 let recommendationRequestVersion = 0;
 let recommendationOwner = '';
 let recommendationSessionVersion = -1;
+/** 公告独立于推荐与目录，用同一套版本/账号校验阻止晚到响应串号。 */
+let announcementRequestVersion = 0;
+let announcementOwner = '';
+let announcementSessionVersion = -1;
 const initialRecommendations: Array<HomeRecommendationItem> = [];
 // 餐厅列表的初始空数组。
 const initialEmptyRestaurants: Array<RestaurantItem> = [];
@@ -253,10 +292,19 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     // 餐厅选择面板是否已挂载显示。
     pickerVisible: false,
     // 餐厅选择面板是否已进入终态，控制其滑入滑出过渡。
-    pickerReady: false })
+    pickerReady: false,
+    /** 首页公告内容；拆成基本字段，避免在 uvue 响应式对象中持有可空业务对象。 */
+    announcementTitle: '',
+    announcementContent: '',
+    announcementPublishedAt: '',
+    /** 是否有可展示公告；无公告或接口失败时为 false，整块不渲染。 */
+    announcementVisible: false,
+    /** 公告详情弹层是否已挂载与是否进入终态。 */
+    announcementSheetVisible: false,
+    announcementSheetReady: false })
 
 // 首页模板直接读取推荐模式与筛选结果，因此一并暴露为响应式引用，避免运行时找不到变量。
-const { refreshing, currentRefreshTime, statusBarHeight, roleCode, recommendationItems, recommendationLoading, recommendationError, recommendationMode, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, heroShapesEntered, listReady, pickerVisible, pickerReady } = toRefs(state)
+const { refreshing, currentRefreshTime, statusBarHeight, roleCode, recommendationItems, recommendationLoading, recommendationError, recommendationMode, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, heroShapesEntered, listReady, pickerVisible, pickerReady, announcementTitle, announcementContent, announcementPublishedAt, announcementVisible, announcementSheetVisible, announcementSheetReady } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.loading || state.pickerVisible || state.roleCode != 'CUSTOMER')
@@ -266,6 +314,8 @@ function refreshPage() {
     state.currentRefreshTime = refreshTimeLabel(refreshStartedAt);
     // 推荐与目录分别发起；推荐返回慢或失败都不阻塞原有目录和下拉刷新收起。
     loadRecommendations();
+    // 公告同样独立加载：失败只隐藏公告条，不改变推荐与档口的状态。
+    loadAnnouncement();
     loadCatalog().then(() => {
         finishPullRefresh(refreshStartedAt, state.loadError.length == 0, (time: string) => {
             if (time.length > 0)
@@ -385,6 +435,8 @@ function loadProfile() {
             // 返回首页时独立更新月售与推荐，保持窗口目录、筛选和档口卡片动画不动。
             refreshMonthlyWindowSales();
             loadRecommendations();
+            // 公告可能已在运营端更新或到期，返回首页时重新读取一次。
+            loadAnnouncement();
             return;
         }
         catalogOwner = profile.userUuid;
@@ -400,9 +452,11 @@ function loadProfile() {
         state.selectedRestaurantName = ALL_RESTAURANTS_NAME;
         loadRecommendations();
         loadCatalog();
+        loadAnnouncement();
     }
     else {
         clearRecommendations();
+        clearAnnouncement();
         // 后端餐厅与档口查询接口只放行顾客角色，其它角色在此直接给出说明，
         // 省掉一次必然失败的请求，也不会在首页上摆一个错误提示。
         state.loading = false;
@@ -419,6 +473,68 @@ function clearRecommendations(): void {
     state.recommendationMode = '';
     state.recommendationLoading = false;
     state.recommendationError = '';
+}
+
+/**
+ * 清空公告展示数据并收起详情弹层。
+ *
+ * <p>只重置界面状态、不递增请求版本：用于"当前没有生效公告"和接口失败后的隐藏，
+ * 让同一会话内的后续刷新仍能正常接纳结果。</p>
+ */
+function resetAnnouncementData(): void {
+    state.announcementTitle = '';
+    state.announcementContent = '';
+    state.announcementPublishedAt = '';
+    state.announcementVisible = false;
+    state.announcementSheetVisible = false;
+    state.announcementSheetReady = false;
+}
+
+/** 清空公告并使在途请求失效；用于退出登录、切换账号或角色不符。 */
+function clearAnnouncement(): void {
+    announcementRequestVersion++;
+    announcementOwner = '';
+    announcementSessionVersion = -1;
+    resetAnnouncementData();
+}
+
+/**
+ * 读取学生端首页公告。
+ *
+ * <p>公告是第三条独立加载链：网络失败或没有公告都只隐藏公告条，不影响推荐与档口。
+ * 与推荐一致，用请求版本、会话版本和账号三重校验丢弃退出、切换账号或离页后的迟到响应，
+ * 避免把上一个账号的公告渲染给当前用户。</p>
+ */
+function loadAnnouncement(): void {
+    // 页面不可见时直接放弃，离页后不再发起请求或改写隐藏视图。
+    if (!homeVisible) {
+        clearAnnouncement();
+        return;
+    }
+    const profile = currentUser();
+    if (!isLoggedIn() || profile == null || profile.roleCode != 'CUSTOMER') {
+        clearAnnouncement();
+        return;
+    }
+    const owner = profile.userUuid;
+    const sessionVersion = getSessionVersion();
+    const version = ++announcementRequestVersion;
+    announcementOwner = owner;
+    announcementSessionVersion = sessionVersion;
+    fetchHomeAnnouncement().then((result: HomeAnnouncementResult) => {
+        const current = currentUser();
+        if (!homeVisible || version != announcementRequestVersion || sessionVersion != getSessionVersion() ||
+            !isLoggedIn() || current == null || current.userUuid != owner || current.roleCode != 'CUSTOMER') return;
+        // 接口失败或当前没有生效公告：同样隐藏公告条，不展示错误打断首页浏览。
+        if (!result.ok || result.data == null) {
+            resetAnnouncementData();
+            return;
+        }
+        state.announcementTitle = result.data!.title;
+        state.announcementContent = result.data!.content;
+        state.announcementPublishedAt = result.data!.publishedAt;
+        state.announcementVisible = true;
+    });
 }
 
 /**
@@ -701,6 +817,66 @@ function openSearch() {
     uni.navigateTo({ url: '/pages/search/search' });
 }
 
+/** 公告弹层展开/收起计时器；重复点击时先取消旧计时器，避免迟到的卸载关掉新弹层。 */
+let announcementShowTimer = 0;
+let announcementHideTimer = 0;
+
+/** 打开公告详情弹层：先以初始态挂载，下一帧切终态以播放上滑过渡。 */
+function openAnnouncement() {
+    // 没有内容时不打开空弹层。
+    if (!state.announcementVisible) return;
+    // 打开前再核对账号与会话，防止页面切换过程中展示上一个账号的公告。
+    const profile = currentUser();
+    if (!isLoggedIn() || profile == null || profile.roleCode != 'CUSTOMER' ||
+        profile.userUuid != announcementOwner || announcementSessionVersion != getSessionVersion()) return;
+    if (announcementHideTimer > 0) {
+        clearTimeout(announcementHideTimer);
+        announcementHideTimer = 0;
+    }
+    state.announcementSheetReady = false;
+    state.announcementSheetVisible = true;
+    if (announcementShowTimer > 0) clearTimeout(announcementShowTimer);
+    announcementShowTimer = setTimeout(() => {
+        announcementShowTimer = 0;
+        state.announcementSheetReady = true;
+    }, 30);
+}
+
+/** 关闭公告详情弹层：先回落到初始态触发滑出，过渡结束后再卸载节点。 */
+function closeAnnouncement() {
+    if (!state.announcementSheetVisible) return;
+    if (announcementShowTimer > 0) {
+        clearTimeout(announcementShowTimer);
+        announcementShowTimer = 0;
+    }
+    state.announcementSheetReady = false;
+    if (announcementHideTimer > 0) clearTimeout(announcementHideTimer);
+    announcementHideTimer = setTimeout(() => {
+        announcementHideTimer = 0;
+        state.announcementSheetVisible = false;
+    }, 240);
+}
+
+/** 把后端时间裁剪为「YYYY-MM-DD HH:mm」；空串表示不展示发布时间行。 */
+function announcementTimeText(): string {
+    const value = state.announcementPublishedAt;
+    if (value.length == 0) return '';
+    return value.replace('T', ' ').substring(0, 16);
+}
+
+/**
+ * 公告正文滚动区高度。
+ *
+ * <p>按每行约 18 个汉字、22px 行高估算：短公告让面板贴身展示，长公告最多 300px，
+ * 超出部分在面板内部滚动，避免弹层盖满整个首页。</p>
+ */
+function announcementContentStyle(): string {
+    const lines = Math.ceil(state.announcementContent.length / 18);
+    const estimated = lines * 22;
+    const height = estimated > 300 ? 300 : estimated;
+    return 'height: ' + (height < 44 ? 44 : height) + 'px';
+}
+
 // 首页为缓存tab页，onReady只执行一次；可见性生命周期单独管理图形动画。
 let heroShapesTimer = 0;
 let homeReady = false;
@@ -722,6 +898,12 @@ onPageHide(() => {
     homeVisible = false;
     recommendationRequestVersion++;
     state.recommendationLoading = false;
+    // 公告同样废弃在途请求，并立即收起详情弹层，返回首页不残留遮罩。
+    announcementRequestVersion++;
+    if (announcementShowTimer > 0) { clearTimeout(announcementShowTimer); announcementShowTimer = 0; }
+    if (announcementHideTimer > 0) { clearTimeout(announcementHideTimer); announcementHideTimer = 0; }
+    state.announcementSheetVisible = false;
+    state.announcementSheetReady = false;
     // 离开页面时立即收起餐厅面板并取消延迟计时器，返回首页不残留遮罩。
     if (pickerShowTimer > 0) { clearTimeout(pickerShowTimer); pickerShowTimer = 0; }
     if (pickerHideTimer > 0) { clearTimeout(pickerHideTimer); pickerHideTimer = 0; }
@@ -732,6 +914,9 @@ onPageHide(() => {
 onUnload(() => {
     homeVisible = false;
     clearRecommendations();
+    clearAnnouncement();
+    if (announcementShowTimer > 0) { clearTimeout(announcementShowTimer); announcementShowTimer = 0; }
+    if (announcementHideTimer > 0) { clearTimeout(announcementHideTimer); announcementHideTimer = 0; }
     if (pickerShowTimer > 0) { clearTimeout(pickerShowTimer); pickerShowTimer = 0; }
     if (pickerHideTimer > 0) { clearTimeout(pickerHideTimer); pickerHideTimer = 0; }
     state.pickerVisible = false;
@@ -1290,6 +1475,83 @@ onReady(() => {
 		color: #E4572E;
 	}
 
+	/* ---------- 首页公告 ---------- */
+
+	/* 公告条：单行胶囊卡片，位于品牌区与推荐区之间；无公告时整块不渲染 */
+	.announcement-bar {
+		flex-direction: row;
+		align-items: center;
+		height: 44px;
+		margin-top: 12px;
+		margin-left: 16px;
+		margin-right: 16px;
+		padding-left: 10px;
+		padding-right: 12px;
+		border-radius: 14px;
+		background-color: #FFFFFF;
+	}
+
+	.announcement-bar-hover {
+		background-color: #FDF0E8;
+	}
+
+	/* 小徽标只占一行高度，避免与标题争夺横向空间 */
+	.announcement-badge {
+		height: 20px;
+		padding-left: 8px;
+		padding-right: 8px;
+		border-radius: 999px;
+		background-color: #FDE7DC;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.announcement-badge-text {
+		font-size: 10px;
+		font-weight: bold;
+		color: #E4572E;
+	}
+
+	.announcement-text {
+		flex: 1;
+		margin-left: 8px;
+		margin-right: 8px;
+		font-size: 13px;
+		color: #4A4038;
+	}
+
+	.announcement-arrow {
+		font-size: 16px;
+		color: #B9A99B;
+	}
+
+	.announcement-head {
+		margin-top: 12px;
+	}
+
+	.announcement-detail-title {
+		font-size: 16px;
+		font-weight: bold;
+		color: #211C18;
+	}
+
+	.announcement-detail-time {
+		margin-top: 6px;
+		font-size: 11px;
+		color: #A2968B;
+	}
+
+	.announcement-detail {
+		margin-top: 10px;
+		margin-bottom: 8px;
+	}
+
+	.announcement-detail-content {
+		font-size: 14px;
+		line-height: 22px;
+		color: #4A4038;
+	}
+
 	/* ---------- 页脚 ---------- */
 
 	.footer {
@@ -1307,9 +1569,10 @@ onReady(() => {
     /* #ifdef WEB */
     .page { display: flex; flex-direction: column; height: 100%; min-height: 0; }
     .hero-body { display: flex; flex-direction: column; }
-    .hero-top, .search-entry, .hero-picker, .stall-line, .recommendation-list, .recommendation-price-row, .sheet-item { display: flex; flex-direction: row; }
+    .hero-top, .search-entry, .hero-picker, .stall-line, .recommendation-list, .recommendation-price-row, .sheet-item, .announcement-bar { display: flex; flex-direction: row; }
     .hero-picker { align-items: center; }
-    .recommendation-card, .recommendation-body, .sheet-item-body { display: flex; flex-direction: column; }
-    .recommendation-name, .recommendation-window, .stall-name, .stall-meta, .hero-picker-text { white-space: nowrap; overflow: hidden; }
+    .announcement-bar { align-items: center; }
+    .recommendation-card, .recommendation-body, .sheet-item-body, .announcement-head { display: flex; flex-direction: column; }
+    .recommendation-name, .recommendation-window, .stall-name, .stall-meta, .hero-picker-text, .announcement-text { white-space: nowrap; overflow: hidden; }
     /* #endif */
 </style>

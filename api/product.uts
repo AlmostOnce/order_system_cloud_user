@@ -1,4 +1,4 @@
-import { jsonArray, jsonNumber, jsonString } from '../common/json.uts'
+import { jsonArray, jsonNumber, jsonObject, jsonString } from '../common/json.uts'
 /**
  * 商品（餐厅与档口）服务接口定义。
  *
@@ -248,4 +248,79 @@ export function fetchProductImages(productIds: number[]): Promise<ProductImageLi
  */
 export function listProductImages(productIds: number[]): Promise<ProductImage[]> {
     return fetchProductImages(productIds).then((result: ProductImageListResult): ProductImage[] => result.items);
+}
+
+/**
+ * 首页公告，对应后端 HomeAnnouncementVO。
+ *
+ * 服务端已按状态与生效时间筛选好，只返回当前应展示的一条；客户端不再判断过期。
+ */
+export type HomeAnnouncement = {
+	/** 公告编号，用于列表渲染标识。 */
+	announcementId: number
+	/** 公告标题，首页公告条单行展示。 */
+	title: string
+	/** 公告正文，点击公告条后在底部弹层展示。 */
+	content: string
+	/** 发布时间，后端 LocalDateTime 字符串，可能为空。 */
+	publishedAt: string
+}
+
+/**
+ * 首页公告查询结果。
+ *
+ * 把「请求失败」与「当前没有公告」区分开：前者需要隐藏公告条并在下次刷新重试，
+ * 后者是正常状态，同样隐藏公告条但不记为错误。
+ */
+export type HomeAnnouncementResult = {
+	/** 请求与响应结构是否有效。 */
+	ok: boolean
+	/** 失败时的可重试提示；没有公告时为空串。 */
+	message: string
+	/** 成功时返回当前公告；没有生效公告时为 null。 */
+	data: HomeAnnouncement | null
+}
+
+/**
+ * 查询学生端首页当前应展示的公告。
+ *
+ * 后端没有生效公告时返回 data = null，这是正常空状态，不应显示错误；
+ * 网络失败、非 200 或响应结构异常时 ok 为 false，首页隐藏公告条即可，不影响推荐与档口。
+ *
+ * @return 公告查询结果
+ */
+export function fetchHomeAnnouncement(): Promise<HomeAnnouncementResult> {
+	return new Promise<HomeAnnouncementResult>((resolve) => {
+		httpGet('/products/announcements/home', true).then((result: HttpResult) => {
+			// 请求整体失败（网络、401、403 等）：传递提示并隐藏公告条。
+			if (!result.ok) {
+				const failed: HomeAnnouncementResult = { ok: false, message: result.message, data: null }
+				resolve(failed)
+				return
+			}
+			// 成功却没有统一响应体属于异常响应，按可重试失败处理。
+			const envelope = result.data
+			if (envelope == null) {
+				const abnormal: HomeAnnouncementResult = { ok: false, message: '公告响应异常，请稍后重试', data: null }
+				resolve(abnormal)
+				return
+			}
+			// data 为 null 表示当前没有生效公告，是正常状态，不是失败。
+			const raw = jsonObject(envelope, 'data')
+			if (raw == null) {
+				const empty: HomeAnnouncementResult = { ok: true, message: '', data: null }
+				resolve(empty)
+				return
+			}
+			// 按后端字段名取值，缺失字段用空串兜底，避免展示出 undefined。
+			const announcement: HomeAnnouncement = {
+				announcementId: jsonNumber(raw, 'announcementId') ?? 0,
+				title: jsonString(raw, 'title') ?? '',
+				content: jsonString(raw, 'content') ?? '',
+				publishedAt: jsonString(raw, 'publishedAt') ?? ''
+			}
+			const success: HomeAnnouncementResult = { ok: true, message: '', data: announcement }
+			resolve(success)
+		})
+	})
 }
