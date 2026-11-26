@@ -62,9 +62,31 @@
                 <view v-for="review in reviews" :key="review.commentId" class="review-feed-card">
                     <!-- 星级与昵称分行，系统大字体及长昵称不挤压星星；时间保留独立次级层次。 -->
                     <view class="review-feed-author-row"><view class="review-feed-avatar"><business-image :src="review.authorAvatarUrl" kind="avatar"></business-image></view><view class="review-author"><text class="review-feed-author-name" :max-lines="1">{{ review.authorName }}</text><text class="review-feed-date">{{ formatDate(review.createdAt) }}</text></view></view>
-                    <view class="review-feed-rating"><review-stars :score="review.score"></review-stars><text class="review-feed-rating-label">{{ review.score == 5 ? '好评' : '差评' }}</text></view>
-                    <text v-if="review.content.length > 0" class="review-feed-body">{{ review.content }}</text>
-                    <view v-if="review.tags.length > 0" class="review-tags"><view v-for="tag in review.tags" :key="tag" class="review-tag"><text class="review-tag-label">{{ tag }}</text></view></view>
+                    <!-- 我的评价支持原地编辑：只改评分、正文和标签，图片保持原值，避免前端反推文件标识。 -->
+                    <view v-if="editingId == review.commentId" class="review-edit-panel">
+                        <view class="review-stars">
+                            <view v-for="value in editScores" :key="value" class="review-star-button" @click="setEditScore(value)">
+                                <image class="review-star" :src="editScore >= value ? '/static/review/star-filled.svg' : '/static/review/star-outline.svg'"></image>
+                            </view>
+                        </view>
+                        <text class="review-score-hint">{{ editScore == 0 ? '请选择评分' : editScore + ' 星 · ' + editScoreLabels[editScore - 1] }}</text>
+                        <textarea class="review-textarea" v-model="editContent" :maxlength="1000" :disabled="editSubmitting" placeholder="聊聊这次用餐体验" aria-label="编辑评价内容"></textarea>
+                        <text class="review-counter">{{ editContent.length }} / 1000</text>
+                        <view class="review-tags">
+                            <button v-for="tag in editTagOptions" :key="tag" class="review-tag-button review-tag-label button-text button-text-44" :class="editTags.includes(tag) ? 'review-tag-selected' : ''" :disabled="editSubmitting" @click="toggleEditTag(tag)">{{ tag }}</button>
+                        </view>
+                        <text v-if="editError.length > 0" class="account-error">{{ editError }}</text>
+                        <view class="review-edit-actions">
+                            <view class="review-edit-cancel" @click="cancelEdit"><text class="review-edit-cancel-text">取消</text></view>
+                            <button class="review-edit-save button-text button-text-44" :disabled="editSubmitting || editScore <= 0" @click="saveEdit(review)"><text class="review-edit-save-text">{{ editSubmitting ? '保存中…' : '保存修改' }}</text></button>
+                        </view>
+                        <text class="review-edit-note">图片与发布时的订单归属不会改变，图片暂不支持修改。</text>
+                    </view>
+                    <view v-else>
+                        <view class="review-feed-rating"><review-stars :score="review.score"></review-stars><text class="review-feed-rating-label">{{ review.score == 5 ? '好评' : '差评' }}</text></view>
+                        <text v-if="review.content.length > 0" class="review-feed-body">{{ review.content }}</text>
+                        <view v-if="review.tags.length > 0" class="review-tags"><view v-for="tag in review.tags" :key="tag" class="review-tag"><text class="review-tag-label">{{ tag }}</text></view></view>
+                    </view>
                     <view v-if="review.images.length > 0" class="review-photos"><image v-for="(url, index) in review.images" :key="url" class="review-feed-photo" :src="photoSource(url)" mode="aspectFill" @click="previewPhotos(review, index)"></image></view>
                     <!-- 评论区摘要：只读展示服务端给的前三条顶层评论，完整对话进入独立评论页。 -->
                     <view v-if="review.discussionCount > 0" class="review-discussion">
@@ -88,6 +110,11 @@
                     <view v-if="productId == 0 && windowId == 0 && !showWindowReviews" class="review-product-link" @click="openProduct(review)">
                         <text class="account-link-text">查看这道菜的评价</text><view class="account-arrow"></view>
                     </view>
+                    <!-- 只有“我的评价”列表确认这些评价属于当前用户，普通浏览页不显示编辑与删除。 -->
+                    <view v-if="isMineView && editingId != review.commentId" class="review-owner-actions">
+                        <view class="review-owner-action" @click="startEdit(review)"><text class="review-owner-action-text">编辑</text></view>
+                        <view class="review-owner-action" @click="askDelete(review)"><text class="review-owner-action-danger">删除</text></view>
+                    </view>
                 </view>
                 <text v-if="loading" class="account-note">正在获取评价…</text>
                 <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
@@ -101,14 +128,18 @@
                 <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
             </view>
         </scroll-view>
+        <!-- 删除评价会同时影响该订单的再次评价资格，必须二次确认；删除请求进行中禁止重复提交。 -->
+        <confirm-dialog v-if="deleteTarget != null" title="删除这条评价？" message="删除后其他同学将看不到这条评价，该订单也不能再次评价；商品或店铺评分会重新计算。" cancel-text="保留评价" confirm-text="确认删除" :busy="deleteBusy" busy-text="正在删除…" @cancel="cancelDelete" @confirm="confirmDelete" />
     </view>
 </template>
 <script setup lang="uts">
 import ReviewStars from '../review-stars/review-stars.uvue';
-import { reactive, toRefs, watch, onMounted, onBeforeUnmount } from 'vue'
+import { reactive, toRefs, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import BusinessImage from '../business-image/business-image.uvue'
 import RefreshHeader from '../refresh-header/refresh-header.uvue'
-import { Review, fetchComments, fetchWindowReviews, commentPayload, parseCommentPage, parseWindowReviewPage } from '../../api/comments.uts'
+import ConfirmDialog from '../confirm-dialog/confirm-dialog.uvue'
+import { Review, fetchComments, fetchWindowReviews, commentPayload, parseComment, parseCommentPage, parseWindowReview, parseWindowReviewPage,
+    reviseComment, removeComment, reviseWindowReview, removeWindowReview } from '../../api/comments.uts'
 import { fetchReviewSummary, parseReviewSummary } from '../../api/comments.uts'
 import { listProductImages, listActiveWindows, ProductImage, WindowItem } from '../../api/product.uts'
 import { currentUser } from '../../store/auth.uts'
@@ -116,6 +147,7 @@ import { backToAccount, accountDate } from '../../common/account.uts'
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 import { imageSource } from '../../common/images.uts'
 import { openOrderList } from '../../common/order-navigation.uts'
+import { toast } from '../../common/feedback.uts'
 
 /**
  * 只读评价列表本体。
@@ -150,10 +182,19 @@ const emit = defineEmits(['close', 'toggle-product-favorite'])
 const initialReviews: Array<Review> = []
 // 标签仅写全部/好评/差评/有图；分数由0/5/1表达，有图单独使用布尔查询条件。
 const scoreTabs: Array<number> = [0, 5, 1]
+// 编辑评分与标签沿用发布页的五个档位，保证展示和提交口径一致。
+const editScores: Array<number> = [1, 2, 3, 4, 5]
+const editScoreLabels: Array<string> = ['不满意', '有待改进', '还不错', '很满意', '非常满意']
+const editTagOptions: Array<string> = ['味道好', '分量足', '出餐快', '包装好', '值得推荐']
+const initialEditTags: Array<string> = []
 // 分数筛选与统计分别存储；统计覆盖全部评价，不随分页累计。
 const state = reactive({ photoOnly: false, imageCount: null as number | null, scoreFilter: 0, reviewScrollTop: 0, positiveCount: 0, negativeCount: 0, contextImageUrl: '', contextWindowName: '', contextLocation: '', statusBarHeight: 0, productId: 0, windowId: 0, showWindowReviews: true, productName: '', reviews: initialReviews, loading: false, loaded: false, errorText: '', nextCursor: '', hasMore: false,
-    refreshing: false, currentRefreshTime: '', ratingLoading: false, ratingReady: false, averageScore: null as number | null, reviewCount: 0, ratingError: '' })
-const { photoOnly, imageCount, scoreFilter, reviewScrollTop, nextCursor, positiveCount, negativeCount, contextImageUrl, contextWindowName, contextLocation, statusBarHeight, productId, windowId, showWindowReviews, productName, reviews, loading, loaded, errorText, hasMore, refreshing, currentRefreshTime, ratingLoading, ratingReady, averageScore, reviewCount, ratingError } = toRefs(state)
+    refreshing: false, currentRefreshTime: '', ratingLoading: false, ratingReady: false, averageScore: null as number | null, reviewCount: 0, ratingError: '',
+    editingId: '', editScore: 0, editContent: '', editTags: initialEditTags, editSubmitting: false, editError: '', deleteTarget: null as Review | null, deleteBusy: false })
+const { photoOnly, imageCount, scoreFilter, reviewScrollTop, nextCursor, positiveCount, negativeCount, contextImageUrl, contextWindowName, contextLocation, statusBarHeight, productId, windowId, showWindowReviews, productName, reviews, loading, loaded, errorText, hasMore, refreshing, currentRefreshTime, ratingLoading, ratingReady, averageScore, reviewCount, ratingError,
+    editingId, editScore, editContent, editTags, editSubmitting, editError, deleteTarget, deleteBusy } = toRefs(state)
+/** 只有独立“我的评价”页能确认列表里的评价都属于当前用户；其他复用场景一律只读。 */
+const isMineView = computed((): boolean => state.productId == 0 && state.windowId == 0)
 // 每次切筛选/离页都递增，所有响应在写入前复核；旧finally也不能结束新请求的加载态。
 let reviewVersion = 0
 let summaryVersion = 0
@@ -265,6 +306,7 @@ function selectPhotos() { changeReviewFilter(0, true) }
 function changeReviewFilter(score: number, withImages: boolean) {
     if (reviewDisposed || state.refreshing || (score == state.scoreFilter && withImages == state.photoOnly)) return
     reviewVersion++; state.loading = false; state.scoreFilter = score; state.photoOnly = withImages
+    resetEditState(); state.deleteTarget = null
     state.reviews = []; state.nextCursor = ''; state.hasMore = false; state.loaded = false; state.errorText = ''; state.reviewScrollTop = 0
     loadReviews(true)
 }
@@ -313,9 +355,135 @@ function openDiscussions(review: Review) {
     const type = review.productId > 0 ? 'COMMENT' : 'WINDOW_REVIEW'
     uni.navigateTo({ url: '/pages/review/discussions?reviewType=' + type + '&reviewId=' + encodeURIComponent(review.commentId) })
 }
+/**
+ * 清空编辑态。
+ *
+ * 切筛选、切我的评价/店铺评价、删除成功后都调用，避免把上一条评价的草稿
+ * 带到另一条评价或另一类列表里；提交中的请求不允许被清空，由调用方先判断。
+ */
+function resetEditState(): void {
+    state.editingId = ''
+    state.editScore = 0
+    state.editContent = ''
+    state.editTags = []
+    state.editError = ''
+}
+
+/** 进入原地编辑；只在“我的评价”列表开放，普通浏览场景后端会拒绝非作者请求。 */
+function startEdit(review: Review): void {
+    if (!isMineView.value || state.editSubmitting || state.deleteBusy) return
+    state.editingId = review.commentId
+    state.editScore = review.score
+    state.editContent = review.content
+    const tags: Array<string> = []
+    for (let i = 0; i < review.tags.length; i++) tags.push(review.tags[i])
+    state.editTags = tags
+    state.editError = ''
+    state.deleteTarget = null
+}
+
+/** 取消编辑；提交中的请求保持锁定，避免用户误以为已取消而重复提交。 */
+function cancelEdit(): void {
+    if (state.editSubmitting) return
+    resetEditState()
+}
+
+/** 选择编辑评分；1 至 5 为服务端唯一合法区间。 */
+function setEditScore(score: number): void {
+    if (state.editSubmitting || score < 1 || score > 5) return
+    state.editScore = score
+}
+
+/** 切换编辑标签，最多五个；与发布页一致，超出上限不再追加。 */
+function toggleEditTag(tag: string): void {
+    if (state.editSubmitting) return
+    const found = state.editTags.indexOf(tag)
+    if (found >= 0) state.editTags.splice(found, 1)
+    else if (state.editTags.length < 5) state.editTags.push(tag)
+}
+
+/**
+ * 保存评价修改。
+ *
+ * 只回写评分、正文和标签，不清空本地已加载的评论区预览；图片因为编辑接口未下发，
+ * 保持原值。服务端返回空数据或字段异常时停留在编辑态并展示原因，用户可直接重试。
+ */
+async function saveEdit(review: Review): Promise<void> {
+    if (state.editSubmitting || !isMineView.value) return
+    if (state.editScore < 1 || state.editScore > 5) { state.editError = '请选择1至5星评分'; return }
+    if (state.editContent.length > 1000) { state.editError = '评价内容不能超过1000字'; return }
+    state.editSubmitting = true
+    state.editError = ''
+    try {
+        const content = state.editContent.trim()
+        const tags: Array<string> = []
+        for (let i = 0; i < state.editTags.length; i++) tags.push(state.editTags[i])
+        const result = review.productId > 0
+            ? await reviseComment(review.commentId, state.editScore, content, tags)
+            : await reviseWindowReview(review.commentId, state.editScore, content, tags)
+        if (reviewDisposed) return
+        const data = commentPayload(result)
+        if (data == null) {
+            state.editError = result.message.length > 0 ? result.message : '评价保存失败，请稍后重试'
+            return
+        }
+        const parsed = review.productId > 0 ? parseComment(data) : parseWindowReview(data)
+        if (parsed == null) { state.editError = '评价数据异常，请刷新后重试'; return }
+        review.score = parsed.score
+        review.content = parsed.content
+        review.tags = parsed.tags
+        state.editingId = ''
+        toast('评价已更新')
+    } catch (_error) {
+        if (!reviewDisposed) state.editError = '网络异常，请稍后重试'
+    } finally {
+        state.editSubmitting = false
+    }
+}
+
+/** 打开删除确认框；提交或删除进行中不重复打开。 */
+function askDelete(review: Review): void {
+    if (!isMineView.value || state.deleteBusy || state.editSubmitting) return
+    state.deleteTarget = review
+}
+
+/** 关闭删除确认框；删除请求进行中禁止关闭，避免用户误以为已取消。 */
+function cancelDelete(): void {
+    if (state.deleteBusy) return
+    state.deleteTarget = null
+}
+
+/**
+ * 确认删除评价。
+ *
+ * 服务端软删除后，该订单与菜品/店铺不能再评价，评分由后端重算；
+ * 前端只从当前列表移除并关闭编辑态，不伪造评分或评价数量变化。
+ * 失败保留确认框与原文案，用户可重试或取消。
+ */
+async function confirmDelete(): Promise<void> {
+    const target = state.deleteTarget
+    if (target == null || state.deleteBusy) return
+    state.deleteBusy = true
+    try {
+        const result = target.productId > 0 ? await removeComment(target.commentId) : await removeWindowReview(target.commentId)
+        if (!result.ok) {
+            toast(result.message.length > 0 ? result.message : '删除失败，请稍后重试')
+            return
+        }
+        state.reviews = state.reviews.filter((item: Review): boolean => item.commentId != target.commentId)
+        if (state.editingId == target.commentId) resetEditState()
+        state.deleteTarget = null
+        toast('评价已删除')
+    } catch (_error) {
+        toast('网络异常，请稍后重试')
+    } finally {
+        state.deleteBusy = false
+    }
+}
 function selectMine(windowMode: boolean) {
     if (state.refreshing || state.showWindowReviews == windowMode) return
     reviewVersion++; state.loading = false; state.scoreFilter = 0; state.photoOnly = false; state.reviewScrollTop = 0
+    resetEditState(); state.deleteTarget = null
     state.showWindowReviews = windowMode; state.reviews = []; state.loaded = false; state.nextCursor = ''; state.hasMore = false
     loadReviews(true)
 }
@@ -383,8 +551,23 @@ onPageShow(() => {
 .review-feed-body { margin-top: 6px; font-size: 13px; line-height: 20px; color: #463A32; }
 /* 最多三张缩略图；窄屏可换行，保持图片预览和正文阅读宽度。 */
 .review-feed-photo { width: 64px; height: 64px; margin-right: 5px; margin-bottom: 5px; border-radius: 8px; background-color: #F6EEE7; }
+/* 我的评价编辑区：复用发布页的星级、输入框和标签样式，只补容器与操作行。 */
+.review-edit-panel { margin-top: 6px; padding: 8px; border-radius: 10px; background-color: #FBF6F1; }
+.review-edit-panel .review-textarea { height: 84px; margin-top: 6px; background-color: #FFFFFF; }
+.review-edit-actions { flex-direction: row; align-items: center; justify-content: flex-end; margin-top: 8px; }
+.review-edit-cancel { display: flex; min-height: 40px; padding: 0 14px; align-items: center; justify-content: center; }
+.review-edit-cancel-text { font-size: 12px; line-height: 18px; color: #7A6C60; }
+.review-edit-save { display: flex; min-height: 40px; margin: 0; padding: 0 16px; border-width: 0; border-radius: 8px; background-color: #E4572E; align-items: center; justify-content: center; }
+.review-edit-save-text { font-size: 12px; line-height: 18px; font-weight: bold; color: #FFFFFF; }
+.review-edit-note { margin-top: 4px; font-size: 10px; line-height: 14px; color: #A09083; }
+.review-owner-actions { flex-direction: row; justify-content: flex-end; margin-top: 2px; }
+.review-owner-action { display: flex; min-height: 36px; margin-left: 14px; align-items: center; justify-content: center; }
+.review-owner-action-text { font-size: 11px; line-height: 16px; color: #8D7B6E; }
+.review-owner-action-danger { font-size: 11px; line-height: 16px; color: #B73920; }
 /* #ifdef WEB */
-.account-page .review-overview-main, .account-page .review-overview-number, .account-page .review-feed-heading, .account-page .review-feed-author-row, .account-page .review-feed-rating, .account-page .review-segment, .account-page .review-segment-tab { flex-direction: row; }
+.account-page .review-overview-main, .account-page .review-overview-number, .account-page .review-feed-heading, .account-page .review-feed-author-row, .account-page .review-feed-rating, .account-page .review-segment, .account-page .review-segment-tab,
+.account-page .review-edit-actions, .account-page .review-owner-actions { flex-direction: row; }
+.account-page .review-edit-panel .review-textarea { box-sizing: border-box; }
 /* #endif */
 
 /* 图片和店铺构成评价对象的视觉锚点；介绍失败时仍可阅读评价。 */
