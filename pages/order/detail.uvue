@@ -32,6 +32,8 @@
             </view>
             <view v-if="order != null" class="account-card vapor-account-secondary--account-card">
                 <text class="account-heading">{{ order!.windowName.length > 0 ? order!.windowName : '店铺名称暂不可用' }}</text>
+                <!-- 取餐地点按档口当前资料展示：未配置或查询失败时整行隐藏，不影响订单正文。 -->
+                <text v-if="windowLocation.length > 0" class="account-note">取餐地点 {{ windowLocation }}</text>
                 <view v-for="item in order!.items" :key="item.itemId" class="order-line"><view class="order-line-copy"><text class="order-line-name">{{ item.productName }}</text><text v-if="item.specificationText.length > 0" class="account-note">{{ item.specificationText }}</text><text class="account-muted">¥{{ item.unitPrice.toFixed(2) }} × {{ item.quantity }}</text><text v-if="item.refundedQuantity > 0 || item.fulfillableQuantity < item.quantity" class="account-note">已退 {{ item.refundedQuantity }} 份 · 待履约 {{ item.fulfillableQuantity }} 份</text></view><text class="order-line-price">¥{{ item.lineAmount.toFixed(2) }}</text></view>
                 <!-- totalAmount 保留商品原价，优惠与最终应付金额直接使用服务端订单快照。 -->
                 <view class="order-total"><text class="account-muted">商品金额</text><text class="account-muted">¥{{ order!.totalAmount.toFixed(2) }}</text></view>
@@ -86,18 +88,22 @@ import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts';
 import { readStoredObject, cleanupKey, paymentPendingKey } from '../../common/checkout.uts';
 import { currentUser } from '../../store/auth.uts';
 import { backToAccount, accountDate } from '../../common/account.uts';
+import { fetchWindowSummary, WindowSummaryResult } from '../../api/product.uts';
 
 let pickupPageVisible = false
 let pickupVersion = 0
 let pickupQrVersion = 0
 let orderLoadVersion = 0
+// 取餐地点与订单正文分开请求：记录已请求的档口，避免实时刷新反复重查同一地点。
+let locationRequestedWindowId = 0
+let locationVersion = 0
 let stopLiveOrders: (() => void) | null = null
 function stopOrderUpdates() {
     if (stopLiveOrders != null) { stopLiveOrders!(); stopLiveOrders = null }
 }
-const state = reactive({ reordering: false, reorderMessage: '', contacting: false, paymentDeadlineKnown: false, paymentExpired: false, remainingPaymentText: '--:--', reviewStatusReady: false, orderReviewed: false, orderReviewComplete: false, pickupCode: '', pickupLoading: false, pickupError: '', pickupQr: '', pickupQrLoading: false, pickupQrError: '', refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
+const state = reactive({ windowLocation: '', reordering: false, reorderMessage: '', contacting: false, paymentDeadlineKnown: false, paymentExpired: false, remainingPaymentText: '--:--', reviewStatusReady: false, orderReviewed: false, orderReviewComplete: false, pickupCode: '', pickupLoading: false, pickupError: '', pickupQr: '', pickupQrLoading: false, pickupQrError: '', refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
 
-const { reordering, reorderMessage, contacting, paymentDeadlineKnown, paymentExpired, remainingPaymentText, reviewStatusReady, orderReviewed, orderReviewComplete, pickupCode, pickupLoading, pickupError, pickupQr, pickupQrLoading, pickupQrError, refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
+const { windowLocation, reordering, reorderMessage, contacting, paymentDeadlineKnown, paymentExpired, remainingPaymentText, reviewStatusReady, orderReviewed, orderReviewComplete, pickupCode, pickupLoading, pickupError, pickupQr, pickupQrLoading, pickupQrError, refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
 /** 已批准退款的份数不再履约，全部获批时隐藏旧取餐码，最终权限仍由后端核销条件保证。 */
 const canPickup = computed((): boolean => state.order != null && ['已支付', '制作中', '待取货'].includes(state.order!.status) && state.order!.items.some((item: OrderLine): boolean => item.fulfillableQuantity > 0))
 /**
@@ -108,6 +114,8 @@ const canReorder = computed((): boolean => state.order != null && state.order!.i
 
 
 let paymentClock = 0
+// 从订单列表“去支付”进入时置为 true，首轮加载完成后自动展开支付，不改变其他进入路径。
+let payOnOpen = false
 let deadlineChecked = false
 function stopPaymentClock() { if (paymentClock > 0) { clearInterval(paymentClock); paymentClock = 0 } }
 function startPaymentClock(order: CustomerOrder) {
@@ -158,6 +166,28 @@ function goBack() {
 
 function formatDate(value: string): string {
     return accountDate(value);
+}
+
+/**
+ * 加载订单所属档口的取餐地点。
+ *
+ * 设计要点：
+ * - 与订单正文、取餐码、支付完全独立：任何失败只隐藏地点一行，不改写 errorText，也不影响其他数据加载。
+ * - 同一档口每个页面实例只请求一次，实时刷新和下拉刷新不会重复放大流量；
+ *   离开页面后通过版本号丢弃迟到响应，避免把上一单的地点渲染到当前订单。
+ * - 后端按档口主键直接查询，窗口停用或休息时仍能返回位置，历史订单也能回看取餐地点。
+ */
+function loadWindowLocation(): Promise<void> {
+    const current = state.order
+    if (!pickupPageVisible || current == null || current.windowId <= 0) return Promise.resolve()
+    if (locationRequestedWindowId == current.windowId) return Promise.resolve()
+    locationRequestedWindowId = current.windowId
+    state.windowLocation = ''
+    const version = ++locationVersion
+    return fetchWindowSummary(current.windowId).then((result: WindowSummaryResult) => {
+        if (!pickupPageVisible || version != locationVersion) return
+        if (result.ok) state.windowLocation = result.location
+    })
 }
 
 async function loadReviewStatus(): Promise<void> {
@@ -341,6 +371,8 @@ function refresh(): Promise<void> {
         }
         state.order = order;
         startPaymentClock(order);
+        // 地点是独立展示链路，不等待它完成，也不让它的失败影响订单正文。
+        loadWindowLocation();
         state.pickupCode = ''; state.pickupError = '';
         if (order.status != '待支付') {
             closePayment();
@@ -503,6 +535,8 @@ function cancel() {
 
 onLoad((options: OnLoadOptions) => {
     state.orderId = Number(options['orderId'] ?? '0');
+    // 列表快捷支付通过 pay=1 进入；仅影响本次首轮加载。
+    payOnOpen = options['pay'] == '1';
 })
 
 onPageShow(() => {
@@ -520,7 +554,12 @@ onPageShow(() => {
     }
     state.userUuid = user.userUuid;
     state.paymentUncertain = state.paymentUncertain || uni.getStorageSync(paymentPendingKey(state.userUuid, state.orderId)) === true;
-    refresh();
+    refresh().then(() => {
+        // 订单、余额与支付状态就绪后再自动展开支付；任一条件不满足则停在详情页由用户手动操作。
+        if (!payOnOpen) return;
+        payOnOpen = false;
+        openPayment();
+    });
     retryCleanup();
     const liveOwner = user.userUuid;
     stopLiveOrders = startOrderLiveRefresh((): Promise<void> => {
@@ -531,6 +570,7 @@ onPageShow(() => {
 })
 
 onPageHide(() => {
+    payOnOpen = false;
     state.cancelConfirm = false;
     stopOrderUpdates();
     orderLoadVersion++; state.loading = false; state.balanceLoading = false;
@@ -538,18 +578,23 @@ onPageHide(() => {
     pickupPageVisible = false; pickupVersion++; state.pickupCode = ""; state.pickupLoading = false;
     // 二维码随取餐码一起失效；重新进入页面后按当前订单重新获取。
     pickupQrVersion++; state.pickupQr = ""; state.pickupQrLoading = false; state.pickupQrError = "";
+    // 取餐地点同样随页面失效：版本号丢弃迟到响应，重新进入时允许重新查询。
+    locationRequestedWindowId = 0; locationVersion++; state.windowLocation = "";
     if (state.paymentExpanded) cancelPaymentPassword();
     state.paymentExpanded = false;
     state.payPassword = '';
 })
 
 onUnload(() => {
+    payOnOpen = false;
     state.cancelConfirm = false;
     stopOrderUpdates();
     orderLoadVersion++; state.loading = false; state.balanceLoading = false;
     stopPaymentClock();
     pickupPageVisible = false; pickupVersion++; state.pickupCode = ""; state.pickupLoading = false;
     pickupQrVersion++; state.pickupQr = ""; state.pickupQrLoading = false; state.pickupQrError = "";
+    // 页面销毁后不再保留地点状态，避免下次进入沿用过期的取餐地点。
+    locationRequestedWindowId = 0; locationVersion++; state.windowLocation = "";
     if (state.paymentExpanded) cancelPaymentPassword();
     state.paymentExpanded = false;
     state.payPassword = '';
