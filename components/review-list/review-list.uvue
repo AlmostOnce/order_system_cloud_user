@@ -70,7 +70,7 @@
                             </view>
                         </view>
                         <text class="review-score-hint">{{ editScore == 0 ? '请选择评分' : editScore + ' 星 · ' + editScoreLabels[editScore - 1] }}</text>
-                        <textarea class="review-textarea" v-model="editContent" :maxlength="1000" :disabled="editSubmitting" placeholder="聊聊这次用餐体验" aria-label="编辑评价内容"></textarea>
+                        <textarea class="review-textarea review-edit-textarea" v-model="editContent" :maxlength="1000" :disabled="editSubmitting" placeholder="聊聊这次用餐体验" aria-label="编辑评价内容"></textarea>
                         <text class="review-counter">{{ editContent.length }} / 1000</text>
                         <view class="review-tags">
                             <button v-for="tag in editTagOptions" :key="tag" class="review-tag-button review-tag-label button-text button-text-44" :class="editTags.includes(tag) ? 'review-tag-selected' : ''" :disabled="editSubmitting" @click="toggleEditTag(tag)">{{ tag }}</button>
@@ -78,7 +78,7 @@
                         <text v-if="editError.length > 0" class="account-error">{{ editError }}</text>
                         <view class="review-edit-actions">
                             <view class="review-edit-cancel" @click="cancelEdit"><text class="review-edit-cancel-text">取消</text></view>
-                            <button class="review-edit-save button-text button-text-44" :disabled="editSubmitting || editScore <= 0" @click="saveEdit(review)"><text class="review-edit-save-text">{{ editSubmitting ? '保存中…' : '保存修改' }}</text></button>
+                            <button class="review-edit-save review-edit-save-text button-text button-text-44" :disabled="editSubmitting || editScore <= 0" @click="saveEdit(review)">{{ editSubmitting ? '保存中…' : '保存修改' }}</button>
                         </view>
                         <text class="review-edit-note">图片与发布时的订单归属不会改变，图片暂不支持修改。</text>
                     </view>
@@ -553,7 +553,8 @@ onPageShow(() => {
 .review-feed-photo { width: 64px; height: 64px; margin-right: 5px; margin-bottom: 5px; border-radius: 8px; background-color: #F6EEE7; }
 /* 我的评价编辑区：复用发布页的星级、输入框和标签样式，只补容器与操作行。 */
 .review-edit-panel { margin-top: 6px; padding: 8px; border-radius: 10px; background-color: #FBF6F1; }
-.review-edit-panel .review-textarea { height: 84px; margin-top: 6px; background-color: #FFFFFF; }
+/* 编辑态输入框单类选择器：uvue 原生端不支持后代选择器，不能写 .review-edit-panel .review-textarea。 */
+.review-edit-textarea { height: 84px; margin-top: 6px; background-color: #FFFFFF; }
 .review-edit-actions { flex-direction: row; align-items: center; justify-content: flex-end; margin-top: 8px; }
 .review-edit-cancel { display: flex; min-height: 40px; padding: 0 14px; align-items: center; justify-content: center; }
 .review-edit-cancel-text { font-size: 12px; line-height: 18px; color: #7A6C60; }

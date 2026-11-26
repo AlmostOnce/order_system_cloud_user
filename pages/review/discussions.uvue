@@ -37,7 +37,7 @@
                         <text v-if="composeError.length > 0" class="account-error">{{ composeError }}</text>
                     </view>
 
-                    <view v-if="loading" class="account-note discussion-loading">正在获取评论…</view>
+                    <text v-if="loading" class="account-note discussion-loading">正在获取评论…</text>
                     <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
 
                     <!-- 楼层列表：顶层评论按时间倒序，楼层内回复按时间正序。 -->
