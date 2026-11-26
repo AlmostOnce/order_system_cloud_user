@@ -47,6 +47,8 @@
 .order-list-countdown { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 14px; width: 100%; padding: 10px 12px; border-radius: 10px; background-color: #FDF6F0; }
 .order-list-countdown-label { flex-shrink: 0; margin-right: 12px; font-size: 12px; line-height: 20px; color: #7A6C60; }
 .order-list-countdown-value { font-size: 15px; line-height: 22px; font-weight: bold; color: #C2410C; }
+/* 待支付订单的列表内快捷支付入口：仅负责带参进入详情，支付确认仍在详情页完成。 */
+.order-list-pay { font-size: 13px; line-height: 18px; font-weight: bold; color: #C2410C; }
 /* #ifdef WEB */
 .account-page .order-list-countdown { flex-direction: row; box-sizing: border-box; }
 /* #endif */

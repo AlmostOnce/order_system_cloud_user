@@ -24,7 +24,11 @@
                 <text class="account-muted order-list-date">{{ formatDate(item.createdAt) }}</text>
                 <text class="account-muted">订单号 {{ item.orderNo }}</text>
                 <!-- 列表显示服务端应付快照，避免把优惠前的商品金额误认为支付金额。 -->
-                <view class="order-list-top order-list-bottom"><text class="account-muted">{{ item.status == '已完成' ? '查看详情与评价' : '查看订单详情' }}</text><text class="order-total-price">实付 ¥{{ item.payableAmount.toFixed(2) }}</text></view>
+                <view class="order-list-top order-list-bottom">
+                    <text v-if="item.status == '待支付'" class="order-list-pay" @click.stop="payNow(item.orderId)">去支付</text>
+                    <text v-else class="account-muted">{{ item.status == '已完成' ? '查看详情与评价' : '查看订单详情' }}</text>
+                    <text class="order-total-price">实付 ¥{{ item.payableAmount.toFixed(2) }}</text>
+                </view>
                 </view>
                 <view v-if="!loading && visibleOrders.length == 0 && errorText.length == 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">{{ selectedStatus == 'all' ? '还没有订单' : '暂无该状态的订单' }}</text><text class="account-note">去食堂挑选喜欢的菜品，开启下一餐。</text>
                     <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="goHome">去点餐</button>
@@ -84,15 +88,45 @@ const visibleOrders = computed((): Array<CustomerOrder> => state.orders)
 let countdownTimer = 0
 let listVisible = false
 let loadVersion = 0
+// 倒计时归零后的静默刷新标记与失败冷却，避免每秒重复请求。
+let expiredRefreshScheduled = false
+let expiredRefreshCooldownUntil = 0
 // 阅读历史时不让后台通知重置分页；用户回到顶部后再合并处理一次延迟刷新。
 let atListTop = true
 let awaitingLiveRefresh = false
-function stopCountdown() { if (countdownTimer > 0) { clearInterval(countdownTimer); countdownTimer = 0 } }
+function stopCountdown() { if (countdownTimer > 0) { clearInterval(countdownTimer); countdownTimer = 0 } expiredRefreshScheduled = false }
 function startCountdown() {
     stopCountdown(); state.clockNow = Date.now()
     if (listVisible && state.orders.some((item: CustomerOrder): boolean => item.status == '待支付')) {
-        countdownTimer = setInterval(() => { state.clockNow = Date.now() }, 1000)
+        countdownTimer = setInterval(() => {
+            state.clockNow = Date.now()
+            // 有订单倒计时归零时主动刷新一次，避免停留在“待支付/已超时”的旧状态。
+            checkExpiredPayments()
+        }, 1000)
     }
+}
+
+/** 倒计时归零后静默刷新首屏；失败进入冷却，不在下一秒继续打服务端。 */
+function checkExpiredPayments(): void {
+    if (expiredRefreshScheduled || Date.now() < expiredRefreshCooldownUntil) return
+    if (!listVisible || state.refreshing || state.loading || state.loadingMore) return
+    const now = state.clockNow + state.serverClockOffset
+    let expired = false
+    for (let i = 0; i < state.orders.length; i++) {
+        const item = state.orders[i]
+        if (item.status != '待支付') continue
+        const deadline = orderPaymentDeadline(item.createdAt)
+        if (deadline > 0 && deadline <= now) { expired = true; break }
+    }
+    if (!expired) return
+    expiredRefreshScheduled = true
+    load().then(() => {
+        expiredRefreshScheduled = false
+        expiredRefreshCooldownUntil = 0
+    }).catch(() => {
+        expiredRefreshScheduled = false
+        expiredRefreshCooldownUntil = Date.now() + 15000
+    })
 }
 function paymentTime(item: CustomerOrder): string {
     const deadline = orderPaymentDeadline(item.createdAt)
@@ -146,6 +180,11 @@ function formatDate(value: string): string {
 
 function openOrder(id: number) {
     uni.navigateTo({ url: '/pages/order/detail?orderId=' + id });
+}
+
+/** 列表内快捷支付：带 pay=1 进入详情，详情在首轮加载后自动展开支付。 */
+function payNow(id: number) {
+    uni.navigateTo({ url: '/pages/order/detail?orderId=' + id + '&pay=1' });
 }
 
 function resume() {
