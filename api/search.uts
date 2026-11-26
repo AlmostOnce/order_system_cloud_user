@@ -125,3 +125,55 @@ export function searchProducts(keyword: string, page: number, size: number, quer
         }
     })
 }
+
+/**
+ * 输入联想结果。
+ *
+ * <p>后端只返回去重后的菜名数组；超限、缓存或 ES 临时不可用时返回空数组，
+ * 页面表现为「暂无候选」，不应据此判断菜品不存在。</p>
+ */
+export type SearchSuggestResult = {
+    /** 请求是否成功；失败时 suggestions 为空数组。 */
+    ok: boolean
+    /** 失败时的提示文案；联想属弱功能，页面通常不展示该文案。 */
+    message: string
+    /** 去重后的菜名候选。 */
+    suggestions: string[]
+}
+
+/**
+ * 按输入前缀获取菜名联想候选。
+ *
+ * @param keyword 当前输入内容，由调用方保证已 trim 且非空
+ * @param limit 候选数量，取值 1 至 20，后端默认 8
+ * @return 联想结果
+ */
+export function suggestProducts(keyword: string, limit: number = 8): Promise<SearchSuggestResult> {
+    // 关键词含中文与空格，必须编码后再拼进查询串；条数为纯数字。
+    const path = '/search/suggest?keyword=' + encodeURIComponent(keyword) + '&limit=' + limit
+    return httpGet(path, true).then((result: HttpResult): SearchSuggestResult => {
+        const empty: string[] = []
+        // 网络失败、401 或服务不可用：联想静默降级，不打断用户继续输入或提交搜索。
+        if (!result.ok || result.data == null) {
+            return { ok: false, message: result.message, suggestions: empty }
+        }
+        // 统一响应体的 data 即字符串数组；缺失或类型不符时按空候选处理。
+        const rows = jsonArray(result.data, 'data')
+        if (rows == null) {
+            return { ok: false, message: '联想数据不完整，请稍后再试', suggestions: empty }
+        }
+        const suggestions: string[] = []
+        for (let i = 0; i < rows.length; i++) {
+            const raw = rows[i]
+            // 防御性过滤：后端契约是字符串数组，非字符串项直接跳过。
+            if (typeof raw != 'string') {
+                continue
+            }
+            const text = (raw as string).trim()
+            if (text.length > 0) {
+                suggestions.push(text)
+            }
+        }
+        return { ok: true, message: '', suggestions: suggestions }
+    })
+}

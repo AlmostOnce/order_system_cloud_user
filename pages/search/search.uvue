@@ -26,6 +26,7 @@
 						placeholder-class="search-placeholder"
 						confirm-type="search"
 						@confirm="submit"
+						@input="onKeywordInput"
 					/>
 					<view
 						v-if="keyword.length > 0"
@@ -37,6 +38,18 @@
 					</view>
 					<view class="search-submit" hover-class="search-submit-hover" @click="submit">
 						<text class="search-submit-text">搜索</text>
+					</view>
+				</view>
+				<!-- 输入联想：只展示去重后的菜名，点击候选即填入并立即搜索 -->
+				<view v-if="suggestVisible && suggestions.length > 0" class="suggest-card">
+					<view
+						class="suggest-item"
+						hover-class="suggest-item-hover"
+						v-for="entry in suggestions"
+						:key="entry"
+						@click="pickSuggestion(entry)"
+					>
+						<text class="suggest-item-text" :max-lines="1">{{ entry }}</text>
 					</view>
 				</view>
 				<text class="search-privacy-hint">提交的关键词和首屏结果会用于近期推荐，按14天保留期自动清理。</text>
@@ -134,15 +147,21 @@ import { reactive, toRefs } from 'vue'
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import { isLoggedIn, currentUser } from '../../store/auth.uts';
 import { toast } from '../../common/feedback.uts';
-import { searchProducts, SearchProductItem, SearchProductsResult } from '../../api/search.uts';
+import { searchProducts, SearchProductItem, SearchProductsResult, suggestProducts, SearchSuggestResult } from '../../api/search.uts';
 import { readSearchHistory, saveSearchHistory, clearSearchHistory, removeSearchHistory } from '../../common/search-history.uts';
 
 /** 每页条数，与后端默认值保持一致。 */
 const PAGE_SIZE: number = 20;
+/** 联想候选数量，与后端默认值保持一致；下拉过短会频繁请求，过长会遮挡内容。 */
+const SUGGEST_LIMIT: number = 8;
+/** 输入防抖毫秒数：连续输入期间只请求最后一次，避免每次按键都打到搜索服务。 */
+const SUGGEST_DEBOUNCE_MS: number = 250;
 
 // 结果列表的初始空数组，避免首帧渲染时出现 undefined。
 const initialItems: SearchProductItem[] = [];
 const initialHistory: Array<string> = [];
+// 联想候选的初始空数组，语义同上。
+const initialSuggestions: Array<string> = [];
 
 const state = reactive({
     // 状态栏高度（px），用于顶部占位，避免内容被系统状态栏遮挡。
@@ -177,11 +196,20 @@ const state = reactive({
     total: 0,
     // 已加载的结果。
     items: initialItems,
+    // 输入联想候选菜名，后端已按菜名去重。
+    suggestions: initialSuggestions,
+    // 是否展示联想候选面板；输入为空、已提交或点选候选后收起。
+    suggestVisible: false,
     // 请求版本号：新搜索开始后，旧请求的结果不再写回。
     requestVersion: 0
 });
 
-const { statusBarHeight, entered, listReady, roleChecked, canSearch, history, historyEditing, historyClearConfirm, keyword, submittedKeyword, searching, loadingMore, errorText, total, items } = toRefs(state)
+const { statusBarHeight, entered, listReady, roleChecked, canSearch, history, historyEditing, historyClearConfirm, keyword, submittedKeyword, searching, loadingMore, errorText, total, items, suggestions, suggestVisible } = toRefs(state)
+
+/** 联想输入的防抖计时器；大于 0 表示有等待中的请求。 */
+let suggestTimer = 0;
+/** 联想请求版本号：只让最后一次输入对应的响应写回候选。 */
+let suggestVersion = 0;
 
 /**
  * 返回上一页；没有上一页时退回首页 tab。
@@ -267,6 +295,92 @@ function itemDelay(index: number): string {
 }
 
 /**
+ * 输入框内容变化：重新安排一次防抖联想。
+ *
+ * <p>只响应用户键入；点击历史词、候选词等程序化赋值不会触发本方法，
+ * 因此不会在提交搜索后又把候选面板弹回来。</p>
+ *
+ * @param event 输入事件，detail.value 为当前输入内容
+ */
+function onKeywordInput(event: UniInputEvent) {
+    scheduleSuggest(event.detail.value);
+}
+
+/**
+ * 安排联想请求：取消上一次等待中的计时器，并在需要时发起新请求。
+ *
+ * @param raw 当前输入内容（可能含首尾空白）
+ */
+function scheduleSuggest(raw: string) {
+    // 先取消旧计时器，保证连续输入只保留最后一次请求。
+    if (suggestTimer > 0) {
+        clearTimeout(suggestTimer);
+        suggestTimer = 0;
+    }
+    const trimmed = raw.trim();
+    // 空输入时立即收起候选，并递增版本号让在途响应作废。
+    if (trimmed.length == 0) {
+        suggestVersion = suggestVersion + 1;
+        state.suggestions = [];
+        state.suggestVisible = false;
+        return;
+    }
+    suggestTimer = setTimeout(() => {
+        suggestTimer = 0;
+        requestSuggest(trimmed);
+    }, SUGGEST_DEBOUNCE_MS);
+}
+
+/**
+ * 请求联想候选；乱序响应按版本号丢弃。
+ *
+ * @param keywordText 已去空白的输入内容
+ */
+function requestSuggest(keywordText: string) {
+    suggestVersion = suggestVersion + 1;
+    const version = suggestVersion;
+    suggestProducts(keywordText, SUGGEST_LIMIT).then((result: SearchSuggestResult) => {
+        // 用户已继续输入，说明本次候选过期，直接丢弃。
+        if (version != suggestVersion) {
+            return;
+        }
+        if (!result.ok) {
+            state.suggestions = [];
+            state.suggestVisible = false;
+            return;
+        }
+        state.suggestions = result.suggestions;
+        // 版本号已保证这是最后一次输入对应的响应；清空输入会递增版本号，迟到响应不会走到这里。
+        state.suggestVisible = result.suggestions.length > 0;
+    }).catch(() => {
+        // 联想是弱功能：失败静默收起，不弹错误提示，也不影响用户继续提交正式搜索。
+        if (version != suggestVersion) {
+            return;
+        }
+        state.suggestions = [];
+        state.suggestVisible = false;
+    });
+}
+
+/**
+ * 点击候选词：填入输入框并立即搜索。
+ *
+ * @param entry 候选菜名
+ */
+function pickSuggestion(entry: string) {
+    state.keyword = entry;
+    state.suggestions = [];
+    state.suggestVisible = false;
+    // 取消可能仍在等待的防抖请求，并让在途响应作废，避免面板重新弹出。
+    if (suggestTimer > 0) {
+        clearTimeout(suggestTimer);
+        suggestTimer = 0;
+    }
+    suggestVersion = suggestVersion + 1;
+    submit();
+}
+
+/**
  * 提交搜索：校验关键词后从第一页重新查询。
  */
 function submit() {
@@ -279,6 +393,14 @@ function submit() {
         toast('请输入关键词');
         return;
     }
+    // 正式提交时收起候选，并让等待中的联想请求作废，避免结果页上方残留下拉。
+    if (suggestTimer > 0) {
+        clearTimeout(suggestTimer);
+        suggestTimer = 0;
+    }
+    suggestVersion = suggestVersion + 1;
+    state.suggestions = [];
+    state.suggestVisible = false;
     state.submittedKeyword = trimmed;
     // 每次明确点击搜索、键盘确认或点击历史词都生成新标识；它不是身份凭据。
     // 沿用项目现有时间戳与随机数格式，满足服务端 16～64 位安全字符约束。
@@ -422,6 +544,14 @@ function loadMore() {
 function clearKeyword() {
     // 递增版本号，让进行中的请求结果作废。
     state.requestVersion = state.requestVersion + 1;
+    // 同时取消联想防抖并作废在途联想响应，避免清空后候选又弹回来。
+    if (suggestTimer > 0) {
+        clearTimeout(suggestTimer);
+        suggestTimer = 0;
+    }
+    suggestVersion = suggestVersion + 1;
+    state.suggestions = [];
+    state.suggestVisible = false;
     state.keyword = '';
     state.submittedKeyword = '';
     state.queryId = '';
@@ -700,6 +830,29 @@ onReady(() => {
 		font-size: 13px;
 		font-weight: bold;
 		color: #FFFFFF;
+	}
+
+	/* 输入联想：白色卡片紧贴搜索条下方，逐条展示去重后的候选菜名 */
+	.suggest-card {
+		margin-top: 8px;
+		background-color: #FFFFFF;
+		border-radius: 16px;
+		padding-top: 4px;
+		padding-bottom: 4px;
+		overflow: hidden;
+	}
+
+	.suggest-item {
+		padding: 10px 14px;
+	}
+
+	.suggest-item-hover {
+		background-color: #FDF0E8;
+	}
+
+	.suggest-item-text {
+		font-size: 14px;
+		color: #3A2E26;
 	}
 
 	/* ---------- 结果区 ---------- */
