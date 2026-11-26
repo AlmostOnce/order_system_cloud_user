@@ -231,7 +231,8 @@ function openFavorites() {
 /** 优惠券入口仅供学生查看与领取；券发行和活动管理由专用管理端负责。 */
 function openCoupons() {
     if (state.roleCode != 'CUSTOMER') return;
-    uni.navigateTo({ url: '/pages/coupons/list' });
+    // 个人中心直接打开可使用券，可领取与历史状态在页面内切换。
+    uni.navigateTo({ url: '/pages/coupons/list?tab=mine' });
 }
 /** 帮助与反馈是学生服务；管理端反馈队列不在 uni-app 中提供入口。 */
 function openSupport() {

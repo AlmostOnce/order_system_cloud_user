@@ -12,7 +12,7 @@
             <view class="coupon-banner-main">
                 <view class="coupon-banner-count-row">
                     <text class="coupon-banner-count">{{ bannerCountText }}</text>
-                    <text class="coupon-banner-count-unit">{{ activeTab == 'CLAIMABLE' ? '张可领取' : '张可用' }}</text>
+                    <text class="coupon-banner-count-unit">{{ bannerUnitText }}</text>
                 </view>
                 <text class="coupon-banner-caption">给下一餐添一点实惠</text>
             </view>
@@ -27,8 +27,14 @@
             <view class="coupon-tab" :class="activeTab == 'CLAIMABLE' ? 'coupon-tab-selected' : 'coupon-tab-idle'" @click="selectTab('CLAIMABLE')">
                 <text class="coupon-tab-text" :class="activeTab == 'CLAIMABLE' ? 'coupon-tab-text-selected' : 'coupon-tab-text-idle'">可领取</text>
             </view>
-            <view class="coupon-tab" :class="activeTab == 'MINE' ? 'coupon-tab-selected' : 'coupon-tab-idle'" @click="selectTab('MINE')">
-                <text class="coupon-tab-text" :class="activeTab == 'MINE' ? 'coupon-tab-text-selected' : 'coupon-tab-text-idle'">我的券</text>
+            <view class="coupon-tab" :class="activeTab == 'AVAILABLE' ? 'coupon-tab-selected' : 'coupon-tab-idle'" @click="selectTab('AVAILABLE')">
+                <text class="coupon-tab-text" :class="activeTab == 'AVAILABLE' ? 'coupon-tab-text-selected' : 'coupon-tab-text-idle'">可使用</text>
+            </view>
+            <view class="coupon-tab" :class="activeTab == 'USED' ? 'coupon-tab-selected' : 'coupon-tab-idle'" @click="selectTab('USED')">
+                <text class="coupon-tab-text" :class="activeTab == 'USED' ? 'coupon-tab-text-selected' : 'coupon-tab-text-idle'">已使用</text>
+            </view>
+            <view class="coupon-tab" :class="activeTab == 'EXPIRED' ? 'coupon-tab-selected' : 'coupon-tab-idle'" @click="selectTab('EXPIRED')">
+                <text class="coupon-tab-text" :class="activeTab == 'EXPIRED' ? 'coupon-tab-text-selected' : 'coupon-tab-text-idle'">已过期</text>
             </view>
         </view>
         <scroll-view class="account-scroll coupon-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" @refresherrefresh="refreshPage" refresher-default-style="none" :refresher-threshold="72">
@@ -36,7 +42,7 @@
                 <view v-if="loading && coupons.length == 0" class="account-card vapor-account-secondary--account-card coupon-state-card">
                     <text class="account-note">正在获取优惠券…</text>
                 </view>
-                <view v-for="coupon in coupons" :key="activeTab == 'MINE' ? coupon.userCouponId : coupon.templateId" class="coupon-card">
+                <view v-for="coupon in coupons" :key="activeTab == 'CLAIMABLE' ? coupon.templateId : coupon.userCouponId" class="coupon-card">
                     <view class="coupon-card-face">
                         <text class="coupon-face-label">满减券</text>
                         <!-- 币种符号与面额同行显示，避免 ¥ 单独占一行造成错位。 -->
@@ -49,7 +55,8 @@
                     <view class="coupon-card-detail">
                         <view class="coupon-card-heading">
                             <text class="coupon-title">{{ coupon.title }}</text>
-                            <text v-if="activeTab == 'MINE'" class="coupon-status">可使用</text>
+                            <!-- 徽标文案直接映射服务端状态，不在客户端按时间自行推断 -->
+                            <text v-if="activeTab != 'CLAIMABLE'" class="coupon-status" :class="statusBadgeClass(coupon)">{{ statusLabel(coupon) }}</text>
                         </view>
                         <text class="coupon-condition">满 ¥{{ coupon.minSpend.toFixed(2) }} 可用</text>
                         <text class="coupon-meta">{{ scopeLabel(coupon) }}</text>
@@ -65,10 +72,11 @@
                     <text class="account-error">{{ errorText }}</text>
                     <text class="account-note">可在列表顶部下拉重试。</text>
                 </view>
+                <!-- 空态按当前标签分别说明：可领取、可使用、已使用、已过期各自的原因不同 -->
                 <view v-if="!loading && errorText.length == 0 && coupons.length == 0" class="account-card vapor-account-secondary--account-card coupon-state-card">
-                    <text class="account-heading">{{ activeTab == 'CLAIMABLE' ? '暂时没有可领取的优惠券' : '还没有可用优惠券' }}</text>
-                    <text class="account-note">{{ activeTab == 'CLAIMABLE' ? '新的用餐优惠开放后会显示在这里。' : '领取后的优惠券会保存在这里，结算时可选择使用。' }}</text>
-                    <button v-if="activeTab == 'MINE'" class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="selectTab('CLAIMABLE')">去看看可领取的券</button>
+                    <text class="account-heading">{{ emptyTitle }}</text>
+                    <text class="account-note">{{ emptyNote }}</text>
+                    <button v-if="activeTab != 'CLAIMABLE'" class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="selectTab('CLAIMABLE')">去看看可领取的券</button>
                 </view>
             </view>
             <view slot="refresher" class="native-refresh-slot">
@@ -85,10 +93,11 @@ import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 import { backToAccount } from '../../common/account.uts'
 import { toast, toastSuccess } from '../../common/feedback.uts'
 import { currentUser } from '../../store/auth.uts'
-import { CustomerCoupon, CustomerCouponListResult, claimCoupon, fetchClaimableCoupons, fetchMyAvailableCoupons, isClaimResponseValid } from '../../api/coupons.uts'
+import { CustomerCoupon, CustomerCouponListResult, claimCoupon, fetchClaimableCoupons, fetchMyCoupons, isClaimResponseValid } from '../../api/coupons.uts'
 import { HttpResult } from '../../common/http.uts'
 
-type CouponTab = 'CLAIMABLE' | 'MINE'
+/** 四个标签：可领取模板与本人券的可使用、已使用、已过期三态。 */
+type CouponTab = 'CLAIMABLE' | 'AVAILABLE' | 'USED' | 'EXPIRED'
 const emptyCoupons: Array<CustomerCoupon> = []
 const state = reactive({
     /** 顶部安全区高度，沿用账户二级页的原生状态栏留白。 */
@@ -97,7 +106,7 @@ const state = reactive({
     userUuid: '',
     /** 页面离开后关闭请求写入，避免旧页面响应覆盖当前会话。 */
     pageVisible: false,
-    /** 当前展示可领取模板或本人可用券，切换时清空另一类数据。 */
+    /** 当前展示可领取模板或本人券的某一状态，切换时清空另一类数据。 */
     activeTab: 'CLAIMABLE' as CouponTab,
     /** 当前标签页从服务端返回的券快照，不在客户端推导券状态。 */
     coupons: emptyCoupons,
@@ -130,6 +139,52 @@ const bannerDiscountText = computed((): string => {
     return best > 0 ? '¥' + best.toFixed(2) : '—'
 })
 
+/** 引导条数量单位随标签变化，避免把已使用或已过期的数量说成可用。 */
+const bannerUnitText = computed((): string => {
+    if (state.activeTab == 'CLAIMABLE') return '张可领取'
+    if (state.activeTab == 'USED') return '张已使用'
+    if (state.activeTab == 'EXPIRED') return '张已过期'
+    return '张可用'
+})
+
+/** 标签到持券状态的映射；CLAIMABLE 不会进入本人券查询，缺省按可使用处理。 */
+function myCouponStatus(tab: CouponTab): string {
+    if (tab == 'USED') return 'USED'
+    if (tab == 'EXPIRED') return 'EXPIRED'
+    return 'AVAILABLE'
+}
+
+/** 券状态徽标文案；服务端已按状态过滤，这里只做展示映射。 */
+function statusLabel(coupon: CustomerCoupon): string {
+    if (coupon.status == 'USED') return '已使用'
+    if (coupon.status == 'EXPIRED') return '已过期'
+    if (coupon.status == 'AVAILABLE') return '可使用'
+    return '状态未知'
+}
+
+/** 徽标配色：可用为绿色，已使用与已过期为中性灰，避免与可用券混淆。 */
+function statusBadgeClass(coupon: CustomerCoupon): string {
+    if (coupon.status == 'USED') return 'coupon-status-inactive'
+    if (coupon.status == 'EXPIRED') return 'coupon-status-expired'
+    return ''
+}
+
+/** 空态标题按标签分别说明原因，不用一句通用文案掩盖状态差异。 */
+const emptyTitle = computed((): string => {
+    if (state.activeTab == 'CLAIMABLE') return '暂时没有可领取的优惠券'
+    if (state.activeTab == 'USED') return '还没有使用过优惠券'
+    if (state.activeTab == 'EXPIRED') return '没有已过期的优惠券'
+    return '还没有可用优惠券'
+})
+
+/** 空态说明与标题配套，用于解释该状态何时会出现。 */
+const emptyNote = computed((): string => {
+    if (state.activeTab == 'CLAIMABLE') return '新的用餐优惠开放后会显示在这里。'
+    if (state.activeTab == 'USED') return '下单时使用优惠券后会记录在这里。'
+    if (state.activeTab == 'EXPIRED') return '优惠券超过有效期后会显示在这里。'
+    return '领取后的优惠券会保存在这里，结算时可选择使用。'
+})
+
 /** 离开后递增版本，避免旧请求在页面重新进入或切换账号后覆盖当前券列表。 */
 function isCurrentRequest(version: number, owner: string): boolean {
     return state.pageVisible && requestVersion == version && currentUser()?.userUuid == owner
@@ -159,7 +214,8 @@ function loadCoupons(): Promise<void> {
     state.userUuid = owner
     state.loading = true
     state.errorText = ''
-    const request: Promise<CustomerCouponListResult> = tab == 'CLAIMABLE' ? fetchClaimableCoupons() : fetchMyAvailableCoupons()
+    // 本人券按标签映射为服务端状态枚举，状态含义与时效判断完全交给后端。
+    const request: Promise<CustomerCouponListResult> = tab == 'CLAIMABLE' ? fetchClaimableCoupons() : fetchMyCoupons(myCouponStatus(tab))
     return request.then((result: CustomerCouponListResult) => {
         if (!isCurrentRequest(version, owner) || state.activeTab != tab) return
         if (!result.ok || result.coupons == null) {
@@ -191,11 +247,11 @@ function claim(coupon: CustomerCoupon) {
             return
         }
         if (result.statusCode == 409) {
-            // 后端409代表本人已领过；切到我的券并刷新，避免用户停留在同一张可领取卡片反复冲突。
-            state.activeTab = 'MINE'
+            // 后端409代表本人已领过；切到可使用标签并刷新，避免用户停留在同一张可领取卡片反复冲突。
+            state.activeTab = 'AVAILABLE'
             state.coupons = []
             state.errorText = ''
-            toast('你已领取过这张优惠券，已为你打开我的券')
+            toast('你已领取过这张优惠券，已为你打开可使用券')
             loadCoupons()
             return
         }
@@ -247,9 +303,9 @@ function refreshPage() {
     })
 }
 
-/** 允许结算页直接打开“我的券”标签，普通账户入口默认展示可领取列表。 */
+/** 结算页与个人中心入口直接打开“可使用”标签，历史三态仍可手动切换。 */
 onLoad((options: OnLoadOptions) => {
-    if (options['tab'] == 'mine') state.activeTab = 'MINE'
+    if (options['tab'] == 'mine') state.activeTab = 'AVAILABLE'
 })
 
 /** 每次展示时重新检查 CUSTOMER 身份并刷新列表，避免退出重登后泄露旧账号券数据。 */
@@ -336,6 +392,9 @@ onUnload(() => {
 .coupon-card-heading { display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; }
 .coupon-title { flex: 1; min-width: 0; font-size: 14px; line-height: 20px; font-weight: bold; color: #211C18; }
 .coupon-status { flex-shrink: 0; margin-left: 6px; padding: 2px 7px; border-radius: 9px; background-color: #EEF5E9; font-size: 10px; line-height: 16px; color: #4A6A3B; }
+/* 已使用与已过期使用中性底色，避免与仍可使用的绿色徽标混淆 */
+.coupon-status-inactive { background-color: #F1ECE7; color: #7A6C60; }
+.coupon-status-expired { background-color: #F6EDE9; color: #A2968B; }
 .coupon-condition { margin-top: 3px; font-size: 12px; line-height: 18px; font-weight: 600; color: #C2410C; }
 .coupon-meta { margin-top: 3px; font-size: 11px; line-height: 16px; color: #7A6C60; }
 .coupon-card-footer { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 8px; }

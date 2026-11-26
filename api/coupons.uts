@@ -29,8 +29,19 @@ export type CustomerCoupon = {
     totalQuantity: number
     /** 可领取模板的剩余发行量；持券接口未返回时为0占位，不用于页面展示。 */
     remainingQuantity: number
-    /** 用户券状态；我的优惠券接口当前只返回 AVAILABLE。 */
+    /** 用户券状态；我的券按状态查询取 AVAILABLE、USED、EXPIRED 三态之一。 */
     status: string
+}
+
+/** 我的券允许查询的三种状态；LOCKED 等中间态不进入学生端历史列表。 */
+const ownedCouponStatuses: Array<string> = ['AVAILABLE', 'USED', 'EXPIRED']
+
+/** 判断持券状态是否在页面已确认的三态契约内，未知状态整页失败而不是猜测展示。 */
+function isOwnedCouponStatus(status: string): boolean {
+    for (let i = 0; i < ownedCouponStatuses.length; i++) {
+        if (ownedCouponStatuses[i] == status) return true
+    }
+    return false
 }
 
 /** API 结果区分空列表和响应契约异常，避免把服务故障伪装成“没有优惠券”。 */
@@ -80,7 +91,7 @@ function parseCouponList(result: HttpResult, owned: boolean): CustomerCouponList
             || validFrom.length == 0 || validUntil.length == 0
             || (!owned && (claimStartAt.length == 0 || claimEndAt.length == 0 || totalQuantity <= 0 || remainingQuantity < 0
                 || !Number.isSafeInteger(totalQuantity) || !Number.isSafeInteger(remainingQuantity) || remainingQuantity > totalQuantity))
-            || (owned && (!Number.isSafeInteger(userCouponId) || userCouponId <= 0 || status != 'AVAILABLE'))) {
+            || (owned && (!Number.isSafeInteger(userCouponId) || userCouponId <= 0 || !isOwnedCouponStatus(status)))) {
             return { ok: false, message: '优惠券列表响应异常，请稍后重试', coupons: null }
         }
         const windowIds: Array<number> = []
@@ -144,9 +155,21 @@ export function claimCoupon(templateId: number): Promise<HttpResult> {
     return httpPost('/coupons/' + templateId + '/claim', null, true)
 }
 
-/** 查询本人当前可用的用户券；订单下单时服务端仍会重新核验范围和门槛。 */
-export function fetchMyAvailableCoupons(): Promise<CustomerCouponListResult> {
-    return httpGet('/coupons/mine?status=AVAILABLE', true).then((result: HttpResult): CustomerCouponListResult => {
+/**
+ * 查询本人指定状态的券：可使用、已使用、已过期。
+ * 状态只在本地先做白名单判断，最终由服务端按枚举校验；服务端查询前会把到期仍标记可用的券置为已过期。
+ */
+export function fetchMyCoupons(status: string): Promise<CustomerCouponListResult> {
+    if (!isOwnedCouponStatus(status)) {
+        const invalid: CustomerCouponListResult = { ok: false, message: '优惠券状态无效', coupons: null }
+        return Promise.resolve(invalid)
+    }
+    return httpGet('/coupons/mine?status=' + status, true).then((result: HttpResult): CustomerCouponListResult => {
         return parseCouponList(result, true)
     }).catch((): CustomerCouponListResult => ({ ok: false, message: '优惠券暂时无法获取，请检查网络后重试', coupons: null }))
+}
+
+/** 查询本人当前可用的用户券；订单下单时服务端仍会重新核验范围和门槛。 */
+export function fetchMyAvailableCoupons(): Promise<CustomerCouponListResult> {
+    return fetchMyCoupons('AVAILABLE')
 }
