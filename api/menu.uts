@@ -88,6 +88,8 @@ export type WindowMenu = {
 	description: string
 	/** 档口位置。 */
 	location: string
+	/** 营业状态：1 营业，0 休息；休息时菜单可浏览但不可加购和结算。 */
+	isOpen: number
 	/** 启用的分类，含空分类。 */
 	categories: Array<MenuCategory>
 	/** 未归入分类的在售菜品。 */
@@ -279,6 +281,8 @@ export function fetchWindowMenu(windowId: number): Promise<WindowMenuResult> {
 				description: jsonString(menuObject, 'description') ?? '',
 				// 档口位置。
 				location: jsonString(menuObject, 'location') ?? '',
+				// 营业状态：缺失时按营业中兼容旧服务，真正的下单资格仍由服务端核价决定。
+				isOpen: jsonNumber(menuObject, 'isOpen') ?? 1,
 				// 分类列表。
 				categories: categories,
 				// 未归类菜品。

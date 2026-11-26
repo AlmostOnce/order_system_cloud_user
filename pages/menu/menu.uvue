@@ -50,6 +50,10 @@
 					<text class="window-hero-location" :max-lines="1">{{ windowLocation.length > 0 ? windowLocation : '位置待补充' }}</text>
 				</view>
 				<window-message :content="windowDescription"></window-message>
+				<!-- 休息中只禁用下单，不影响学生查看菜单与评价 -->
+				<view v-if="!windowOpen" class="window-closed-banner">
+					<text class="window-closed-banner-text">该档口当前休息中，暂不可下单</text>
+				</view>
 			</view>
 		</view>
 		<view class="shop-tabs">
@@ -186,11 +190,11 @@
 			</view>
 			<view
 				class="cartbar-btn"
-				:class="cartQuantity > 0 ? '' : 'cartbar-btn-off'"
+				:class="(cartQuantity > 0 && windowOpen) ? '' : 'cartbar-btn-off'"
 				hover-class="cartbar-btn-hover"
 				@click="goCheckout"
 			>
-				<text class="cartbar-btn-text">去结算</text>
+				<text class="cartbar-btn-text">{{ windowOpen ? '去结算' : '休息中' }}</text>
 			</view>
 		</view>
 		<!-- 购物车清单：遮罩淡入、面板自底部上滑，交互与首页餐厅选择面板一致 -->
@@ -204,7 +208,7 @@
 			<view class="sheet-head">
 				<text class="sheet-title">已选菜品</text>
 				<!-- 清空放在标题右侧；用 view 承载 hover-class，text 在部分平台不响应按下态 -->
-				<view v-if="cartItems.length > 0" class="sheet-clear" hover-class="sheet-clear-hover" @click="clearCart">
+				<view v-if="cartItems.length > 0" class="sheet-clear" hover-class="sheet-clear-hover" @click="askClearCart">
 					<text class="sheet-clear-text">清空</text>
 				</view>
 			</view>
@@ -273,6 +277,8 @@
 				:productFavorite="productReviewFavorite" :productFavoriteBusy="productReviewFavoriteBusy"
 				@toggle-product-favorite="toggleProductReviewFavorite" @close="closeProductReviewDrawer"></review-list>
 		</view>
+		<!-- 清空购物车需要二次确认；确认后再复用原清空接口，避免误触丢失整单已选菜品 -->
+		<confirm-dialog v-if="clearCartConfirm" title="清空购物车？" message="已选菜品会全部移除，操作不可撤销。" cancel-text="继续选购" confirm-text="确认清空" :busy="mutating" busy-text="清空中…" @cancel="cancelClearCart" @confirm="confirmClearCart" />
 	</view>
 </template>
 
@@ -282,6 +288,7 @@ import WindowMessage from '../../components/window-message/window-message.uvue';
 import BusinessImage from '../../components/business-image/business-image.uvue';
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import ReviewList from '../../components/review-list/review-list.uvue';
+import ConfirmDialog from '../../components/confirm-dialog/confirm-dialog.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 // 导入轻量提示：购物车操作反馈。
 import { toast } from '../../common/feedback.uts';
@@ -424,6 +431,8 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     windowLocation: '',
     // 窗口简介，未配置时不占展示空间。
     windowDescription: '',
+    // 窗口是否营业；菜单加载前按营业中处理，加载后以服务端为准，休息时禁用加购与结算。
+    windowOpen: true,
     // 是否正在加载菜单。
     loading: true,
     // 菜单加载失败文案，非空时展示错误态。
@@ -445,6 +454,8 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     cartPanelVisible: false,
     // 购物车清单面板是否已进入终态，控制滑入滑出过渡。
     cartPanelReady: false,
+    // 清空购物车确认层；只有确认后才调用清空接口。
+    clearCartConfirm: false,
     // 规格选择器独立覆盖在菜单上；确认前只保存在页面内存，不提前写入购物车。
     specificationPickerVisible: false,
     specificationPickerReady: false,
@@ -459,7 +470,7 @@ const state = reactive({ refreshing: false, cartLoadError: '', currentRefreshTim
     // 菜品卡片是否已就绪，控制依次浮入。
     listReady: false })
 
-const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHeight, windowId, highlightedProductId, shopKeyword, shopSearchVisible, stocks, stockLoading, stockRequestVersion, stockLoadError, windowName, windowImageUrls, windowImageIndex, windowLocation, windowDescription, loading, loadError, groups, activeCategoryId, dishesAnchor, railAnchor, dishesScrollTop, categoryTailHeight, categoryOffsets, quantities, cartItems, cartQuantity, cartAmount, cartPanelVisible, cartPanelReady, specificationPickerVisible, specificationPickerReady, specificationProduct, specificationSelections, mutating, entered, layoutReady, listReady } = toRefs(state)
+const { refreshing, cartLoadError, currentRefreshTime, cartLoading, statusBarHeight, windowId, highlightedProductId, shopKeyword, shopSearchVisible, stocks, stockLoading, stockRequestVersion, stockLoadError, windowName, windowImageUrls, windowImageIndex, windowLocation, windowDescription, windowOpen, loading, loadError, groups, activeCategoryId, dishesAnchor, railAnchor, dishesScrollTop, categoryTailHeight, categoryOffsets, quantities, cartItems, cartQuantity, cartAmount, cartPanelVisible, cartPanelReady, clearCartConfirm, specificationPickerVisible, specificationPickerReady, specificationProduct, specificationSelections, mutating, entered, layoutReady, listReady } = toRefs(state)
 const { shopTab } = toRefs(state)
 const { productReviewVisible, productReviewReady, productReviewId, productReviewName } = toRefs(state)
 const { productRatings } = toRefs(state)
@@ -744,6 +755,8 @@ function loadMenu(): Promise<void> {
         state.windowImageIndex = 0;
         state.windowLocation = menu.location;
         state.windowDescription = menu.description;
+        // 营业状态随菜单快照更新；休息中的档口仍可浏览菜单，但不能加购或结算。
+        state.windowOpen = menu.isOpen == 1;
         // 把后端分类转换成页面分组，只保留有菜品的分类。
         const converted: Array<MenuGroup> = [];
         for (let i = 0; i < menu.categories.length; i++) {
@@ -837,7 +850,8 @@ function stockOf(productId: number): number {
 }
 
 function canIncrease(productId: number): boolean {
-    return !state.stockLoading && state.stockLoadError.length == 0 && stockOf(productId) > quantityOf(productId);
+    // 休息中的档口不允许加购；库存限制仍照常判断。
+    return state.windowOpen && !state.stockLoading && state.stockLoadError.length == 0 && stockOf(productId) > quantityOf(productId);
 }
 
 function stockHint(productId: number): string {
@@ -1185,6 +1199,11 @@ function canConfirmSpecifications(): boolean {
 function confirmSpecifications() {
 	const product = state.specificationProduct;
 	if (product == null || state.mutating) return;
+	// 休息中的档口即使规格已选完也不允许加入购物车。
+	if (!state.windowOpen) {
+		toast('该档口当前休息中，暂不可下单');
+		return;
+	}
 	for (let i = 0; i < product.specificationGroups.length; i++) {
 		const group = product.specificationGroups[i];
 		if (group.required && selectedSpecificationOption(group.groupId) <= 0) {
@@ -1274,6 +1293,11 @@ function formatPrice(value: number): string {
 }
 
 function increase(product: MenuProduct) {
+	// 休息中的档口仍可查看菜单，但不能增加数量或弹出规格选择。
+	if (!state.windowOpen) {
+		toast('该档口当前休息中，暂不可下单');
+		return;
+	}
 	if (hasSpecifications(product)) {
 		openSpecificationPicker(product);
 		return;
@@ -1288,6 +1312,10 @@ function decrease(product: MenuProduct) {
 }
 
 function increaseItem(item: CartItem) {
+	if (!state.windowOpen) {
+		toast('该档口当前休息中，暂不可下单');
+		return;
+	}
 	if (!canIncrease(item.productId)) {
 		toast(state.stockLoading ? '正在查询库存，请稍候' : (state.stockLoadError.length > 0 ? '库存查询失败，请稍后重试' : '已达到当前可售数量'));
 		return;
@@ -1326,6 +1354,10 @@ function removeUnavailableItem(item: CartItem) {
 }
 
 function increaseById(productId: number, current: number) {
+    if (!state.windowOpen) {
+        toast('该档口当前休息中，暂不可下单');
+        return;
+    }
     if (!canIncrease(productId)) {
         toast(state.stockLoading ? '正在查询库存，请稍候' : (state.stockLoadError.length > 0 ? '库存查询失败，请稍后重试' : '已达到当前可售数量'));
         return;
@@ -1448,6 +1480,23 @@ function unavailableHint(item: CartItem): string {
     return '当前不可购买';
 }
 
+/** 打开清空购物车的确认层；购物车为空或正在写操作时不响应。 */
+function askClearCart() {
+    if (state.mutating || state.cartItems.length == 0) return;
+    state.clearCartConfirm = true;
+}
+
+/** 取消清空，保留当前购物车。 */
+function cancelClearCart() {
+    state.clearCartConfirm = false;
+}
+
+/** 确认清空：先收起确认层，结果由 clearCart 的提示与购物车刷新体现。 */
+function confirmClearCart() {
+    state.clearCartConfirm = false;
+    clearCart();
+}
+
 function clearCart() {
     // 已有写操作进行中时忽略重复点击。
     if (state.mutating) {
@@ -1467,6 +1516,11 @@ function clearCart() {
 }
 
 function goCheckout() {
+    // 休息中的档口不允许进入结算；即使购物车里有历史菜品也只允许查看。
+    if (!state.windowOpen) {
+        toast('该档口当前休息中，暂不可下单');
+        return;
+    }
     // 购物车为空时提示先选菜，不进入结算流程。
     if (state.cartQuantity <= 0) {
         toast('请先选择菜品');
@@ -1565,6 +1619,21 @@ onReady(() => {
 	.window-hero-info { padding: 0 16px 10px; }
 	.window-hero-title { font-size: 20px; line-height: 26px; font-weight: bold; color: #211C18; }
 	.window-hero-location { margin-top: 3px; font-size: 12px; line-height: 17px; color: #7A6C60; }
+
+	/* 休息中提示：菜单仍可浏览，只阻止加购与结算 */
+	.window-closed-banner {
+		margin-top: 8px;
+		margin-left: 16px;
+		margin-right: 16px;
+		margin-bottom: 10px;
+		padding-top: 8px;
+		padding-bottom: 8px;
+		padding-left: 12px;
+		padding-right: 12px;
+		border-radius: 10px;
+		background-color: #FDF0E8;
+	}
+	.window-closed-banner-text { font-size: 12px; line-height: 17px; color: #B4471F; }
 
 	.nav-top {
 		width: 100%;
