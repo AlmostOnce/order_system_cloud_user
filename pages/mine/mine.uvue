@@ -82,16 +82,6 @@
                         <view class="account-entry-icon"><view class="flow-stem"></view><view class="flow-tip flow-tip-out"></view></view><view class="account-entry-body"><text class="account-entry-title">消费记录</text></view><view class="account-arrow"></view>
 				</view>
                 </view>
-				<text v-if="roleCode == 'STALL_MANAGER' || roleCode == 'RESTAURANT_MANAGER'" class="account-section-label">窗口管理</text>
-                <view v-if="roleCode == 'STALL_MANAGER' || roleCode == 'RESTAURANT_MANAGER'" class="entry-group">
-                    <view class="account-entry" @click="openPickupVerification">
-                        <view class="account-entry-icon"><view class="center-receipt"></view></view><view class="account-entry-body"><text class="account-entry-title">取餐核销</text></view><view class="account-arrow"></view>
-                    </view>
-                    <view class="entry-divider"></view>
-                    <view class="account-entry" @click="openImageManagement">
-                        <view class="account-entry-icon"><view class="account-icon-line"></view><view class="account-icon-line"></view></view><view class="account-entry-body"><text class="account-entry-title">窗口与菜品图片</text></view><view class="account-arrow"></view>
-                    </view>
-                </view>
                 <text v-if="roleCode == 'CUSTOMER'" class="account-section-label">账号与安全</text>
 				<view v-if="roleCode == 'CUSTOMER'" class="entry-group">
                     <view v-if="roleCode == 'CUSTOMER'" class="account-entry" @click="openChangePassword">
@@ -306,12 +296,6 @@ function openCompletedOrders() {
 
 function openCancelledOrders() {
     openOrderList('cancelled');
-}
-
-function openPickupVerification() { uni.navigateTo({ url: '/pages/manage/pickup' }); }
-
-function openImageManagement() {
-    uni.navigateTo({ url: '/pages/manage/images' });
 }
 
 function openAvatarPreview() {

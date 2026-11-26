@@ -114,8 +114,6 @@
         { "path": "pages/review/list", "style": { "navigationStyle": "custom" } },
         { "path": "pages/review/discussions", "style": { "navigationStyle": "custom" } },
         { "path": "pages/notifications/chat", "style": { "navigationStyle": "custom", "softinputMode": "adjustNothing" } },
-        { "path": "pages/manage/images", "style": { "navigationStyle": "custom" } },
-        { "path": "pages/manage/pickup", "style": { "navigationStyle": "custom" } },
         { "path": "pages/ranking/ranking", "style": { "navigationStyle": "custom" } },
         { "path": "pages/support/list", "style": { "navigationStyle": "custom" } },
         { "path": "pages/support/submit", "style": { "navigationStyle": "custom" } },
