@@ -112,6 +112,7 @@
         { "path": "pages/account/password-recovery", "style": { "navigationStyle": "custom" } },
         { "path": "pages/review/create", "style": { "navigationStyle": "custom" } },
         { "path": "pages/review/list", "style": { "navigationStyle": "custom" } },
+        { "path": "pages/review/discussions", "style": { "navigationStyle": "custom" } },
         { "path": "pages/notifications/chat", "style": { "navigationStyle": "custom", "softinputMode": "adjustNothing" } },
         { "path": "pages/manage/images", "style": { "navigationStyle": "custom" } },
         { "path": "pages/manage/pickup", "style": { "navigationStyle": "custom" } },

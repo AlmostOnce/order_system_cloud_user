@@ -1,7 +1,63 @@
-import { httpGet, httpPost, HttpResult } from '../common/http.uts'
+import { httpGet, httpPost, httpPut, httpDelete, HttpResult } from '../common/http.uts'
 import { jsonObject, jsonArray, jsonString, jsonNumber, jsonBoolean } from '../common/json.uts'
 
-export type Review = { commentId: string, productId: number, windowId: number, authorName: string, authorAvatarUrl: string, score: number, content: string, images: Array<string>, tags: Array<string>, createdAt: string }
+/**
+ * 评价评论区的一条评论或回复。
+ *
+ * 评论分两层：depth=1 为楼层（顶层评论），depth=2 为楼层内的回复。
+ * 回复条数不限，但不再产生第三层；parentId 与 parentAuthorName 只用于展示“回复 @某人”，
+ * rootId 始终指向楼层根，便于把同一层对话放在一起展示。
+ */
+export type Discussion = {
+    /** 公开评论标识，游标分页与编辑撤回都用它 */
+    discussionId: string
+    /** 所属评价类型：COMMENT 菜品评价，WINDOW_REVIEW 店铺评价 */
+    reviewType: string
+    /** 所属评价公开标识 */
+    reviewId: string
+    /** 楼层根评论标识；顶层评论等于自身 discussionId */
+    rootId: string
+    /** 被直接回复的评论标识；顶层评论为空 */
+    parentId: string | null
+    /** 楼层深度：1 顶层评论，2 楼层内回复 */
+    depth: number
+    /** 评论人展示名快照（学生昵称或商家档口名） */
+    authorName: string
+    /** 评论人头像地址，服务端批量解析，缺失时为空串 */
+    authorAvatarUrl: string
+    /** 评论时的角色快照；official 由它派生 */
+    authorRole: string
+    /** 是否商家等管理角色，前端据此展示“商家”标识 */
+    official: boolean
+    /** 被回复人展示名；父评论已撤回或屏蔽时服务端返回占位文案 */
+    parentAuthorName: string | null
+    /** 评论正文，纯文本，最终以服务端返回为准 */
+    content: string
+    /** 内容版本号，编辑时必须原样回传，版本不一致服务端返回 409 */
+    version: number
+    /** 首次发布时间 */
+    createdAt: string
+    /** 最近编辑或状态变化时间；从未编辑时为空 */
+    updatedAt: string | null
+    /** 楼层内的可见回复数；回复条目自身为 0 */
+    replyCount: number
+    /** 当前登录用户是否为作者，前端据此显示编辑与撤回入口 */
+    mine: boolean
+}
+/**
+ * 一个楼层及其回复预览。
+ *
+ * 顶层评论接口会把“楼层根 + 前三条回复”一起返回，因此单独建一个组合类型，
+ * 不让 Discussion 递归引用自身：UTS 的对象字面量类型不适合自引用，
+ * 用组合类型既保留预览，又避免跨端编译差异。
+ */
+export type DiscussionThread = {
+    /** 楼层根评论 */
+    root: Discussion
+    /** 服务端给出的回复预览，可能为空数组 */
+    replies: Array<Discussion>
+}
+export type Review = { commentId: string, productId: number, windowId: number, authorName: string, authorAvatarUrl: string, score: number, content: string, images: Array<string>, tags: Array<string>, createdAt: string, discussionCount: number, discussions: Array<Discussion> }
 export type ReviewPage = { items: Array<Review>, nextCursor: string, hasMore: boolean }
 export type ProductRating = { productId: number, reviewCount: number, averageScore: number | null }
 export type CardRating = { id: number, reviewCount: number, averageScore: number | null, available: boolean }
@@ -56,6 +112,121 @@ export function strings(raw: UTSJSONObject, name: string): Array<string> | null 
     }
     return output
 }
+/**
+ * 解析单条评论或回复。
+ *
+ * 只接受服务端契约内的结构：标识必须是 UUID、层级只能是 1 或 2、版本号从 1 开始、
+ * 回复数非负。任一必需字段缺失或类型不符都返回 null，由调用方整页判为异常，
+ * 避免把残缺评论渲染成看似正常的发言。
+ *
+ * 这里只解析单条评论本身，不解析服务端附带的回复预览：嵌套结构由
+ * {@link parseDiscussionThread} 组合，避免对象字面量类型自引用。
+ */
+export function parseDiscussion(raw: UTSJSONObject): Discussion | null {
+    const id = jsonString(raw, 'discussionId') ?? ''
+    const reviewType = jsonString(raw, 'reviewType') ?? ''
+    const reviewId = jsonString(raw, 'reviewId') ?? ''
+    const rootId = jsonString(raw, 'rootId') ?? ''
+    const depth = jsonNumber(raw, 'depth') ?? 0
+    const authorName = jsonString(raw, 'authorName')
+    const authorRole = jsonString(raw, 'authorRole') ?? ''
+    const content = jsonString(raw, 'content')
+    const official = jsonBoolean(raw, 'official')
+    const mine = jsonBoolean(raw, 'mine')
+    const version = jsonNumber(raw, 'version') ?? 0
+    const replyCount = jsonNumber(raw, 'replyCount') ?? -1
+    const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
+    // reviewType 只认两类评价，防止服务端契约变化后把未知类型当成菜品评价展示。
+    if (!uuid.test(id) || !uuid.test(reviewId) || !uuid.test(rootId) || (reviewType != 'COMMENT' && reviewType != 'WINDOW_REVIEW')) return null
+    if (depth != 1 && depth != 2) return null
+    if (authorName == null || authorRole.length == 0 || content == null || content.length == 0) return null
+    if (official == null || mine == null) return null
+    if (!Number.isInteger(version) || version < 1 || !Number.isInteger(replyCount) || replyCount < 0) return null
+    return { discussionId: id, reviewType: reviewType, reviewId: reviewId, rootId: rootId,
+        parentId: jsonString(raw, 'parentId'), depth: depth, authorName: authorName,
+        authorAvatarUrl: jsonString(raw, 'authorAvatarUrl') ?? '', authorRole: authorRole, official: official,
+        parentAuthorName: jsonString(raw, 'parentAuthorName'), content: content, version: version,
+        createdAt: jsonString(raw, 'createdAt') ?? '', updatedAt: jsonString(raw, 'updatedAt'),
+        replyCount: replyCount, mine: mine }
+}
+
+/** 解析评论分页；hasMore 为真时必须带有效游标，避免客户端原地重复请求同一页。 */
+export type DiscussionPage = { items: Array<Discussion>, nextCursor: string, hasMore: boolean }
+export function parseDiscussionPage(raw: UTSJSONObject): DiscussionPage | null {
+    const rows = jsonArray(raw, 'items')
+    const more = jsonBoolean(raw, 'hasMore')
+    const cursor = jsonString(raw, 'nextCursor') ?? ''
+    if (rows == null || more == null || (more && (cursor.length == 0 || rows.length == 0))) return null
+    const items: Array<Discussion> = []
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) return null
+        const item = parseDiscussion(rows[i] as UTSJSONObject)
+        if (item == null) return null
+        items.push(item)
+    }
+    return { items: items, nextCursor: cursor, hasMore: more }
+}
+
+/**
+ * 解析一条楼层根及其回复预览。
+ *
+ * 根必须是 depth=1；每条预览必须是 depth=2 且 rootId 指向该根，
+ * 防止服务端分批或排序异常时把其他楼层的回复挂到当前楼层。
+ */
+export function parseDiscussionThread(raw: UTSJSONObject): DiscussionThread | null {
+    const root = parseDiscussion(raw)
+    if (root == null || root.depth != 1) return null
+    const rows = jsonArray(raw, 'replies')
+    if (rows == null) return null
+    const replies: Array<Discussion> = []
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) return null
+        const reply = parseDiscussion(rows[i] as UTSJSONObject)
+        if (reply == null || reply.depth != 2 || reply.rootId != root.discussionId) return null
+        replies.push(reply)
+    }
+    // 预览数不能超过服务端给出的楼层回复总数，出现矛盾时整页判异常。
+    if (root.replyCount < replies.length) return null
+    return { root: root, replies: replies }
+}
+
+/** 顶层评论分页：每项是“楼层根 + 最多三条回复预览”。 */
+export type DiscussionThreadPage = { threads: Array<DiscussionThread>, nextCursor: string, hasMore: boolean }
+export function parseDiscussionThreadPage(raw: UTSJSONObject): DiscussionThreadPage | null {
+    const rows = jsonArray(raw, 'items')
+    const more = jsonBoolean(raw, 'hasMore')
+    const cursor = jsonString(raw, 'nextCursor') ?? ''
+    if (rows == null || more == null || (more && (cursor.length == 0 || rows.length == 0))) return null
+    const threads: Array<DiscussionThread> = []
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) return null
+        const thread = parseDiscussionThread(rows[i] as UTSJSONObject)
+        if (thread == null) return null
+        threads.push(thread)
+    }
+    return { threads: threads, nextCursor: cursor, hasMore: more }
+}
+
+/**
+ * 读取评价卡片内嵌的评论数与预览。
+ *
+ * 评论字段是本次新增能力：旧服务不返回时按“无评论”处理，保证评价主体仍可展示；
+ * 一旦返回了 discussions，就要求每条都能解析，且数量不超过 discussionCount，
+ * 防止展示与服务端计数互相矛盾。
+ */
+function embeddedDiscussions(raw: UTSJSONObject): Array<Discussion> | null {
+    const rows = jsonArray(raw, 'discussions')
+    if (rows == null) return []
+    const items: Array<Discussion> = []
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i] == null || typeof rows[i] != 'object' || Array.isArray(rows[i])) return null
+        const item = parseDiscussion(rows[i] as UTSJSONObject)
+        if (item == null || item.depth != 1) return null
+        items.push(item)
+    }
+    return items
+}
+
 export function parseComment(raw: UTSJSONObject): Review | null {
     const id = jsonString(raw, 'commentId') ?? ''
     const product = jsonNumber(raw, 'productId') ?? 0
@@ -64,8 +235,12 @@ export function parseComment(raw: UTSJSONObject): Review | null {
     const images = strings(raw, 'images')
     const tags = strings(raw, 'tags')
     if (id.length == 0 || product <= 0 || window <= 0 || !Number.isInteger(score) || score < 1 || score > 5 || images == null || tags == null) return null
+    const discussions = embeddedDiscussions(raw)
+    const count = jsonNumber(raw, 'discussionCount') ?? 0
+    if (discussions == null || !Number.isInteger(count) || count < 0 || count < discussions.length) return null
     return { commentId: id, productId: product, windowId: window, authorName: jsonString(raw, 'authorName') ?? '校园用户', authorAvatarUrl: jsonString(raw, 'authorAvatarUrl') ?? '', score: score,
-        content: jsonString(raw, 'content') ?? '', images: images, tags: tags, createdAt: jsonString(raw, 'createdAt') ?? '' }
+        content: jsonString(raw, 'content') ?? '', images: images, tags: tags, createdAt: jsonString(raw, 'createdAt') ?? '',
+        discussionCount: count, discussions: discussions }
 }
 export function parseCommentPage(raw: UTSJSONObject): ReviewPage | null {
     const rows = jsonArray(raw, 'items')
@@ -117,7 +292,12 @@ export function parseWindowReviewPage(raw: UTSJSONObject): ReviewPage | null {
         const images = strings(item, 'images')
         const tags = strings(item, 'tags')
         if (id.length == 0 || windowId <= 0 || !Number.isInteger(score) || score < 1 || score > 5 || images == null || tags == null) return null
-        items.push({ commentId: id, productId: 0, windowId: windowId, authorName: jsonString(item, 'authorName') ?? '校园用户', authorAvatarUrl: jsonString(item, 'authorAvatarUrl') ?? '', score: score, content: jsonString(item, 'content') ?? '', images: images, tags: tags, createdAt: jsonString(item, 'createdAt') ?? '' })
+        // 店铺评价同样内嵌评论数与预览；字段缺失按无评论处理，解析失败则整页判异常。
+        const discussions = embeddedDiscussions(item)
+        const count = jsonNumber(item, 'discussionCount') ?? 0
+        if (discussions == null || !Number.isInteger(count) || count < 0 || count < discussions.length) return null
+        items.push({ commentId: id, productId: 0, windowId: windowId, authorName: jsonString(item, 'authorName') ?? '校园用户', authorAvatarUrl: jsonString(item, 'authorAvatarUrl') ?? '', score: score, content: jsonString(item, 'content') ?? '', images: images, tags: tags, createdAt: jsonString(item, 'createdAt') ?? '',
+            discussionCount: count, discussions: discussions })
     }
     return { items: items, nextCursor: cursor, hasMore: more }
 }
@@ -161,4 +341,80 @@ export function parseReviewSummary(raw: UTSJSONObject): ReviewSummary | null {
     if (images != null && (!Number.isInteger(images) || images < 0 || (count != null && images > count))) return null
     if (count == null || positive == null || negative == null || !Number.isInteger(count) || !Number.isInteger(positive) || !Number.isInteger(negative) || count < 0 || positive < 0 || negative < 0 || positive + negative > count || (count > 0 && (average == null || !Number.isFinite(average) || average < 1 || average > 5))) return null
     return { reviewCount: count, averageScore: count == 0 ? null : average, positiveCount: positive, negativeCount: negative, imageCount: images }
+}
+
+/**
+ * 读取某条评价的顶层评论（楼层），按发布时间倒序分页。
+ *
+ * reviewType 必须是 COMMENT 或 WINDOW_REVIEW，两类评价的顶层入口路径不同；
+ * cursor 是上一页最后一条的公开评论标识，由服务端换算出内部序号，
+ * 前端只透传不自行计算，避免顺序错乱。读取不校验消费资格，
+ * 未购买过的学生也可以浏览评论。
+ */
+export function fetchDiscussions(reviewType: string, reviewId: string, cursor: string, limit: number = 20): Promise<HttpResult> {
+    const base = reviewType == 'WINDOW_REVIEW'
+        ? '/comments/window-reviews/' + encodeURIComponent(reviewId) + '/discussions'
+        : '/comments/' + encodeURIComponent(reviewId) + '/discussions'
+    return httpGet(base + '?limit=' + limit + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : ''), true)
+}
+
+/**
+ * 读取单个楼层内的回复，按发布时间正序分页。
+ *
+ * discussionId 可以是楼层根，也可以是楼层内任意一条回复，服务端统一解析出 rootId；
+ * 因此前端拿到父评论标识即可直接请求，不需要自己找楼层根。
+ */
+export function fetchDiscussionReplies(discussionId: string, cursor: string, limit: number = 50): Promise<HttpResult> {
+    return httpGet('/comments/discussions/' + encodeURIComponent(discussionId) + '/replies?limit=' + limit
+        + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : ''), true)
+}
+
+/**
+ * 发表顶层评论。
+ *
+ * key 为客户端幂等请求标识：网络超时后用同一 key 与同一内容重试，服务端返回原评论；
+ * 撤回后重新发表必须换新 key，否则会被服务端判为重复请求。
+ * 服务端要求“购买过该菜品/该店铺”，未消费返回 403，管理角色豁免。
+ */
+export function createDiscussion(reviewType: string, reviewId: string, content: string, key: string): Promise<HttpResult> {
+    const path = reviewType == 'WINDOW_REVIEW'
+        ? '/comments/window-reviews/' + encodeURIComponent(reviewId) + '/discussions'
+        : '/comments/' + encodeURIComponent(reviewId) + '/discussions'
+    return httpPost(path, { content: content }, true, key)
+}
+
+/**
+ * 回复楼层内的某一条评论。
+ *
+ * 回复条数不限，服务端把回复统一挂到楼层根下、深度固定为 2；
+ * 被回复评论已撤回或屏蔽时返回 409，前端应刷新列表后重试。
+ */
+export function createDiscussionReply(discussionId: string, content: string, key: string): Promise<HttpResult> {
+    return httpPost('/comments/discussions/' + encodeURIComponent(discussionId) + '/replies', { content: content }, true, key)
+}
+
+/**
+ * 编辑自己的评论。
+ *
+ * 只有作者本人可以编辑，管理角色只能屏蔽、不能改写他人正文；
+ * version 必须是最近一次读取到的版本，版本不一致返回 409，由页面刷新后重试。
+ * 编辑不会重新发送通知。
+ */
+export function reviseDiscussion(discussionId: string, content: string, version: number): Promise<HttpResult> {
+    return httpPut('/comments/discussions/' + encodeURIComponent(discussionId), { content: content, version: version }, true)
+}
+
+/**
+ * 撤回自己的评论（软删除）。
+ *
+ * 撤回后评论不再出现在列表与回复中，但记录保留供管理员追溯；
+ * 重复撤回服务端按幂等成功处理。已被管理员屏蔽的评论不允许作者撤回。
+ */
+export function revokeDiscussion(discussionId: string): Promise<HttpResult> {
+    return httpDelete('/comments/discussions/' + encodeURIComponent(discussionId), true)
+}
+
+/** 读取评论接口的统一响应体 data；失败或缺 body 时返回 null。 */
+export function discussionPayload(result: HttpResult): UTSJSONObject | null {
+    return result.ok && result.data != null ? jsonObject(result.data, 'data') : null
 }

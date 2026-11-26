@@ -66,6 +66,25 @@
                     <text v-if="review.content.length > 0" class="review-feed-body">{{ review.content }}</text>
                     <view v-if="review.tags.length > 0" class="review-tags"><view v-for="tag in review.tags" :key="tag" class="review-tag"><text class="review-tag-label">{{ tag }}</text></view></view>
                     <view v-if="review.images.length > 0" class="review-photos"><image v-for="(url, index) in review.images" :key="url" class="review-feed-photo" :src="photoSource(url)" mode="aspectFill" @click="previewPhotos(review, index)"></image></view>
+                    <!-- 评论区摘要：只读展示服务端给的前三条顶层评论，完整对话进入独立评论页。 -->
+                    <view v-if="review.discussionCount > 0" class="review-discussion">
+                        <view v-for="discussion in review.discussions" :key="discussion.discussionId" class="review-discussion-line">
+                            <view class="review-discussion-head">
+                                <text class="review-discussion-name" :max-lines="1">{{ discussion.authorName }}</text>
+                                <text v-if="discussion.official" class="review-discussion-official">商家</text>
+                            </view>
+                            <text class="review-discussion-text" :max-lines="2">{{ discussion.content }}</text>
+                        </view>
+                        <view class="review-discussion-entry" @click="openDiscussions(review)">
+                            <text class="review-discussion-entry-text">查看全部 {{ review.discussionCount }} 条评论</text><view class="review-discussion-arrow"></view>
+                        </view>
+                    </view>
+                    <!-- 没有评论时也保留发布入口，否则第一条评论无从发起。 -->
+                    <view v-else class="review-discussion review-discussion-empty">
+                        <view class="review-discussion-entry" @click="openDiscussions(review)">
+                            <text class="review-discussion-entry-text">写第一条评论</text><view class="review-discussion-arrow"></view>
+                        </view>
+                    </view>
                     <view v-if="productId == 0 && windowId == 0 && !showWindowReviews" class="review-product-link" @click="openProduct(review)">
                         <text class="account-link-text">查看这道菜的评价</text><view class="account-arrow"></view>
                     </view>
@@ -283,6 +302,17 @@ function goBack() {
 }
 function openCompleted() { openOrderList('completed') }
 function openProduct(review: Review) { uni.navigateTo({ url: '/pages/review/list?productId=' + review.productId }) }
+/**
+ * 打开某条评价的评论区。
+ *
+ * 菜品评价的 commentId 对应 comments.comment_id，店铺评价的 commentId 对应
+ * window_reviews.review_id；用 productId 是否大于 0 区分两类评价，与服务端 reviewType 一致。
+ * 只传公开标识，不把档口、菜品等无关参数带进评论页，避免前端拼错归属。
+ */
+function openDiscussions(review: Review) {
+    const type = review.productId > 0 ? 'COMMENT' : 'WINDOW_REVIEW'
+    uni.navigateTo({ url: '/pages/review/discussions?reviewType=' + type + '&reviewId=' + encodeURIComponent(review.commentId) })
+}
 function selectMine(windowMode: boolean) {
     if (state.refreshing || state.showWindowReviews == windowMode) return
     reviewVersion++; state.loading = false; state.scoreFilter = 0; state.photoOnly = false; state.reviewScrollTop = 0
@@ -372,6 +402,20 @@ onPageShow(() => {
 .review-score-tab-count { margin-left: 3px; font-size: 10px; line-height: 16px; }
 .review-score-label-selected { color: #FFFFFF; font-weight: bold; }
 .review-score-label-idle { color: #7A6C60; font-weight: normal; }
+/* 评论摘要：与评价正文分层，灰底卡片让“评论”明显从属于上方评价。 */
+.review-discussion { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background-color: #FBF6F1; }
+.review-discussion-empty { padding-top: 0; padding-bottom: 0; background-color: transparent; }
+.review-discussion-line { margin-bottom: 6px; }
+.review-discussion-head { flex-direction: row; align-items: center; }
+.review-discussion-name { flex-shrink: 1; font-size: 11px; line-height: 16px; font-weight: bold; color: #5A4A3E; }
+.review-discussion-official { flex-shrink: 0; margin-left: 5px; padding: 0 5px; border-radius: 4px; background-color: #FFE8D9; font-size: 9px; line-height: 14px; color: #C2410C; }
+.review-discussion-text { margin-top: 1px; font-size: 12px; line-height: 18px; color: #6E5D50; }
+.review-discussion-entry { flex-direction: row; align-items: center; min-height: 36px; margin-top: 2px; }
+.review-discussion-entry-text { flex: 1; min-width: 0; font-size: 11px; line-height: 16px; color: #C2410C; }
+.review-discussion-arrow { width: 6px; height: 6px; flex-shrink: 0; margin-right: 3px; border-right-width: 1px; border-right-style: solid; border-right-color: #C2410C; border-top-width: 1px; border-top-style: solid; border-top-color: #C2410C; transform: rotate(45deg); }
+/* #ifdef WEB */
+.account-page .review-discussion-head, .account-page .review-discussion-entry { flex-direction: row; }
+/* #endif */
 /* #ifdef WEB */
 .account-page .review-subject, .account-page .review-score-tabs, .account-page .review-score-tab { flex-direction: row; }
 /* #endif */

@@ -1,0 +1,621 @@
+<template>
+    <view class="account-page account-secondary discussion-page">
+        <view class="account-status vapor-account-secondary--account-status" :style="'height:' + statusBarHeight + 'px'"></view>
+        <view class="account-nav vapor-account-secondary--account-nav">
+            <view class="account-back vapor-account-secondary--account-back" @click="goBack">
+                <view class="account-back-icon"></view>
+            </view>
+            <text class="account-title">评价评论</text>
+        </view>
+        <scroll-view class="account-scroll" direction="vertical" :scroll-top="scrollTop" :refresher-enabled="validTarget && !loading && !submitting" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMore" @scroll="pageScrolled">
+            <view class="account-content discussion-content">
+                <!-- 参数非法时停在错误卡片，不发任何请求，避免调用不存在的评价评论区。 -->
+                <view v-if="!validTarget" class="account-card vapor-account-secondary--account-card">
+                    <text class="account-heading">无法打开评论区</text>
+                    <text class="account-error">{{ errorText }}</text>
+                </view>
+                <view v-else>
+                    <!-- 说明区：解释评论准入，避免用户写完才被 403 拒绝。 -->
+                    <view class="discussion-intro">
+                        <text class="discussion-intro-title">聊一聊这条评价</text>
+                        <text class="discussion-intro-note">购买过该菜品或在该店铺下过单的同学可以发言，商家以“商家”身份参与讨论。回复和编辑会立即生效，撤回后其他同学不再看到。</text>
+                    </view>
+
+                    <!-- 编辑器：顶层评论、楼层回复、编辑自己的评论共用一块，靠标题区分当前动作。 -->
+                    <view class="account-card vapor-account-secondary--account-card discussion-compose">
+                        <view class="discussion-compose-head">
+                            <text class="account-heading">{{ composeTitle }}</text>
+                            <view v-if="replyTo != null || editing != null" class="discussion-cancel" @click="cancelCompose">
+                                <text class="discussion-cancel-text">取消</text>
+                            </view>
+                        </view>
+                        <textarea class="discussion-textarea" v-model="draft" :maxlength="500" :disabled="submitting" :placeholder="composePlaceholder" aria-label="评论内容"></textarea>
+                        <view class="discussion-compose-foot">
+                            <text class="discussion-counter">{{ draft.length }} / 500</text>
+                            <button class="discussion-submit discussion-submit-text button-text button-text-44" :class="canSubmit ? '' : 'discussion-submit-disabled'" :disabled="!canSubmit" @click="submit">{{ submitLabel }}</button>
+                        </view>
+                        <text v-if="composeError.length > 0" class="account-error">{{ composeError }}</text>
+                    </view>
+
+                    <view v-if="loading" class="account-note discussion-loading">正在获取评论…</view>
+                    <text v-if="errorText.length > 0" class="account-error">{{ errorText }}</text>
+
+                    <!-- 楼层列表：顶层评论按时间倒序，楼层内回复按时间正序。 -->
+                    <view v-for="floor in floors" :key="floor.root.discussionId" class="account-card vapor-account-secondary--account-card discussion-floor">
+                        <view class="discussion-author">
+                            <view class="discussion-avatar"><business-image :src="floor.root.authorAvatarUrl" kind="avatar"></business-image></view>
+                            <view class="discussion-author-copy">
+                                <view class="discussion-author-line">
+                                    <text class="discussion-author-name" :max-lines="1">{{ floor.root.authorName }}</text>
+                                    <text v-if="floor.root.official" class="discussion-official">商家</text>
+                                </view>
+                                <text class="discussion-date">{{ formatDate(floor.root.createdAt) }}{{ floor.root.updatedAt != null ? ' · 已编辑' : '' }}</text>
+                            </view>
+                        </view>
+                        <text class="discussion-body">{{ floor.root.content }}</text>
+                        <view class="discussion-actions">
+                            <view class="discussion-action" @click="startReply(floor.root)"><text class="discussion-action-text">回复</text></view>
+                            <view v-if="floor.root.mine" class="discussion-action" @click="startEdit(floor.root)"><text class="discussion-action-text">编辑</text></view>
+                            <view v-if="floor.root.mine" class="discussion-action" @click="askRevoke(floor.root)"><text class="discussion-action-danger">撤回</text></view>
+                        </view>
+
+                        <!-- 楼层回复：预览最多三条，完整对话按需分页加载，不在首屏一次拉完。 -->
+                        <view v-if="floor.replies.length > 0 || floor.root.replyCount > 0" class="discussion-replies">
+                            <view v-for="reply in floor.replies" :key="reply.discussionId" class="discussion-reply">
+                                <view class="discussion-reply-head">
+                                    <text class="discussion-reply-name" :max-lines="1">{{ reply.authorName }}</text>
+                                    <text v-if="reply.official" class="discussion-official">商家</text>
+                                    <text class="discussion-reply-date">{{ formatDate(reply.createdAt) }}</text>
+                                </view>
+                                <view class="discussion-reply-body">
+                                    <text v-if="reply.parentAuthorName != null" class="discussion-reply-target">回复 @{{ reply.parentAuthorName }}：</text>
+                                    <text class="discussion-reply-content">{{ reply.content }}</text>
+                                </view>
+                                <view class="discussion-actions">
+                                    <view class="discussion-action" @click="startReply(reply)"><text class="discussion-action-text">回复</text></view>
+                                    <view v-if="reply.mine" class="discussion-action" @click="startEdit(reply)"><text class="discussion-action-text">编辑</text></view>
+                                    <view v-if="reply.mine" class="discussion-action" @click="askRevoke(reply)"><text class="discussion-action-danger">撤回</text></view>
+                                </view>
+                            </view>
+                            <view v-if="showRepliesAction(floor)" class="discussion-more" @click="toggleReplies(floor)">
+                                <text class="discussion-more-text">{{ repliesActionLabel(floor) }}</text>
+                            </view>
+                        </view>
+                    </view>
+
+                    <!-- 空态：还没有评论时引导写下第一条，入口与卡片内“写第一条评论”一致。 -->
+                    <view v-if="loaded && !loading && errorText.length == 0 && floors.length == 0" class="discussion-empty">
+                        <text class="account-heading">还没有评论</text>
+                        <text class="review-subtitle">购买过该菜品或该店铺的同学，可以写下第一条评论。</text>
+                    </view>
+                    <button v-if="hasMore && !loading" class="account-link account-link-text button-text button-text-44" @click="loadMore">加载更多评论</button>
+                    <text v-if="loaded && !hasMore && floors.length > 0 && errorText.length == 0" class="review-end">已经看到全部评论</text>
+                </view>
+            </view>
+            <view slot="refresher" class="native-refresh-slot">
+                <refresh-header :refreshing="refreshing" :current-refresh-time="currentRefreshTime"></refresh-header>
+            </view>
+        </scroll-view>
+
+        <!-- 撤回不可逆，统一走二次确认；屏蔽与撤回的权限差异由服务端再次校验。 -->
+        <confirm-dialog v-if="revoking != null" title="撤回这条评论？" message="撤回后其他同学将不再看到这条评论，记录仍会保留用于追溯。" cancel-text="保留评论" confirm-text="确认撤回" :busy="revokeBusy" busy-text="正在撤回…" @cancel="cancelRevoke" @confirm="confirmRevoke" />
+    </view>
+</template>
+<script setup lang="uts">
+import { reactive, toRefs, computed } from 'vue'
+import BusinessImage from '../../components/business-image/business-image.uvue'
+import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
+import ConfirmDialog from '../../components/confirm-dialog/confirm-dialog.uvue'
+import { currentUser } from '../../store/auth.uts'
+import { backToAccount, accountDate } from '../../common/account.uts'
+import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
+import { newCommentKey } from '../../common/comments.uts'
+import { toast } from '../../common/feedback.uts'
+import { HttpResult } from '../../common/http.uts'
+import { Discussion, DiscussionThread, fetchDiscussions, fetchDiscussionReplies, parseDiscussionPage, parseDiscussionThreadPage,
+    parseDiscussion, discussionPayload, createDiscussion, createDiscussionReply, reviseDiscussion, revokeDiscussion } from '../../api/comments.uts'
+
+/**
+ * 楼层视图。
+ *
+ * 服务端把顶层评论与最多三条回复预览一起返回；完整回复按需另行分页。
+ * expanded 为 false 时只展示预览，为 true 表示至少加载过一页完整回复；
+ * replyMore 只描述“已加载的完整回复是否还有下一页”，不复用顶层评论的游标。
+ */
+type Floor = { root: Discussion, replies: Array<Discussion>, replyCursor: string, replyMore: boolean, replyExpanded: boolean, replyLoading: boolean }
+
+const initialFloors: Array<Floor> = []
+const state = reactive({
+    statusBarHeight: 0,
+    /** 评论目标：COMMENT 菜品评价 / WINDOW_REVIEW 店铺评价 */
+    reviewType: '',
+    reviewId: '',
+    /** 参数合法才允许发请求，非法时只展示错误占位 */
+    validTarget: false,
+    floors: initialFloors,
+    /** 顶层评论游标与是否还有下一页 */
+    cursor: '',
+    hasMore: false,
+    loading: false,
+    loaded: false,
+    errorText: '',
+    refreshing: false,
+    currentRefreshTime: '',
+    /** 列表滚动位置：回复时滚回顶部编辑器，避免用户找不到输入框 */
+    scrollTop: 0,
+    /** 编辑器草稿、当前回复目标与当前编辑目标三者互斥 */
+    draft: '',
+    replyTo: null as Discussion | null,
+    editing: null as Discussion | null,
+    submitting: false,
+    composeError: '',
+    /** 幂等请求键只对“同一份内容的重试”复用，内容变化或成功后重置 */
+    pendingKey: '',
+    pendingContent: '',
+    /** 待撤回的评论与撤回进行中状态 */
+    revoking: null as Discussion | null,
+    revokeBusy: false
+})
+const { statusBarHeight, validTarget, floors, hasMore, loading, loaded, errorText, refreshing,
+    currentRefreshTime, scrollTop, draft, replyTo, editing, submitting, composeError, revoking, revokeBusy } = toRefs(state)
+
+/** 当前编辑器标题：编辑优先于回复，二者都没有时是发表新评论。 */
+const composeTitle = computed((): string => {
+    if (state.editing != null) return '编辑评论'
+    if (state.replyTo != null) return '回复 ' + state.replyTo!.authorName
+    return '写下你的评论'
+})
+const composePlaceholder = computed((): string => {
+    if (state.editing != null) return '修改这条评论的内容'
+    if (state.replyTo != null) return '回复 ' + state.replyTo!.authorName
+    return '说说你的看法，最多500字'
+})
+/** 只按内容长度与提交状态决定按钮是否可用，不因网络重试状态锁死输入。 */
+const canSubmit = computed((): boolean => !state.submitting && state.draft.trim().length > 0)
+const submitLabel = computed((): string => {
+    if (state.submitting) return '正在提交…'
+    if (state.editing != null) return '保存修改'
+    if (state.replyTo != null) return '发布回复'
+    return '发表评论'
+})
+
+// 页面级请求版本：切目标、离页、刷新都会递增，迟到响应据此丢弃。
+let pageVersion = 0
+let replyVersion = 0
+let disposed = false
+
+/** 返回上一页；直接 navigateBack，没有上一页时回到账户中心。 */
+function goBack(): void {
+    if (getCurrentPages().length > 1) uni.navigateBack()
+    else backToAccount()
+}
+
+/** 时间展示复用账户页口径，避免各页面时间格式不一致。 */
+function formatDate(value: string): string {
+    return accountDate(value)
+}
+
+/** 把服务端顶层评论转成楼层视图；预览回复按服务端顺序保留。 */
+function buildFloor(thread: DiscussionThread): Floor {
+    return { root: thread.root, replies: thread.replies, replyCursor: '', replyMore: false, replyExpanded: false, replyLoading: false }
+}
+
+/** 按楼层根标识查找楼层；楼层根或楼内回复都能归到同一层。 */
+function findFloor(rootId: string): Floor | null {
+    return state.floors.find((floor: Floor): boolean => floor.root.discussionId == rootId) ?? null
+}
+
+/**
+ * 读取顶层评论。
+ *
+ * reset 为 true 时替换整页并回到最新一页；否则按游标追加，并按讨论标识去重，
+ * 防止重复点击“加载更多”把同一条评论插入两次。任何响应写回前都复核页面版本与登录账号。
+ */
+async function loadFloors(reset: boolean): Promise<void> {
+    if (disposed || !state.validTarget || state.loading || (!reset && !state.hasMore)) return
+    const version = ++pageVersion
+    const owner = currentUser()?.userUuid ?? ''
+    state.loading = true
+    if (reset) state.errorText = ''
+    try {
+        const result = await fetchDiscussions(state.reviewType, state.reviewId, reset ? '' : state.cursor, 20)
+        if (disposed || version != pageVersion || (currentUser()?.userUuid ?? '') != owner) return
+        const raw = discussionPayload(result)
+        const page = raw == null ? null : parseDiscussionThreadPage(raw)
+        // 游标不前进时停止追加，避免后端异常导致前端无限请求同一页。
+        if (page == null || (!reset && page.hasMore && page.nextCursor == state.cursor)) {
+            state.errorText = result.message.length > 0 ? result.message : '评论数据异常，请稍后重试'
+            return
+        }
+        if (reset) {
+            const next: Array<Floor> = []
+            for (let i = 0; i < page.threads.length; i++) next.push(buildFloor(page.threads[i]))
+            state.floors = next
+        } else {
+            for (let i = 0; i < page.threads.length; i++) {
+                const thread = page.threads[i]
+                if (!state.floors.some((floor: Floor): boolean => floor.root.discussionId == thread.root.discussionId)) state.floors.push(buildFloor(thread))
+            }
+        }
+        state.cursor = page.nextCursor
+        state.hasMore = page.hasMore
+        state.loaded = true
+    } catch (_error) {
+        if (!disposed && version == pageVersion && (currentUser()?.userUuid ?? '') == owner) state.errorText = '评论暂时不可用，请下拉重试'
+    } finally {
+        if (version == pageVersion) state.loading = false
+    }
+}
+
+/** 是否显示“查看全部回复/加载更多回复”入口。 */
+function showRepliesAction(floor: Floor): boolean {
+    if (floor.replyLoading) return false
+    if (!floor.replyExpanded) return floor.root.replyCount > floor.replies.length
+    return floor.replyMore
+}
+
+/** 回复入口文案：未展开时给总数，展开后只描述分页状态。 */
+function repliesActionLabel(floor: Floor): string {
+    if (floor.replyLoading) return '正在加载回复…'
+    if (!floor.replyExpanded) return floor.root.replyCount > floor.replies.length ? '查看全部 ' + floor.root.replyCount + ' 条回复' : '查看回复'
+    return '加载更多回复'
+}
+
+/**
+ * 加载楼层完整回复。
+ *
+ * 首次点击替换预览，之后按游标追加；被回复人展示名由服务端按 parentId 批量解析，
+ * 父评论已撤回时显示占位文案，前端不自行回查父评论。
+ */
+async function loadReplies(floor: Floor, reset: boolean): Promise<void> {
+    if (floor.replyLoading || (!reset && !floor.replyMore)) return
+    const version = ++replyVersion
+    const owner = currentUser()?.userUuid ?? ''
+    floor.replyLoading = true
+    try {
+        const result = await fetchDiscussionReplies(floor.root.discussionId, reset ? '' : floor.replyCursor, 50)
+        if (disposed || version != replyVersion || (currentUser()?.userUuid ?? '') != owner) return
+        const raw = discussionPayload(result)
+        const page = raw == null ? null : parseDiscussionPage(raw)
+        if (page == null || (!reset && page.hasMore && page.nextCursor == floor.replyCursor)) {
+            toast(result.message.length > 0 ? result.message : '回复加载失败，请稍后重试')
+            return
+        }
+        if (reset) floor.replies = page.items
+        else for (let i = 0; i < page.items.length; i++) {
+            const item = page.items[i]
+            if (!floor.replies.some((existing: Discussion): boolean => existing.discussionId == item.discussionId)) floor.replies.push(item)
+        }
+        floor.replyExpanded = true
+        floor.replyCursor = page.nextCursor
+        floor.replyMore = page.hasMore
+    } catch (_error) {
+        if (!disposed) toast('回复加载失败，请稍后重试')
+    } finally {
+        floor.replyLoading = false
+    }
+}
+
+/** 点击“查看全部/加载更多”时决定是首次加载还是翻页。 */
+function toggleReplies(floor: Floor): void {
+    if (floor.replyLoading) return
+    loadReplies(floor, !floor.replyExpanded)
+}
+
+/** 进入回复模式：清空草稿和编辑目标，避免回复内容混入上一次编辑。 */
+function startReply(target: Discussion): void {
+    if (state.submitting) return
+    state.replyTo = target
+    state.editing = null
+    state.draft = ''
+    state.composeError = ''
+    state.pendingKey = ''
+    state.pendingContent = ''
+    scrollToCompose()
+}
+
+/** 进入编辑模式：只允许作者本人，按钮本身也只对 mine 渲染，服务端仍会二次校验。 */
+function startEdit(target: Discussion): void {
+    if (state.submitting || !target.mine) return
+    state.editing = target
+    state.replyTo = null
+    state.draft = target.content
+    state.composeError = ''
+    state.pendingKey = ''
+    state.pendingContent = ''
+    scrollToCompose()
+}
+
+/** 取消回复或编辑，恢复为发表新评论；不清空用户已经写下的草稿。 */
+function cancelCompose(): void {
+    if (state.submitting) return
+    state.replyTo = null
+    state.editing = null
+    state.composeError = ''
+}
+
+/** 把列表滚回编辑器所在位置；先写入非零值再归零，确保重复点击也能触发滚动。 */
+function scrollToCompose(): void {
+    state.scrollTop = 1
+    setTimeout(() => {
+        if (!disposed) state.scrollTop = 0
+    }, 0)
+}
+
+/** 记录滚动位置，供下一次回复时回滚顶部使用。 */
+function pageScrolled(event: UniScrollEvent): void {
+    state.scrollTop = Math.max(0, event.detail.scrollTop)
+}
+
+/**
+ * 取本次提交的幂等键。
+ *
+ * 只有“同一目标、同一内容”的重试才复用旧键，服务端据此返回原评论而不是重复发布；
+ * 内容变化立即换新键，避免同键不同内容被服务端判为 409。
+ */
+function submitKey(content: string): string {
+    if (state.pendingKey.length > 0 && state.pendingContent == content) return state.pendingKey
+    state.pendingKey = newCommentKey()
+    state.pendingContent = content
+    return state.pendingKey
+}
+
+/** 把服务端返回的新楼层插到列表顶部；顶层评论按发布时间倒序。 */
+function insertFloor(created: Discussion): void {
+    state.floors.unshift({ root: created, replies: [], replyCursor: '', replyMore: false, replyExpanded: false, replyLoading: false })
+}
+
+/**
+ * 发布回复后刷新所属楼层的回复列表。
+ *
+ * 不直接把新回复插到预览数组末尾：楼层原本只展示三条预览时，追加会让预览变四条，
+ * 同时“查看全部 N 条回复”入口消失，更早的回复就再也打不开。
+ * 重新取第一页并按正序替换，既保证顺序，也保留“加载更多回复”的分页入口。
+ * 楼层已不存在（评价刚被撤回）时整页重载，避免继续往失效楼层写数据。
+ */
+async function appendReply(created: Discussion): Promise<void> {
+    const floor = findFloor(created.rootId)
+    if (floor == null) { loadFloors(true); return }
+    floor.root.replyCount = floor.root.replyCount + 1
+    await loadReplies(floor, true)
+    // 超长楼层的第一页不包含刚发布的回复时，把它补在末尾，保证作者能看到自己的发言；
+    // 后续翻页按标识去重，不会重复展示。加载失败时不补，避免预览超过三条。
+    if (floor.replyExpanded && !floor.replies.some((item: Discussion): boolean => item.discussionId == created.discussionId)) floor.replies.push(created)
+}
+
+/**
+ * 提交编辑器内容。
+ *
+ * 编辑走 PUT 且必须带版本号；新评论与回复走 POST 且必须带幂等键。
+ * 失败时保留草稿与幂等键，用户可直接重试；成功后清空草稿与目标。
+ * 403 表示未消费或无权操作，429 表示触发限流，文案直接使用服务端返回。
+ */
+async function submit(): Promise<void> {
+    if (state.submitting || !state.validTarget) return
+    const content = state.draft.trim()
+    if (content.length == 0) { state.composeError = '请先写下评论内容'; return }
+    if (content.length > 500) { state.composeError = '评论内容需为1至500字'; return }
+    state.submitting = true
+    state.composeError = ''
+    try {
+        if (state.editing != null) {
+            const target = state.editing
+            const result = await reviseDiscussion(target.discussionId, content, target.version)
+            const raw = discussionPayload(result)
+            const updated = raw == null ? null : parseDiscussion(raw)
+            if (updated == null) {
+                state.composeError = result.message.length > 0 ? result.message : '评论保存失败，请稍后重试'
+                return
+            }
+            applyUpdate(updated)
+            state.draft = ''
+            state.editing = null
+            toast('评论已更新')
+            return
+        }
+        const key = submitKey(content)
+        let result: HttpResult
+        if (state.replyTo != null) result = await createDiscussionReply(state.replyTo.discussionId, content, key)
+        else result = await createDiscussion(state.reviewType, state.reviewId, content, key)
+        const raw = discussionPayload(result)
+        const created = raw == null ? null : parseDiscussion(raw)
+        if (created == null) {
+            state.composeError = result.message.length > 0 ? result.message : '评论发布失败，请稍后重试'
+            return
+        }
+        if (created.depth == 1) insertFloor(created)
+        else await appendReply(created)
+        state.draft = ''
+        state.replyTo = null
+        state.editing = null
+        state.pendingKey = ''
+        state.pendingContent = ''
+        toast(created.depth == 1 ? '评论已发布' : '回复已发布')
+    } catch (_error) {
+        // 网络层异常无法确认服务端是否已落库，保留幂等键供用户按原内容重试。
+        state.composeError = '网络异常，请稍后重试'
+    } finally {
+        state.submitting = false
+    }
+}
+
+/**
+ * 把编辑结果写回本地列表。
+ *
+ * 服务端编辑响应不再携带楼层预览，因此只覆盖正文、版本与更新时间，
+ * 保留已经加载的回复列表，避免编辑一条评论把整层对话清空。
+ */
+function applyUpdate(updated: Discussion): void {
+    const floor = findFloor(updated.rootId)
+    if (floor == null) { loadFloors(true); return }
+    if (updated.depth == 1) {
+        floor.root.content = updated.content
+        floor.root.version = updated.version
+        floor.root.updatedAt = updated.updatedAt
+        return
+    }
+    for (let i = 0; i < floor.replies.length; i++) {
+        if (floor.replies[i].discussionId == updated.discussionId) {
+            floor.replies[i].content = updated.content
+            floor.replies[i].version = updated.version
+            floor.replies[i].updatedAt = updated.updatedAt
+            return
+        }
+    }
+}
+
+/** 打开撤回确认框；撤回中不允许再次触发。 */
+function askRevoke(target: Discussion): void {
+    if (state.revokeBusy || state.submitting || !target.mine) return
+    state.revoking = target
+}
+
+function cancelRevoke(): void {
+    if (state.revokeBusy) return
+    state.revoking = null
+}
+
+/**
+ * 确认撤回。
+ *
+ * 撤回楼层根会连同整层一起不再展示，因此直接移除整个楼层；
+ * 撤回楼内回复只移除该条并回减计数。重复撤回由服务端按幂等成功处理。
+ */
+async function confirmRevoke(): Promise<void> {
+    const target = state.revoking
+    if (target == null || state.revokeBusy) return
+    state.revokeBusy = true
+    try {
+        const result = await revokeDiscussion(target.discussionId)
+        if (!result.ok) {
+            toast(result.message.length > 0 ? result.message : '撤回失败，请稍后重试')
+            return
+        }
+        if (target.depth == 1) {
+            state.floors = state.floors.filter((floor: Floor): boolean => floor.root.discussionId != target.discussionId)
+        } else {
+            const floor = findFloor(target.rootId)
+            if (floor != null) {
+                floor.replies = floor.replies.filter((item: Discussion): boolean => item.discussionId != target.discussionId)
+                floor.root.replyCount = Math.max(0, floor.root.replyCount - 1)
+            }
+        }
+        state.revoking = null
+        // 撤回后编辑目标可能已不存在，清空编辑器避免把内容写到已撤回的评论上。
+        if (state.editing != null && state.editing.discussionId == target.discussionId) {
+            state.editing = null
+            state.draft = ''
+        }
+        if (state.replyTo != null && state.replyTo.discussionId == target.discussionId) state.replyTo = null
+        toast('评论已撤回')
+    } catch (_error) {
+        toast('网络异常，请稍后重试')
+    } finally {
+        state.revokeBusy = false
+    }
+}
+
+/** 下拉刷新：重新拉取最新评论，保留尚未提交的草稿。 */
+function refreshPage(): void {
+    if (state.loading || state.refreshing || !state.validTarget) return
+    state.refreshing = true
+    const start = Date.now()
+    state.currentRefreshTime = refreshTimeLabel(start)
+    loadFloors(true).then(() => {
+        finishPullRefresh(start, state.errorText.length == 0, (_time: string) => { state.refreshing = false })
+    })
+}
+
+/** 滚动到底部继续加载下一页；加载中或没有更多时由 loadFloors 自行拦截。 */
+function loadMore(): void {
+    if (!state.refreshing) loadFloors(false)
+}
+
+onLoad((options: OnLoadOptions) => {
+    const type = options['reviewType'] ?? ''
+    const id = options['reviewId'] ?? ''
+    const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
+    // 只接受两类评价与公开 UUID；非法参数不再向后端请求，避免探测不存在的评论目标。
+    if ((type != 'COMMENT' && type != 'WINDOW_REVIEW') || !uuid.test(id)) {
+        state.errorText = '评论参数无效，请从评价列表重新进入'
+        return
+    }
+    state.reviewType = type
+    state.reviewId = id
+    state.validTarget = true
+})
+
+onPageShow(() => {
+    state.statusBarHeight = uni.getWindowInfo().statusBarHeight
+    const user = currentUser()
+    if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
+    // 学生端只承载 CUSTOMER 的评论能力；商家回复与屏蔽入口在 Vue 管理端。
+    if (user.roleCode != 'CUSTOMER') { uni.switchTab({ url: '/pages/home/home' }); return }
+    if (state.validTarget && !state.loaded && !state.loading) loadFloors(true)
+})
+
+onPageHide(() => {
+    // 离开页面时作废进行中的请求，避免回到页面后旧响应覆盖新状态。
+    pageVersion++
+    replyVersion++
+    state.loading = false
+    // 楼层回复的加载标记也要复位：迟到响应已被版本号丢弃，若不复位按钮会永久显示“正在加载”。
+    for (let i = 0; i < state.floors.length; i++) state.floors[i].replyLoading = false
+})
+
+onUnload(() => {
+    disposed = true
+    pageVersion++
+    replyVersion++
+})
+</script>
+<style>
+@import '../../styles/account.css';
+@import '../../styles/review.css';
+
+.discussion-page { background-color: #FDF6F0; }
+.discussion-content { padding-bottom: 24px; }
+.discussion-intro { margin-bottom: 12px; padding: 14px; border-radius: 16px; background-color: #FFF0E6; }
+.discussion-intro-title { font-size: 16px; line-height: 24px; font-weight: bold; color: #211C18; }
+.discussion-intro-note { margin-top: 6px; font-size: 12px; line-height: 20px; color: #7A6C60; }
+.discussion-compose { margin-bottom: 12px; }
+.discussion-compose-head { flex-direction: row; align-items: center; justify-content: space-between; }
+.discussion-cancel { display: flex; min-height: 36px; padding: 0 4px 0 12px; align-items: center; justify-content: center; }
+.discussion-cancel-text { font-size: 12px; line-height: 20px; color: #7A6C60; }
+.discussion-textarea { width: 100%; height: 88px; margin-top: 10px; padding: 10px; border-radius: 12px; background-color: #FDF6F0; font-size: 14px; line-height: 22px; color: #211C18; }
+.discussion-compose-foot { flex-direction: row; align-items: center; justify-content: space-between; margin-top: 8px; }
+.discussion-counter { flex: 1; min-width: 0; font-size: 11px; line-height: 16px; color: #A09083; }
+.discussion-submit { display: flex; flex-shrink: 0; min-height: 44px; margin: 0; padding: 0 18px; border-width: 0; border-radius: 10px; background-color: #E4572E; align-items: center; justify-content: center; }
+.discussion-submit-disabled { opacity: 0.5; }
+.discussion-submit-text { font-size: 13px; line-height: 20px; font-weight: bold; color: #FFFFFF; }
+.discussion-loading { margin-bottom: 8px; }
+.discussion-floor { margin-bottom: 10px; padding: 12px; }
+.discussion-author { flex-direction: row; align-items: center; }
+.discussion-avatar { width: 30px; height: 30px; flex-shrink: 0; margin-right: 8px; border-radius: 15px; overflow: hidden; background-color: #F6EEE7; }
+.discussion-author-copy { flex: 1; min-width: 0; }
+.discussion-author-line { flex-direction: row; align-items: center; }
+.discussion-author-name { flex-shrink: 1; font-size: 13px; line-height: 18px; font-weight: bold; color: #3C3029; }
+.discussion-official { flex-shrink: 0; margin-left: 5px; padding: 0 5px; border-radius: 4px; background-color: #FFE8D9; font-size: 9px; line-height: 14px; color: #C2410C; }
+.discussion-date { margin-top: 1px; font-size: 10px; line-height: 14px; color: #A09083; }
+.discussion-body { margin-top: 8px; font-size: 14px; line-height: 22px; color: #463A32; }
+.discussion-actions { flex-direction: row; align-items: center; margin-top: 4px; }
+.discussion-action { display: flex; min-height: 36px; margin-right: 16px; align-items: center; justify-content: center; }
+.discussion-action-text { font-size: 11px; line-height: 16px; color: #8D7B6E; }
+.discussion-action-danger { font-size: 11px; line-height: 16px; color: #B73920; }
+.discussion-replies { margin-top: 6px; padding: 8px 10px; border-radius: 10px; background-color: #FBF6F1; }
+.discussion-reply { padding-top: 6px; padding-bottom: 6px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #F1E7DD; }
+.discussion-reply-head { flex-direction: row; align-items: center; }
+.discussion-reply-name { flex-shrink: 1; font-size: 11px; line-height: 16px; font-weight: bold; color: #5A4A3E; }
+.discussion-reply-date { flex-shrink: 0; margin-left: auto; font-size: 9px; line-height: 14px; color: #A09083; }
+.discussion-reply-body { flex-direction: row; flex-wrap: wrap; margin-top: 2px; }
+.discussion-reply-target { font-size: 12px; line-height: 19px; color: #C2410C; }
+.discussion-reply-content { font-size: 12px; line-height: 19px; color: #6E5D50; }
+.discussion-more { display: flex; min-height: 40px; align-items: center; justify-content: center; }
+.discussion-more-text { font-size: 11px; line-height: 16px; color: #C2410C; }
+.discussion-empty { align-items: center; padding: 40px 20px; }
+/* #ifdef WEB */
+.account-page .discussion-compose-head, .account-page .discussion-compose-foot, .account-page .discussion-author,
+.account-page .discussion-author-line, .account-page .discussion-actions, .account-page .discussion-reply-head { flex-direction: row; }
+.account-page .discussion-textarea { box-sizing: border-box; }
+/* #endif */
+</style>

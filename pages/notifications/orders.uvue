@@ -18,7 +18,7 @@
                     <text class="thread-time">{{ formatDate(item.createdAt) }}</text>
                     <view class="thread-message-row"><image class="thread-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image><view class="thread-message-content"><text class="thread-sender">订单中心</text>
                             <view class="thread-bubble" @click="() => openNotification(item)" :style="bubbleStyle(item)">
-                                <text class="thread-bubble-title">{{ item.title }}</text><text class="thread-body">{{ item.content }}</text><view v-if="item.orderId > 0" class="thread-order-link"><text class="thread-order-label">查看订单</text><view class="thread-order-arrow"></view></view><view v-else-if="item.bizType == 'SUPPORT'" class="thread-order-link"><text class="thread-order-label">查看反馈</text><view class="thread-order-arrow"></view></view>
+                                <text class="thread-bubble-title">{{ item.title }}</text><text class="thread-body">{{ item.content }}</text><view v-if="item.orderId > 0" class="thread-order-link"><text class="thread-order-label">查看订单</text><view class="thread-order-arrow"></view></view><view v-else-if="item.bizType == 'SUPPORT'" class="thread-order-link"><text class="thread-order-label">查看反馈</text><view class="thread-order-arrow"></view></view><view v-else-if="item.bizType == 'COUPON'" class="thread-order-link"><text class="thread-order-label">查看优惠券</text><view class="thread-order-arrow"></view></view><view v-else-if="item.bizType == 'COMMENT' || item.bizType == 'WINDOW_REVIEW'" class="thread-order-link"><text class="thread-order-label">查看评论</text><view class="thread-order-arrow"></view></view>
                             </view>
                         </view></view>
                 </view>
@@ -91,11 +91,14 @@ function refreshPage() {
     load(true).then(() => { finishPullRefresh(start, state.errorText.length == 0, (_time: string) => { state.refreshing = false }) }).catch(() => { finishPullRefresh(start, false, (_time: string) => { state.refreshing = false }) })
 }
 /**
- * 判断通知是否携带可跳转的业务引用：订单通知用 orderId，反馈通知用 bizType + bizId。
+ * 判断通知是否携带可跳转的业务引用：订单通知用 orderId，反馈通知用 SUPPORT + bizId，
+ * 优惠券到期提醒用 COUPON + bizId；评价互动通知用 COMMENT / WINDOW_REVIEW + bizId（评价公开标识）。
  * 无业务引用的历史通知保持不可点击，避免跳到错误详情。
  */
 function canOpen(item: NotificationItem): boolean {
     return item.orderId > 0 || (item.bizType == 'SUPPORT' && item.bizId.length > 0)
+        || (item.bizType == 'COUPON' && item.bizId.length > 0)
+        || ((item.bizType == 'COMMENT' || item.bizType == 'WINDOW_REVIEW') && item.bizId.length > 0)
 }
 /**
  * 无业务引用的通知降低透明度表示不可跳转；点击守卫在 openNotification 内部统一执行。
@@ -112,6 +115,10 @@ async function openNotification(item: NotificationItem): Promise<void> {
         if (item.readAt.length == 0) { const result = await markNotificationRead(item.notificationId); if (version != state.version || currentUser()?.userUuid != state.userUuid) return; if (!result.ok) { toast(result.message.length > 0 ? result.message : '消息状态更新失败'); return } item.readAt = new Date().toISOString(); refreshNotificationCount() }
         if (item.orderId > 0) uni.navigateTo({ url: '/pages/order/detail?orderId=' + item.orderId })
         else if (item.bizType == 'SUPPORT' && item.bizId.length > 0) uni.navigateTo({ url: '/pages/support/detail?ticketId=' + encodeURIComponent(item.bizId) })
+        else if (item.bizType == 'COUPON' && item.bizId.length > 0) uni.navigateTo({ url: '/pages/coupons/list?tab=mine' })
+        // 评价互动通知只带评价类型与评价公开标识：直接进入该评价的评论区，
+        // 评论页再按 reviewType 走两类评价各自的读取接口，不依赖订单号或菜品编号。
+        else if ((item.bizType == 'COMMENT' || item.bizType == 'WINDOW_REVIEW') && item.bizId.length > 0) uni.navigateTo({ url: '/pages/review/discussions?reviewType=' + item.bizType + '&reviewId=' + encodeURIComponent(item.bizId) })
     } finally { state.opening = false }
 }
 function goBack() { uni.navigateBack({ delta: 1, fail: () => { uni.switchTab({ url: '/pages/notifications/list' }) } }) }
