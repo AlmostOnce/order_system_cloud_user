@@ -12,10 +12,9 @@
         </view>
         <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="!loading && !loadingMore" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMore" :lower-threshold="80">
             <view class="account-content vapor-account-secondary--account-content">
+                <!-- 与收藏、订单等二级页一致：导航标题下不再放大标题，首屏直接进入内容。 -->
                 <view class="support-intro">
-                    <text class="support-eyebrow">需要帮助</text>
-                    <text class="support-title">先看看常见问题</text>
-                    <text class="support-subtitle">用餐问题由食堂处理，软件问题由技术侧处理；提交后可在下方跟踪进度。</text>
+                    <text class="support-intro-note">用餐问题由食堂处理，软件问题由技术侧处理，处理进度在下方查看。</text>
                 </view>
 
                 <!-- 分类指引只做分流说明，点击直接进入带类型的提交页。 -->

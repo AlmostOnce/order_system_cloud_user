@@ -13,10 +13,9 @@
 .support-nav-action { display: flex; flex-shrink: 0; min-height: 44px; margin-left: auto; padding: 0 4px 0 12px; align-items: center; justify-content: center; }
 .support-nav-action-text { font-size: 13px; line-height: 20px; font-weight: bold; color: #C2410C; }
 
-.support-intro { margin-bottom: 14px; }
-.support-eyebrow { font-size: 12px; line-height: 20px; color: #C2410C; }
-.support-title { margin-top: 6px; font-size: 23px; line-height: 32px; font-weight: bold; color: #211C18; }
-.support-subtitle { margin-top: 6px; font-size: 13px; line-height: 21px; color: #7A6C60; }
+/* 说明行只保留一条辅助文案：二级页导航标题下不再叠加大标题，避免首屏文字层级过多。 */
+.support-intro { margin-bottom: 10px; }
+.support-intro-note { font-size: 12px; line-height: 18px; color: #7A6C60; }
 
 /* 分段控件与收藏、评价、券页保持一致：米色轨道，选中项白底橙字。 */
 .support-segment { display: flex; flex-direction: row; margin-bottom: 10px; padding: 4px; border-radius: 14px; background-color: #F3E8DE; }
