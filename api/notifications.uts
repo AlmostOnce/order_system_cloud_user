@@ -7,6 +7,33 @@ export type NotificationPreference = { category: string, label: string, descript
 export function fetchNotifications(cursor: string): Promise<HttpResult> {
     return httpGet('/notifications?limit=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : ''), true)
 }
+export type NotificationConversation = { conversationId: string, conversationType: string, title: string, preview: string, latestAt: string, unreadCount: number }
+/** 当前用户的系统通知会话；会话是否存在由后端根据历史通知决定，不在前端硬编码。 */
+export function fetchNotificationConversations(): Promise<HttpResult> { return httpGet('/notifications/conversations', true) }
+/** 校验并解析系统会话列表；结构异常返回 null，由页面保留原状态并提示重试。 */
+export function parseNotificationConversations(result: HttpResult): Array<NotificationConversation> | null {
+    if (!result.ok || result.data == null) return null
+    const rows = jsonArray(result.data, 'data')
+    if (rows == null) return null
+    const items: Array<NotificationConversation> = []
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i]
+        if (row == null || typeof row != 'object' || Array.isArray(row)) return null
+        const obj = row as UTSJSONObject
+        const id = jsonString(obj, 'conversationId') ?? ''
+        // 会话标识是点击跳转与列表去重的必要字段，缺失时整页视为异常。
+        if (id.length == 0) return null
+        items.push({
+            conversationId: id,
+            conversationType: jsonString(obj, 'conversationType') ?? '',
+            title: jsonString(obj, 'title') ?? '',
+            preview: jsonString(obj, 'preview') ?? '',
+            latestAt: jsonString(obj, 'latestAt') ?? '',
+            unreadCount: jsonNumber(obj, 'unreadCount') ?? 0
+        })
+    }
+    return items
+}
 export function fetchUnreadNotificationCount(): Promise<HttpResult> { return httpGet('/notifications/unread-count', true) }
 /** 读取当前账号的通知分类开关；未保存过的分类由服务端按默认开启返回。 */
 export function fetchNotificationPreferences(): Promise<HttpResult> { return httpGet('/notifications/preferences', true) }

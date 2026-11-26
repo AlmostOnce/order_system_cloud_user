@@ -20,20 +20,21 @@
 					<button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="load">重新加载</button>
 				</view>
 
-				<view v-else class="account-card vapor-account-secondary--account-card">
-					<text class="account-heading">接收哪些提醒</text>
-					<text class="account-note">关闭后仍可在消息中心查看记录，只是不再实时提示、不再计入未读红点。账号安全类邮件不经过这里，始终发送。</text>
-					<view v-for="item in items" :key="item.category" class="pref-row" @click="toggle(item)">
-						<view class="pref-copy">
-							<text class="pref-label">{{ item.label }}</text>
-							<text class="pref-desc">{{ item.description }}</text>
-							<text v-if="saving == item.category" class="pref-saving">正在保存…</text>
-						</view>
-						<view class="pref-toggle" :class="item.enabled ? 'pref-toggle-on' : 'pref-toggle-off'">
-							<view class="pref-knob"></view>
+				<view v-else>
+					<text class="pref-intro">关闭后仍可在消息中心查看记录，不再实时提示，也不计入未读红点。</text>
+					<view class="account-card vapor-account-secondary--account-card">
+						<view v-for="(item, index) in items" :key="item.category" class="pref-row" :class="index > 0 ? 'pref-row-divided' : ''" @click="toggle(item)">
+							<view class="pref-copy">
+								<text class="pref-label">{{ item.label }}</text>
+								<text class="pref-desc">{{ item.description }}</text>
+								<text v-if="saving == item.category" class="pref-saving">正在保存…</text>
+							</view>
+							<view class="pref-toggle" :class="item.enabled ? 'pref-toggle-on' : 'pref-toggle-off'">
+								<view class="pref-knob"></view>
+							</view>
 						</view>
 					</view>
-					<text class="pref-footnote">设置会立即生效，并在当前账号的所有设备上保持一致。</text>
+					<text class="pref-footnote">设置立即生效，并同步到当前账号的所有设备。</text>
 				</view>
 			</view>
 		</scroll-view>
@@ -131,7 +132,11 @@ onPageShow(() => {
 
 <style>
 .account-page { background-color: #FDF6F0; }
+/* 说明从卡片内移到卡片外，卡片只保留开关列表，避免标题、说明、列表三层文字挤在一起。 */
+.pref-intro { padding-left: 4px; padding-right: 4px; padding-bottom: 10px; font-size: 12px; line-height: 18px; color: #7A6C60; }
 .pref-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding-top: 14px; padding-bottom: 14px; }
+/* 行与行之间用细分割线，替代原先靠文字间距区分设置项。 */
+.pref-row-divided { border-top-width: 1px; border-top-style: solid; border-top-color: #F0E5DB; }
 .pref-copy { flex: 1; min-width: 0; margin-right: 12px; }
 .pref-label { font-size: 15px; line-height: 22px; font-weight: bold; color: #211C18; }
 .pref-desc { margin-top: 3px; font-size: 12px; line-height: 18px; color: #7A6C60; }
@@ -140,5 +145,5 @@ onPageShow(() => {
 .pref-toggle-on { background-color: #E4572E; justify-content: flex-end; }
 .pref-toggle-off { background-color: #E3D8CE; justify-content: flex-start; }
 .pref-knob { width: 22px; height: 22px; border-radius: 11px; background-color: #FFFFFF; }
-.pref-footnote { margin-top: 12px; font-size: 11px; line-height: 17px; color: #A2968B; }
+.pref-footnote { margin-top: 12px; padding-left: 4px; padding-right: 4px; font-size: 11px; line-height: 17px; color: #A2968B; }
 </style>

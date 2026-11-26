@@ -7,25 +7,30 @@
             </view>
             <text class="account-title">消息通知</text>
             <view class="notification-nav-action" @click="openPreferences">
-                <text class="notification-nav-action-text">设置</text>
+                <image class="notification-nav-icon" src="/static/notifications/settings.svg" mode="aspectFit"></image>
             </view></view>
         <scroll-view class="account-scroll" direction="vertical" :refresher-enabled="refreshing || !loading" :refresher-triggered="refreshing" refresher-background="#FDF6F0" refresher-default-style="none" :refresher-threshold="72" @refresherrefresh="refreshPage" @scrolltolower="loadMoreChats">
             <view class="account-content conversation-list">
-                <view class="conversation-entry" hover-class="conversation-entry-pressed" @click="openOrders">
+                <view v-for="conversation in systemConversations" :key="conversation.conversationId" class="conversation-entry" hover-class="conversation-entry-pressed" @click="openSystemConversation(conversation)">
                     <image class="conversation-avatar" src="/static/notifications/order-center.svg" mode="aspectFit"></image>
                     <view class="conversation-copy">
-                        <text class="conversation-name" :max-lines="1">订单中心</text>
-                        <text class="conversation-preview" :max-lines="1">{{ preview }}</text>
+                        <text class="conversation-name" :max-lines="1">{{ conversation.title }}</text>
+                        <text class="conversation-preview" :max-lines="1">{{ conversation.preview.length > 0 ? conversation.preview : '暂无通知' }}</text>
                     </view>
                     <view class="conversation-meta">
-                        <text v-if="latest != null" class="conversation-time">{{ latestTime }}</text>
-                        <view v-if="unreadCount > 0" class="conversation-badge"><text class="conversation-badge-text">{{ unreadCount > 99 ? '99+' : unreadCount }}</text></view>
+                        <text v-if="conversation.latestAt.length > 0" class="conversation-time">{{ conversationTime(conversation.latestAt) }}</text>
+                        <view v-if="conversation.unreadCount > 0" class="conversation-badge"><text class="conversation-badge-text">{{ conversation.unreadCount > 99 ? '99+' : conversation.unreadCount }}</text></view>
                     </view>
                 </view>
                 <view v-for="chat in chats" :key="chat.conversationUuid" class="conversation-entry" hover-class="conversation-entry-pressed" @click="openChat(chat.conversationUuid)">
                     <business-image class="conversation-avatar" src="" kind="window" :preview="false"></business-image>
                     <view class="conversation-copy"><text class="conversation-name" :max-lines="1">{{ chat.windowName }}</text><text class="conversation-preview" :max-lines="1">{{ chat.preview.length > 0 ? chat.preview : '暂无消息' }}</text><text class="conversation-time" :max-lines="1">订单 {{ chat.orderNo }}</text></view>
                     <view class="conversation-meta"><text class="conversation-time">{{ chat.activityAt.substring(5,16).replace('T', ' ') }}</text><view v-if="chat.unreadCount > 0" class="conversation-badge"><text class="conversation-badge-text">{{ chat.unreadCount > 99 ? '99+' : chat.unreadCount }}</text></view></view>
+                </view>
+                <!-- 没有可展示的会话时不保留空会话，统一显示一页空态。 -->
+                <view v-if="showEmpty" class="account-card conversation-empty">
+                    <text class="account-heading">暂无消息</text>
+                    <text class="account-note">订单状态变化和商家回复会出现在这里。</text>
                 </view>
                 <text v-if="chatLoading" class="conversation-error">正在获取商家会话…</text>
                 <text v-if="chatError.length > 0" class="conversation-error">{{ chatError }}</text>
@@ -43,23 +48,16 @@ import { reactive, toRefs, computed } from 'vue'
 import BusinessImage from '../../components/business-image/business-image.uvue'
 import { ChatConversation, fetchChatConversations, parseChatConversations } from '../../api/chat.uts'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue'
-import { NotificationItem, fetchNotifications, parseNotificationPage } from '../../api/notifications.uts'
-import { notificationState, startNotificationSession, subscribeNotifications, unsubscribeNotifications, subscribeChat, unsubscribeChat, refreshNotificationCount } from '../../store/notifications.uts'
+import { NotificationConversation, fetchNotificationConversations, parseNotificationConversations } from '../../api/notifications.uts'
+import { startNotificationSession, subscribeNotifications, unsubscribeNotifications, subscribeChat, unsubscribeChat, refreshNotificationCount } from '../../store/notifications.uts'
 import { currentUser } from '../../store/auth.uts'
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts'
 import { accountDate, backToAccount } from '../../common/account.uts'
 
-const state = reactive({ chats: [] as Array<ChatConversation>, chatCursor: '', chatMore: false, chatLoading: false, chatError: '', statusBarHeight: 0, userUuid: '', version: 0, loading: false, loaded: false, refreshing: false, currentRefreshTime: '', errorText: '', latest: null as NotificationItem | null })
-const { chats, chatLoading, chatError, statusBarHeight, loading, refreshing, currentRefreshTime, errorText, latest } = toRefs(state)
-const unreadCount = computed((): number => notificationState.unreadCount)
-const preview = computed((): string => {
-    const item = state.latest
-    return item != null ? item.content : (state.loading ? '正在获取最新通知…' : (state.loaded ? '暂无订单通知' : '订单状态更新会显示在这里'))
-})
-const latestTime = computed((): string => {
-    const item = state.latest
-    return item == null ? '' : accountDate(item.createdAt).substring(5, 16)
-})
+const state = reactive({ chats: [] as Array<ChatConversation>, systemConversations: [] as Array<NotificationConversation>, chatCursor: '', chatMore: false, chatLoading: false, chatError: '', statusBarHeight: 0, userUuid: '', version: 0, loading: false, refreshing: false, currentRefreshTime: '', errorText: '' })
+const { chats, systemConversations, chatLoading, chatError, statusBarHeight, loading, refreshing, currentRefreshTime, errorText } = toRefs(state)
+/** 所有会话都为空且没有错误时展示统一空态；会话本身由后端接口决定是否出现。 */
+const showEmpty = computed((): boolean => !state.loading && !state.chatLoading && state.systemConversations.length == 0 && state.chats.length == 0 && state.errorText.length == 0 && state.chatError.length == 0)
 let visible = false
 let pending = false
 let chatQueued = false
@@ -68,12 +66,11 @@ async function load(): Promise<void> {
     state.loading = true; state.errorText = ''
     const version = state.version
     try {
-        const result = await fetchNotifications('')
+        const result = await fetchNotificationConversations()
         if (version != state.version || currentUser()?.userUuid != state.userUuid) return
-        const page = parseNotificationPage(result)
-        if (page == null) { state.errorText = result.message.length > 0 ? result.message : '消息暂时不可用，请下拉重试'; return }
-        state.latest = page.items.length > 0 ? page.items[0] : null
-        state.loaded = true
+        const conversations = parseNotificationConversations(result)
+        if (conversations == null) { state.errorText = result.message.length > 0 ? result.message : '消息暂时不可用，请下拉重试'; return }
+        state.systemConversations = conversations
     } finally {
         if (version == state.version) {
             state.loading = false
@@ -109,6 +106,15 @@ function chatsChanged(): void { if (visible) loadChats(true) }
 function openChat(uuid: string): void { uni.navigateTo({ url: '/pages/notifications/chat?conversationUuid=' + uuid }) }
 function changed(): void { if (visible) load() }
 function openOrders(): void { uni.navigateTo({ url: '/pages/notifications/orders' }) }
+/** 系统会话目前只有订单中心，点击进入订单通知时间线；其它类型暂不跳转。 */
+function openSystemConversation(conversation: NotificationConversation): void {
+    if (conversation.conversationType == 'SYSTEM') openOrders()
+}
+/** 会话时间与通知列表口径一致，只显示 MM-dd HH:mm；时间无效时返回空串避免显示乱码。 */
+function conversationTime(value: string): string {
+    const label = accountDate(value)
+    return label.length >= 16 ? label.substring(5, 16) : ''
+}
 /** 打开通知设置页；返回时 onPageShow 会重新拉取列表，角标由设置页保存后立即重算。 */
 function openPreferences(): void { uni.navigateTo({ url: '/pages/notifications/preferences' }) }
 /** 返回上一页；消息通知现在作为「我的」下的二级页，必须有可见返回入口。 */
@@ -117,7 +123,7 @@ onPageShow(() => {
     state.statusBarHeight = uni.getWindowInfo().statusBarHeight
     const user = currentUser()
     if (user == null) { uni.reLaunch({ url: '/pages/login/login' }); return }
-    if (user.userUuid != state.userUuid) { state.version++; state.userUuid = user.userUuid; state.chats = []; state.chatCursor = ''; state.chatMore = false; state.chatLoading = false; state.latest = null; state.loaded = false; state.loading = false; state.errorText = '' }
+    if (user.userUuid != state.userUuid) { state.version++; state.userUuid = user.userUuid; state.chats = []; state.systemConversations = []; state.chatCursor = ''; state.chatMore = false; state.chatLoading = false; state.loading = false; state.errorText = '' }
     visible = true; subscribeNotifications(changed); subscribeChat(chatsChanged); startNotificationSession(); load(); loadChats(true)
 })
 onPageHide(() => { visible = false; pending = false; chatQueued = false; unsubscribeNotifications(changed); unsubscribeChat(chatsChanged) })
@@ -139,8 +145,11 @@ onUnload(() => { visible = false; state.version++; unsubscribeNotifications(chan
 .conversation-badge { min-width: 18px; height: 18px; padding: 0 5px; align-items: center; justify-content: center; border-radius: 10px; background-color: #C2410C; }
 .conversation-badge-text { color: #FFFFFF; font-size: 10px; line-height: 18px; }
 .conversation-error { padding: 14px; color: #B73920; font-size: 12px; line-height: 20px; }
+/* 无会话时的统一空态，沿用账户二级页的白卡片层级。 */
+.conversation-empty { padding: 28px 20px; }
 .notification-nav-action { display: flex; flex-shrink: 0; min-height: 44px; margin-left: auto; padding: 0 4px 0 12px; align-items: center; justify-content: center; }
-.notification-nav-action-text { font-size: 13px; line-height: 20px; font-weight: bold; color: #C2410C; }
+/* 设置入口使用齿轮图标，避免导航栏出现第二种文字操作，和返回箭头形成对称的图标习惯。 */
+.notification-nav-icon { width: 21px; height: 21px; }
 /* #ifdef WEB */
 .account-page .conversation-entry { flex-direction: row; }
 .account-page .conversation-name, .account-page .conversation-preview { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
