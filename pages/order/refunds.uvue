@@ -141,7 +141,7 @@ async function confirmAction(): Promise<void> {
 }
 function refreshPage() {
     if (state.refreshing || state.submitting || state.loading || state.loadingMore) return
-    state.refreshing = true; state.currentRefreshTime = refreshTimeLabel(); const start = Date.now()
+    state.refreshing = true; state.currentRefreshTime = refreshTimeLabel(Date.now()); const start = Date.now()
     load().finally(() => { finishPullRefresh(start, state.loadError.length == 0, (_time: string) => { state.refreshing = false }) })
 }
 onLoad((options: OnLoadOptions) => { state.orderId = Number(options['orderId'] ?? '0') })
