@@ -1,6 +1,6 @@
 const fs=require('node:fs'),assert=require('node:assert/strict');
 const {loadSetup}=require('./setup-harness.cjs');
-let owner='student-a',requests=0,fail=false,windowFail=false,announcement=null;
+let owner='student-a',requests=0,fail=false,windowFail=false,announcement=null,claimable=[],claimed=0;
 const storage={};
 global.uni={getWindowInfo:()=>({statusBarHeight:24}),reLaunch(){},
  getStorageSync:(key)=>storage[key],setStorageSync:(key,value)=>{storage[key]=value},removeStorageSync:(key)=>{delete storage[key]},
@@ -19,11 +19,24 @@ const create=()=>loadSetup(source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1],
   fetchHomeAnnouncement:async()=>({ok:true,message:'',data:announcement})
  };
  if(p.includes('api/comments'))return{fetchCardRatings:async()=>[]};
+ // 领券弹层依赖优惠券接口与轻提示，补齐最小桩以覆盖“有券才弹、只弹一次”的行为。
+ if(p.includes('common/feedback'))return{toast(){}};
+ if(p.includes('api/coupons'))return{
+  fetchClaimableCoupons:async()=>({ok:true,message:'',coupons:claimable}),
+  claimCoupon:async(id)=>{claimed++;return{ok:true,statusCode:200,data:null}},
+  isClaimResponseValid:()=>true
+ };
  return{};
 }).create();
 const tick=()=>new Promise(r=>setImmediate(r));
 (async()=>{
+ claimable=[{templateId:7,userCouponId:0,title:'新客券',minSpend:10,discountAmount:5,scopeType:'CAMPUS',windowIds:[],claimStartAt:'',claimEndAt:'',validFrom:'2026-11-01',validUntil:'2026-12-01',totalQuantity:0,remainingQuantity:10,status:'CLAIMABLE'}];
  const vm=create();vm.$hooks.onPageShow();vm.$hooks.onPageShow();await tick();assert.equal(requests,2,'first visit loads once, including while pending');
+ assert.equal(vm.couponDialogVisible,true,'claimable coupons open the sheet on the first home visit');
+ await vm.claimAllCoupons();await new Promise(r=>setTimeout(r,200));
+ assert.equal(claimed,1,'one-tap claim submits every coupon once');
+ assert.equal(vm.couponDialogVisible,false,'sheet closes after claiming');
+ vm.$hooks.onPageShow();await tick();assert.equal(vm.couponDialogVisible,false,'coupon sheet does not reopen for the same account');
  // 首次就绪及每次返回都重播右上角图形，离页后不允许迟到定时器重新点亮。
  vm.$hooks.onReady();await new Promise(r=>setTimeout(r,90));assert.equal(vm.heroShapesEntered,true);
  vm.$hooks.onPageHide();assert.equal(vm.heroShapesEntered,false);

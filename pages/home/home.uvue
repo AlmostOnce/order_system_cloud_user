@@ -221,6 +221,37 @@
 				<text class="announcement-detail-content">{{ announcementContent }}</text>
 			</scroll-view>
 		</view>
+		<!-- 领券弹层：进入首页检测到可领取优惠券时弹出，支持一次领取当前全部券。 -->
+		<view
+			v-if="couponDialogVisible"
+			class="mask"
+			:class="couponDialogReady ? '' : 'mask-pre'"
+			@click="closeCouponDialog"
+		></view>
+		<view
+			v-if="couponDialogVisible"
+			class="sheet"
+			:class="couponDialogReady ? '' : 'sheet-pre'"
+		>
+			<text class="sheet-title">可领取优惠券</text>
+			<scroll-view class="coupon-sheet-list" direction="vertical">
+				<view v-for="item in couponItems" :key="item.templateId" class="coupon-sheet-item">
+					<view class="coupon-sheet-amount">
+						<text class="coupon-sheet-value">¥{{ item.discountAmount.toFixed(0) }}</text>
+						<text class="coupon-sheet-threshold">满 {{ item.minSpend.toFixed(0) }} 可用</text>
+					</view>
+					<view class="coupon-sheet-copy">
+						<text class="coupon-sheet-name" :max-lines="1">{{ item.title }}</text>
+						<text class="coupon-sheet-scope">{{ item.scopeType == 'CAMPUS' ? '全校窗口可用' : '指定窗口可用' }}</text>
+					</view>
+				</view>
+			</scroll-view>
+			<text v-if="couponMessage.length > 0" class="coupon-sheet-message">{{ couponMessage }}</text>
+			<button class="coupon-sheet-button coupon-sheet-button-text button-text button-text-50" :disabled="couponClaiming" @click="claimAllCoupons">{{ couponClaiming ? '正在领取…' : '一键领取' }}</button>
+			<view class="coupon-sheet-link" @click="closeCouponDialog">
+				<text class="coupon-sheet-link-text">稍后再说</text>
+			</view>
+		</view>
 	</view>
 </template>
 
@@ -237,6 +268,8 @@ import { fetchHomeRecommendations, HomeRecommendationItem, HomeRecommendationRes
 // 导入商品查询与结果类型：档口列表、餐厅列表及其返回结构。
 import { listActiveWindows, listActiveRestaurants, WindowItem, WindowListResult, RestaurantItem, RestaurantListResult, fetchHomeAnnouncement, HomeAnnouncementResult } from '../../api/product.uts';
 import { CardRating, fetchCardRatings } from '../../api/comments.uts';
+import { CustomerCoupon, CustomerCouponListResult, fetchClaimableCoupons, claimCoupon, isClaimResponseValid } from '../../api/coupons.uts';
+import { toast } from '../../common/feedback.uts';
 import { fetchMonthlyWindowSales, MonthlyWindowSalesItem } from '../../api/statistics.uts';
 /** 表示「全部餐厅」的哨兵值，与任何真实餐厅 ID 都不会冲突。 */
 const ALL_RESTAURANTS: number = 0;
@@ -258,6 +291,11 @@ let recommendationSessionVersion = -1;
 let announcementRequestVersion = 0;
 let announcementOwner = '';
 let announcementSessionVersion = -1;
+/** 领券提示按账号记录：同一次运行内每个账号最多自动弹出一次，避免返回首页反复打扰。 */
+let couponPromptedOwner = '';
+/** 关闭动画进行中标记：阻止打开时的挂载定时器在关闭后把面板重新点亮。 */
+let couponClosing = false;
+let couponRequestVersion = 0;
 const initialRecommendations: Array<HomeRecommendationItem> = [];
 // 餐厅列表的初始空数组。
 const initialEmptyRestaurants: Array<RestaurantItem> = [];
@@ -308,10 +346,16 @@ const state = reactive({ refreshing: false, currentRefreshTime: '',
     announcementVisible: false,
     /** 公告详情弹层是否已挂载与是否进入终态。 */
     announcementSheetVisible: false,
-    announcementSheetReady: false })
+    announcementSheetReady: false,
+    /** 可领取优惠券弹层；有券且当前账号本次运行未提示过时展示。 */
+    couponDialogVisible: false,
+    couponDialogReady: false,
+    couponItems: [] as Array<CustomerCoupon>,
+    couponClaiming: false,
+    couponMessage: '' })
 
 // 首页模板直接读取推荐模式与筛选结果，因此一并暴露为响应式引用，避免运行时找不到变量。
-const { refreshing, currentRefreshTime, statusBarHeight, roleCode, recommendationItems, recommendationLoading, recommendationError, recommendationMode, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, heroShapesEntered, listReady, pickerVisible, pickerReady, announcementTitle, announcementContent, announcementPublishedAt, announcementVisible, announcementSheetVisible, announcementSheetReady } = toRefs(state)
+const { refreshing, currentRefreshTime, statusBarHeight, roleCode, recommendationItems, recommendationLoading, recommendationError, recommendationMode, windows, windowRatings, visibleWindows, restaurants, selectedRestaurantId, selectedRestaurantName, loading, loadError, entered, heroShapesEntered, listReady, pickerVisible, pickerReady, announcementTitle, announcementContent, announcementPublishedAt, announcementVisible, announcementSheetVisible, announcementSheetReady, couponDialogVisible, couponDialogReady, couponItems, couponClaiming, couponMessage } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.loading || state.pickerVisible || state.roleCode != 'CUSTOMER')
@@ -444,8 +488,12 @@ function loadProfile() {
             loadRecommendations();
             // 公告可能已在运营端更新或到期，返回首页时重新读取一次。
             loadAnnouncement();
+            // 同一账号本次运行只自动提示一次领券，后续返回直接命中标记。
+            maybePromptCoupons();
             return;
         }
+        // 切换账号时清空上一位用户的领券弹层，避免把旧账号的券展示给新账号。
+        resetCouponPrompt();
         catalogOwner = profile.userUuid;
         windowRatingVersion++;
         state.windows = [];
@@ -460,10 +508,13 @@ function loadProfile() {
         loadRecommendations();
         loadCatalog();
         loadAnnouncement();
+        // 登录后首次进入首页时检测可领取券，有券才弹出领取面板。
+        maybePromptCoupons();
     }
     else {
         clearRecommendations();
         clearAnnouncement();
+        resetCouponPrompt();
         // 后端餐厅与档口查询接口只放行顾客角色，其它角色在此直接给出说明，
         // 省掉一次必然失败的请求，也不会在首页上摆一个错误提示。
         state.loading = false;
@@ -480,6 +531,91 @@ function clearRecommendations(): void {
     state.recommendationMode = '';
     state.recommendationLoading = false;
     state.recommendationError = '';
+}
+
+/**
+ * 检测当前账号是否有可领取优惠券，并在本次运行首次进入首页时弹出领取面板。
+ *
+ * <p>只对顾客角色执行；同一账号在一次运行中最多自动提示一次，用户关闭或领取后
+ * 不再重复弹出，切换账号后由新账号重新判断。接口失败静默处理，不影响首页目录。</p>
+ */
+function maybePromptCoupons(): void {
+    const profile = currentUser();
+    if (profile == null || profile.roleCode != 'CUSTOMER') return;
+    if (couponPromptedOwner == profile.userUuid) return;
+    couponPromptedOwner = profile.userUuid;
+    const version = ++couponRequestVersion;
+    fetchClaimableCoupons().then((result: CustomerCouponListResult) => {
+        // 晚到响应只在同一账号、同一请求版本内生效，切换账号后直接丢弃。
+        if (version != couponRequestVersion || currentUser()?.userUuid != profile.userUuid) return;
+        if (!result.ok || result.coupons == null || result.coupons.length == 0) return;
+        state.couponItems = result.coupons;
+        state.couponMessage = '';
+        couponClosing = false;
+        state.couponDialogReady = false;
+        state.couponDialogVisible = true;
+        // 先以初始位移挂载，再切到终态，复用首页底部面板的滑入过渡。
+        setTimeout(() => {
+            if (state.couponDialogVisible && !couponClosing) state.couponDialogReady = true;
+        }, 16);
+    }).catch(() => {
+        // 领券提示属于增强体验，失败时不打扰用户，也不自动重试。
+    });
+}
+
+/**
+ * 一键领取弹层中的全部券。
+ *
+ * <p>逐张串行提交，避免同一模板并发重复领取；409 表示该用户已经领过，
+ * 与领取成功等价，不当作失败。全部处理完成后关闭弹层并提示领取结果。</p>
+ */
+async function claimAllCoupons(): Promise<void> {
+    if (state.couponClaiming || state.couponItems.length == 0) return;
+    state.couponClaiming = true;
+    state.couponMessage = '';
+    const items = state.couponItems.slice();
+    let claimed = 0;
+    let failed = 0;
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        try {
+            const result = await claimCoupon(item.templateId);
+            if (result.ok && isClaimResponseValid(result, item.templateId)) claimed++;
+            else if (result.statusCode == 409) claimed++;
+            else failed++;
+        } catch (_error) {
+            failed++;
+        }
+    }
+    state.couponClaiming = false;
+    if (claimed > 0) toast('已领取 ' + claimed + ' 张优惠券');
+    else if (failed > 0) toast('领取失败，请稍后重试');
+    closeCouponDialog();
+}
+
+/** 关闭领券弹层；领取进行中禁止关闭，避免用户误以为未完成的请求已取消。 */
+function closeCouponDialog(): void {
+    if (!state.couponDialogVisible || state.couponClaiming) return;
+    couponClosing = true;
+    state.couponDialogReady = false;
+    setTimeout(() => {
+        if (couponClosing) {
+            couponClosing = false;
+            state.couponDialogVisible = false;
+        }
+    }, 180);
+}
+
+/** 切换账号或退出时清理领券弹层与提示标记，新账号进入首页会重新检测一次。 */
+function resetCouponPrompt(): void {
+    couponRequestVersion++;
+    couponPromptedOwner = '';
+    couponClosing = false;
+    state.couponItems = [];
+    state.couponDialogVisible = false;
+    state.couponDialogReady = false;
+    state.couponClaiming = false;
+    state.couponMessage = '';
 }
 
 /**
@@ -1529,6 +1665,93 @@ onReady(() => {
 		font-size: 13px;
 		font-weight: bold;
 		color: #211C18;
+	}
+
+	/* 领券弹层：券数量多时在面板内滚动，金额区固定宽度保证多张券对齐。 */
+	.coupon-sheet-list {
+		max-height: 300px;
+		margin-top: 6px;
+	}
+
+	.coupon-sheet-item {
+		flex-direction: row;
+		align-items: center;
+		padding-top: 10px;
+		padding-bottom: 10px;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-color: #F0E5DB;
+	}
+
+	.coupon-sheet-amount {
+		width: 86px;
+		align-items: center;
+	}
+
+	.coupon-sheet-value {
+		font-size: 22px;
+		line-height: 28px;
+		font-weight: bold;
+		color: #C2410C;
+	}
+
+	.coupon-sheet-threshold {
+		font-size: 10px;
+		line-height: 15px;
+		color: #A2968B;
+	}
+
+	.coupon-sheet-copy {
+		flex: 1;
+		min-width: 0;
+		margin-left: 10px;
+	}
+
+	.coupon-sheet-name {
+		font-size: 14px;
+		line-height: 20px;
+		font-weight: bold;
+		color: #211C18;
+	}
+
+	.coupon-sheet-scope {
+		margin-top: 2px;
+		font-size: 11px;
+		line-height: 16px;
+		color: #7A6C60;
+	}
+
+	.coupon-sheet-message {
+		margin-top: 8px;
+		font-size: 12px;
+		line-height: 18px;
+		color: #B73920;
+	}
+
+	.coupon-sheet-button {
+		margin-top: 12px;
+		border-radius: 25px;
+		background-color: #E4572E;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.coupon-sheet-button-text {
+		color: #FFFFFF;
+		font-size: 15px;
+		font-weight: bold;
+	}
+
+	.coupon-sheet-link {
+		margin-top: 4px;
+		padding-top: 10px;
+		padding-bottom: 10px;
+		align-items: center;
+	}
+
+	.coupon-sheet-link-text {
+		color: #7A6C60;
+		font-size: 13px;
 	}
 
 	.sheet-list {
