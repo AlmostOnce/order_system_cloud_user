@@ -102,7 +102,7 @@
 				<text
 					v-if="roleCode == 'CUSTOMER' && !loading && loadError.length == 0"
 					class="section-count"
-				>{{ visibleWindows.length }} 个在营业</text>
+				>{{ openWindowCount() }} 个营业中{{ restWindowCount() > 0 ? ' · ' + restWindowCount() + ' 个休息中' : '' }}</text>
 			</view>
 			<view v-if="loading" class="state" :class="entered ? '' : 'state-pre'">
 				<text class="state-text">正在加载档口列表…</text>
@@ -120,7 +120,7 @@
 			<view v-else class="stalls">
 				<view
 					class="stall"
-					:class="listReady ? '' : 'stall-pre'"
+					:class="(listReady ? '' : 'stall-pre') + (item.isOpen == 1 ? '' : ' stall-resting')"
 					:style="stallDelay(index)"
 					hover-class="stall-hover"
 					v-for="(item, index) in visibleWindows"
@@ -140,6 +140,10 @@
 								:class="stallRatingBadge(item) == '暂无评分' ? 'stall-rating-badge-none' : ''"
 							>
 								<text class="stall-rating-badge-text" :class="stallRatingBadge(item) == '暂无评分' ? 'stall-rating-badge-text-none' : ''">{{ stallRatingBadge(item) }}</text>
+							</view>
+							<!-- 休息中的档口仍可进入看菜单，但明确标注且不能下单 -->
+							<view v-if="item.isOpen != 1" class="stall-closed-badge">
+								<text class="stall-closed-badge-text">休息中</text>
 							</view>
 						</view>
 						<text class="stall-meta" :max-lines="1">{{ stallMetaLine(item) }}</text>
@@ -188,6 +192,9 @@
 							:class="selectedRestaurantId == item.restaurantId ? 'sheet-item-name-on' : ''"
 						>{{ item.restaurantName }}</text>
 						<text v-if="item.location.length > 0" class="sheet-item-loc">{{ item.location }}</text>
+						<!-- 餐厅公告与电话由管理端维护，选中餐厅前即可看到，不再只在后台可见 -->
+						<text v-if="item.notice.length > 0" class="sheet-item-notice" :max-lines="2">{{ item.notice }}</text>
+						<text v-if="item.phone.length > 0" class="sheet-item-phone" @click.stop="callRestaurant(item.phone)">电话 {{ item.phone }}</text>
 					</view>
 					<text v-if="selectedRestaurantId == item.restaurantId" class="sheet-item-tick">✓</text>
 				</view>
@@ -630,48 +637,75 @@ function openRecommendation(item: HomeRecommendationItem): void {
 }
 
 function loadCatalog(): Promise<void> {
-    // 进入加载态并清掉上一次的错误文案。
+    // 档口区单独进入加载态并清掉上一次的档口错误；餐厅失败不参与这个状态。
     state.loading = true;
     state.loadError = '';
     // 归零列表就绪标记，数据回来后再重播入场。
     state.listReady = false;
-    return listActiveRestaurants().then((restaurantResult: RestaurantListResult) => {
-        // 餐厅列表失败时直接落到错误态，不再发起档口请求。
-        if (!restaurantResult.ok) {
+
+    // 餐厅列表只服务于筛选面板，与档口列表互不依赖；任一失败都不能阻断另一个。
+    const restaurantsTask = listActiveRestaurants().then((restaurantResult: RestaurantListResult) => {
+        // 餐厅失败时保留上一次成功加载的列表；首次失败则选择器自然隐藏，档口照常展示。
+        if (!restaurantResult.ok) return;
+        state.restaurants = restaurantResult.items;
+        // 冷启动时恢复本账号上次选择的餐厅，再校验是否仍在最新列表中。
+        restoreRestaurantPreference();
+        // 选中的餐厅若已不在最新列表，回落到全部餐厅，避免筛出空档口且无法取消筛选。
+        let selectedExists = state.selectedRestaurantId == ALL_RESTAURANTS;
+        for (let i = 0; i < state.restaurants.length; i++) {
+            if (state.restaurants[i].restaurantId == state.selectedRestaurantId) {
+                selectedExists = true;
+                break;
+            }
+        }
+        if (!selectedExists) {
+            state.selectedRestaurantId = ALL_RESTAURANTS;
+            state.selectedRestaurantName = ALL_RESTAURANTS_NAME;
+            // 偏好指向的餐厅已失效，连同本地记录一起清理，下次不再尝试恢复。
+            const preferenceKey = restaurantPreferenceKey();
+            if (preferenceKey.length > 0) uni.removeStorageSync(preferenceKey);
+        }
+        // 餐厅可能晚于档口返回，筛选数据变化后立即重算，不必等档口再次加载。
+        buildVisibleWindows();
+    }).catch(() => {
+        // 网络异常同样只影响筛选面板，不改写档口错误或加载状态。
+    });
+
+    // 档口失败只把档口区切到错误态，不影响餐厅面板、公告与推荐。
+    const windowsTask = listActiveWindows().then((windowResult: WindowListResult) => {
+        // 档口列表失败时落到档口区错误态，并结束档口区加载态。
+        if (!windowResult.ok) {
+            state.loadError = windowResult.message;
             state.loading = false;
-            state.loadError = restaurantResult.message;
             return;
         }
-        // 餐厅数据一次性写入，供餐厅选择面板渲染。
-        state.restaurants = restaurantResult.items;
-        return listActiveWindows().then((windowResult: WindowListResult) => {
-            // 档口结果返回后统一结束加载态。
-            state.loading = false;
-            // 档口列表失败时落到错误态。
-            if (!windowResult.ok) {
-                state.loadError = windowResult.message;
-                return;
-            }
-            // 写入档口全量数据。
-            state.windows = windowResult.items;
-            const version = ++windowRatingVersion;
-            state.windowRatings = [];
-            // 窗口目录刷新后重新取月售；此时清空旧汇总，避免新旧目录混用旧销量。
-            state.monthlyWindowSales = [];
-            state.monthlyWindowSalesReady = false;
-            const ids: Array<number> = [];
-            for (let i = 0; i < state.windows.length; i++) if (state.windows[i].windowId > 0) ids.push(state.windows[i].windowId);
-            fetchCardRatings('windows', ids).then((ratings: Array<CardRating>) => { if (version == windowRatingVersion) state.windowRatings = ratings; });
-            // 月售是独立的可选展示数据：失败显示“--”，不改变档口列表的成功状态。
-            refreshMonthlyWindowSales();
-            // 按当前选中餐厅算出可见档口。
-            buildVisibleWindows();
-            // 列表渲染完成后再切到「已入场」，卡片才会依次浮入。
-            setTimeout(() => {
-                state.listReady = true;
-            }, 60);
-        });
+        // 写入档口全量数据。
+        state.windows = windowResult.items;
+        const version = ++windowRatingVersion;
+        state.windowRatings = [];
+        // 窗口目录刷新后重新取月售；此时清空旧汇总，避免新旧目录混用旧销量。
+        state.monthlyWindowSales = [];
+        state.monthlyWindowSalesReady = false;
+        const ids: Array<number> = [];
+        for (let i = 0; i < state.windows.length; i++) if (state.windows[i].windowId > 0) ids.push(state.windows[i].windowId);
+        fetchCardRatings('windows', ids).then((ratings: Array<CardRating>) => { if (version == windowRatingVersion) state.windowRatings = ratings; });
+        // 月售是独立的可选展示数据：失败显示“--”，不改变档口列表的成功状态。
+        refreshMonthlyWindowSales();
+        // 档口先于餐厅返回也立即展示；餐厅随后返回时再重算筛选，互不阻塞。
+        state.loading = false;
+        buildVisibleWindows();
+        // 列表渲染完成后再切到「已入场」，卡片才会依次浮入。
+        setTimeout(() => {
+            state.listReady = true;
+        }, 60);
+    }).catch(() => {
+        // 档口请求异常时明确提示档口区，而不是让 loading 永久停留。
+        state.loadError = '档口列表加载失败，请下拉重试';
+        state.loading = false;
     });
+
+    // 只等待两件事都结束以结束下拉刷新；展示与否各自独立，不在这里互相覆盖。
+    return Promise.all([restaurantsTask, windowsTask]).then(() => {});
 }
 
 /**
@@ -718,6 +752,20 @@ function buildVisibleWindows() {
     }
     // 写回筛选结果，驱动页面重新渲染。
     state.visibleWindows = filtered;
+}
+
+/** 当前筛选范围内营业中的档口数；休息档口仍展示并单独计数。 */
+function openWindowCount(): number {
+    let count = 0;
+    for (let i = 0; i < state.visibleWindows.length; i++) {
+        if (state.visibleWindows[i].isOpen == 1) count++;
+    }
+    return count;
+}
+
+/** 当前筛选范围内休息中的档口数。 */
+function restWindowCount(): number {
+    return state.visibleWindows.length - openWindowCount();
 }
 
 /**
@@ -779,6 +827,31 @@ function closePicker() {
     }, 240);
 }
 
+/** 本账号的餐厅偏好存储键；按账号隔离，换人后不会沿用别人的选择。 */
+function restaurantPreferenceKey(): string {
+    const user = currentUser();
+    return user == null ? '' : 'home_restaurant_' + user.userUuid;
+}
+
+/** 恢复上次选择的餐厅；列表里已不存在时清除存储，避免筛出空档口。 */
+function restoreRestaurantPreference(): void {
+    // 当前已有明确选择时不覆盖（例如返回首页或下拉刷新）。
+    if (state.selectedRestaurantId != ALL_RESTAURANTS) return;
+    const key = restaurantPreferenceKey();
+    if (key.length == 0) return;
+    const storedId = Number(uni.getStorageSync(key) ?? 0);
+    if (storedId <= 0) return;
+    for (let i = 0; i < state.restaurants.length; i++) {
+        if (state.restaurants[i].restaurantId == storedId) {
+            state.selectedRestaurantId = storedId;
+            state.selectedRestaurantName = state.restaurants[i].restaurantName;
+            return;
+        }
+    }
+    // 餐厅已停用或删除，清掉失效偏好，回到全部餐厅。
+    uni.removeStorageSync(key);
+}
+
 /**
  * 餐厅选择面板的点击处理。
  *
@@ -795,6 +868,12 @@ function selectRestaurant(restaurantId: number, restaurantName: string) {
     if (state.selectedRestaurantId == restaurantId) return;
     state.selectedRestaurantId = restaurantId;
     state.selectedRestaurantName = restaurantName;
+    // 记住本账号的选择：下次冷启动仍停留在同一食堂；选择全部时清除偏好。
+    const preferenceKey = restaurantPreferenceKey();
+    if (preferenceKey.length > 0) {
+        if (restaurantId == ALL_RESTAURANTS) uni.removeStorageSync(preferenceKey);
+        else uni.setStorageSync(preferenceKey, restaurantId);
+    }
     // 餐厅是推荐的硬范围，切换时立即清空旧卡片并废弃旧请求，不能短暂展示其他餐厅结果。
     clearRecommendations();
     loadRecommendations();
@@ -815,6 +894,12 @@ function openWindow(item: WindowItem) {
 function openSearch() {
     // 进入菜品搜索页，由搜索页负责关键词查询与分页。
     uni.navigateTo({ url: '/pages/search/search' });
+}
+
+/** 拨打餐厅电话；号码为空时不触发系统拨号。 */
+function callRestaurant(phone: string) {
+    if (phone.length == 0) return;
+    uni.makePhoneCall({ phoneNumber: phone });
 }
 
 /** 公告弹层展开/收起计时器；重复点击时先取消旧计时器，避免迟到的卸载关掉新弹层。 */
@@ -1368,6 +1453,22 @@ onReady(() => {
 	}
 	.stall-rating-badge-text-none { color: #A2968B; }
 
+	/* 休息中的档口仍可进入看菜单，用中性底色和徽标与营业档口区分 */
+	.stall-resting {
+		background-color: #FAF6F2;
+	}
+	.stall-closed-badge {
+		flex-shrink: 0;
+		margin-left: 8px;
+		padding-left: 6px;
+		padding-right: 6px;
+		padding-top: 2px;
+		padding-bottom: 2px;
+		border-radius: 6px;
+		background-color: #F0EAE3;
+	}
+	.stall-closed-badge-text { font-size: 10px; font-weight: bold; color: #8A7C6F; }
+
 	/* 月售、食堂与楼层合并为一行，超长时单行省略 */
 	.stall-meta {
 		margin-top: 5px;
@@ -1467,6 +1568,20 @@ onReady(() => {
 		margin-top: 2px;
 		font-size: 11px;
 		color: #A2968B;
+	}
+
+	/* 餐厅公告最多两行，电话可点击直接拨号 */
+	.sheet-item-notice {
+		margin-top: 2px;
+		font-size: 11px;
+		line-height: 15px;
+		color: #8A7C6F;
+	}
+
+	.sheet-item-phone {
+		margin-top: 2px;
+		font-size: 11px;
+		color: #E4572E;
 	}
 
 	.sheet-item-tick {

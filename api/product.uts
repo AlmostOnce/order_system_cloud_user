@@ -31,6 +31,8 @@ export type WindowItem = {
 	sortOrder: number
 	/** 档口位置。 */
 	location: string
+	/** 营业状态：1 营业，0 休息；旧服务未返回时按营业中兼容，避免整页误判。 */
+	isOpen: number
 }
 
 /**
@@ -102,7 +104,9 @@ export function listActiveWindows(): Promise<WindowListResult> {
 					description: jsonString(raw, 'description') ?? '',
 					sortOrder: jsonNumber(raw, 'sortOrder') ?? 0,
 					// 档口位置。
-					location: jsonString(raw, 'location') ?? ''
+					location: jsonString(raw, 'location') ?? '',
+					// 营业状态：缺失时按营业中处理，兼容旧服务与旧缓存。
+					isOpen: jsonNumber(raw, 'isOpen') ?? 1
 				}
 				// 收集到结果列表。
 				items.push(item)
@@ -127,6 +131,10 @@ export type RestaurantItem = {
 	restaurantName: string
 	/** 餐厅位置。 */
 	location: string
+	/** 餐厅公告/简介，未配置时为空串。 */
+	notice: string
+	/** 餐厅联系电话，未配置时为空串。 */
+	phone: string
 }
 
 /**
@@ -192,7 +200,11 @@ export function listActiveRestaurants(): Promise<RestaurantListResult> {
 					// 餐厅名称，展示在选择面板与区头标题。
 					restaurantName: jsonString(raw, 'restaurantName') ?? '',
 					// 餐厅位置，缺失时面板不展示位置行。
-					location: jsonString(raw, 'location') ?? ''
+					location: jsonString(raw, 'location') ?? '',
+					// 餐厅公告/简介，未配置时为空串，面板据此决定是否展示。
+					notice: jsonString(raw, 'notice') ?? '',
+					// 餐厅联系电话，未配置时为空串。
+					phone: jsonString(raw, 'phone') ?? ''
 				}
 				// 收集到结果列表。
 				items.push(item)
@@ -248,6 +260,64 @@ export function fetchProductImages(productIds: number[]): Promise<ProductImageLi
  */
 export function listProductImages(productIds: number[]): Promise<ProductImage[]> {
     return fetchProductImages(productIds).then((result: ProductImageListResult): ProductImage[] => result.items);
+}
+
+/**
+ * 单个档口展示摘要的查询结果，订单详情用它展示取餐地点。
+ *
+ * 把「请求失败」与「档口没维护地点」区分开：前者页面隐藏地点行并在下次进入重试，
+ * 后者是正常状态，同样隐藏地点行但不记为错误。
+ */
+export type WindowSummaryResult = {
+	/** 请求与响应结构是否有效。 */
+	ok: boolean
+	/** 失败时的提示，仅供页面内部判断；取餐地点缺失不向学生报错。 */
+	message: string
+	/** 取餐地点，档口未维护时为空串。 */
+	location: string
+}
+
+/**
+ * 查询单个档口的展示摘要，供订单详情展示取餐地点。
+ *
+ * 后端该接口不按启用状态过滤：订单产生后即使窗口停用或休息，历史订单仍应能回看取餐地点。
+ * 该查询与订单正文、取餐码、支付互相独立，失败只影响地点一行的展示。
+ *
+ * @param windowId 档口 ID
+ * @return 查询结果；档口不存在或响应异常时 ok 为 false
+ */
+export function fetchWindowSummary(windowId: number): Promise<WindowSummaryResult> {
+	return new Promise<WindowSummaryResult>((resolve) => {
+		// 本地先挡掉非法编号，避免无意义请求。
+		if (!Number.isInteger(windowId) || windowId <= 0) {
+			const invalid: WindowSummaryResult = { ok: false, message: '档口编号无效', location: '' }
+			resolve(invalid)
+			return
+		}
+		httpGet('/products/windows/' + windowId, true).then((result: HttpResult) => {
+			// 网络、401、403 等整体失败：交给页面隐藏地点行。
+			if (!result.ok) {
+				const failed: WindowSummaryResult = { ok: false, message: result.message, location: '' }
+				resolve(failed)
+				return
+			}
+			const envelope = result.data
+			if (envelope == null) {
+				const abnormal: WindowSummaryResult = { ok: false, message: '档口信息响应异常', location: '' }
+				resolve(abnormal)
+				return
+			}
+			// data 为 null 表示档口编号不存在，按失败处理。
+			const raw = jsonObject(envelope, 'data')
+			if (raw == null) {
+				const missing: WindowSummaryResult = { ok: false, message: '档口信息暂不可用', location: '' }
+				resolve(missing)
+				return
+			}
+			const success: WindowSummaryResult = { ok: true, message: '', location: jsonString(raw, 'location') ?? '' }
+			resolve(success)
+		})
+	})
 }
 
 /**
