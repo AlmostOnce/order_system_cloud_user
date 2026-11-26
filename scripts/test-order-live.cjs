@@ -56,9 +56,12 @@ function advance(){const batch=[...timers.values()];timers.clear();for(const fn 
     parseOrderPage:result=>result.data,
     fetchOrder:()=>detailResolve?new Promise(r=>detailResolve=r):Promise.resolve({ok:true,data:row()}),
     parseOrder:data=>data,orderPayload:result=>result.data,
-    fetchPickupCode:async()=>({ok:true,data:{pickupCode:'012345'}})
+    fetchPickupCode:async()=>({ok:true,data:{pickupCode:'012345'}}),
+    fetchPickupQr:async()=>({ok:true,data:{imageBase64:'AAAA'}})
    };
    if(p.includes('api/comments'))return{fetchOrderReviews:async()=>({}),commentPayload:()=>null};
+   // 详情页会独立加载取餐地点，补桩避免实时刷新链路因缺函数中断。
+   if(p.includes('api/product'))return{fetchWindowSummary:async()=>({ok:true,message:'',location:'一食堂一楼'})};
    if(p.includes('json'))return{jsonArray:(d,k)=>d[k],jsonString:(d,k)=>d[k]};
    if(p.includes('checkout'))return{readCheckout:()=>null,paymentPendingKey:()=>'',cleanupKey:()=>'',readStoredObject:()=>null};
    return{};

@@ -11,6 +11,8 @@ function createPage() {
         if (request.endsWith('/comments.uts')) return { fetchCardRatings: () => Promise.resolve([]) };
         if (request.endsWith('/cart.uts')) return { fetchCart: () => Promise.resolve({ ok: true, cart: { windows: [] } }) };
         if (request.endsWith('/stock.uts')) return { fetchWindowStocks: () => Promise.resolve({ ok: true, items: [] }) };
+        // 菜单加载会读取当月销量角标，缺少桩会让页面初始化中断。
+        if (request.endsWith('/statistics.uts')) return { fetchMonthlyProductSales: () => Promise.resolve({ ok: true, items: [] }) };
         return {};
     }).create();
     page.windowId = 1;

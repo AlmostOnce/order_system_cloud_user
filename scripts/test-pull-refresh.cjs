@@ -36,7 +36,12 @@ function page(name) {
     const script = source.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
     const parsed = ts.createSourceFile(name + '.ts', script, ts.ScriptTarget.Latest, true);
     assert.equal(parsed.parseDiagnostics.length, 0, name + ': syntax');
-    const setup = require('./setup-harness.cjs').loadSetup(script, request => request.endsWith('/refresh.uts') ? refreshModule.exports : {});
+    const setup = require('./setup-harness.cjs').loadSetup(script, request => {
+        if (request.endsWith('/refresh.uts')) return refreshModule.exports;
+        // 首页/我的等页面刷新时会顺带读取待评价数，补齐桩避免整页刷新因缺函数中断。
+        if (request.endsWith('/api/comments.uts')) return { fetchPendingReviewCount: () => Promise.resolve(0) };
+        return {};
+    });
     const vm = setup.create();
     return vm;
 }

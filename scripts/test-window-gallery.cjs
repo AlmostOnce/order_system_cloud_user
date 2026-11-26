@@ -26,6 +26,6 @@ vm.windowImageUrls=[];vm.previewWindowImage(0);assert.equal(preview,undefined);
 assert.ok(page.includes('<business-image v-else kind="window"'),'empty gallery must display only default image');
 assert.ok(page.includes('<swiper') && page.includes('<swiper-item') && page.includes('windowImageUrls.length == 1'));
 assert.ok(page.includes('kind="window"></business-image>'), 'a single shop photo previews via business-image, not a swiper');
-assert.ok(page.includes('@click="previewCurrentWindowImage"'));
+assert.ok(page.includes('@click.stop="previewWindowImage(index)"'), 'each slide opens the full gallery');
 assert.ok(!page.includes('autoplay="true"'),'manual sliding must not interrupt browsing');
 console.log('Window gallery passed: legacy fallback, explicit empty, five-image cap, deduplication, full-gallery preview and bounds.');

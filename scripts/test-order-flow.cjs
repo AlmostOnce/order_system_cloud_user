@@ -47,7 +47,7 @@ const orderData = { createdAt: new Date().toISOString(), expiresAt: new Date(Dat
     calls.length=0;
     const checkout = load('common/checkout.uts');
     const draft = { key: 'order-original', windowId: 2, windowName: '一食堂', remark: '少辣', items: [{ productId: 3, productName: '饭', quantity: 2, revision: 'rev-original', unitPrice: 9, lineAmount: 18 }] };
-    assert.deepEqual(checkout.orderBody(draft), { windowId: 2, remark: '少辣', items: [{ productId: 3, quantity: 2 }] });
+    assert.deepEqual(checkout.orderBody(draft), { windowId: 2, remark: '少辣', items: [{ productId: 3, quantity: 2, selectedOptionIds: undefined }] });
     assert.equal(checkout.cleanupBody(draft).items[0].revision, 'rev-original');
     assert.equal(api.parseOrder({ ...orderData, totalAmount: null }), null);
     assert.equal(api.parseOrder({ ...orderData, items: [null] }), null);

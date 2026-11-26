@@ -99,9 +99,11 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
         if (request.endsWith('/json.uts')) return { jsonNumber: (raw, key) => raw[key] ?? null };
         if (request.endsWith('/menu.uts')) return { fetchWindowMenu: () => Promise.resolve(menuFails
             ? { ok: false, message: '菜单不可用', menu: null }
-            : { ok: true, menu: { windowName: '窗口', imageUrl: '', location: '', description: '',
+            : { ok: true, menu: { windowName: '窗口', imageUrl: '', location: '', description: '', isOpen: 1,
                 categories: [{ categoryId: 11, categoryName: '米饭', products: [{ productId: 1, productName: '鸡肉饭', description: '香辣' }] }],
                 uncategorizedProducts: [{ productId: 7, productName: '汤', description: '鸡肉汤' }] } }) };
+        // 菜单加载会读取当月销量角标，缺少桩会让整页加载中断。
+        if (request.endsWith('/statistics.uts')) return { fetchMonthlyProductSales: () => Promise.resolve({ ok: true, items: [] }) };
         if (request.endsWith('/stock.uts')) return { fetchWindowStocks: () => Promise.resolve({ ok: true, items: [] }) };
         if (request.endsWith('/cart.uts')) return { fetchCart: () => Promise.resolve({ ok: true, cart: { windows: [] } }) };
         return {};
