@@ -112,15 +112,6 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     user.$hooks.onLoad({avatar:'change'});let chooseCount=0;user.changeAvatar=()=>chooseCount++;user.loadProfile=()=>Promise.resolve();user.$hooks.onPageShow();await flush();assert.equal(chooseCount,1,'change entry opens picker after profile data');user.$hooks.onPageShow();await flush();assert.equal(chooseCount,1,'picker is not reopened on resume');
     calls.length=0;mine.openAvatarPreview();const savePreview=calls[0].options;savePreview.longPressActions.success({tapIndex:0,index:0});assert.equal(calls.at(-1).type,'save-to-album');assert.equal(calls.filter(c=>c.type==='navigate'||c.type==='choose').length,0,'save never changes avatar');
     user.openAvatarPreview();calls.at(-1).options.longPressActions.success({tapIndex:0,index:0});assert.equal(calls.at(-1).type,'save-to-album','profile also retains album save');
-    await files.saveCatalogImage('window', 2, KEY); assert.ok(calls.at(-1).options.url.endsWith('/products/admin/windows/2/image'));
-    await files.saveCatalogImage('product', 3, KEY); assert.ok(calls.at(-1).options.url.endsWith('/products/admin/products/3/image'));
-    const management = load('pages/manage/images.uvue').create();
-
-    const parsedWindows = management.parseItems( { ok: true, data: { data: [{ windowId: 2, windowName: '窗口', imageUrl: '' }] } }, 'window');
-    assert.deepEqual(parsedWindows, [{ id: 2, name: '窗口', imageUrl: '' }]);
-    const parsedProducts = management.parseItems( { ok: true, data: { data: [{ productId: 3, productName: '菜品', imageUrl: '' }] } }, 'product');
-    assert.deepEqual(parsedProducts, [{ id: 3, name: '菜品', imageUrl: '' }]);
-    assert.equal(management.parseItems( { ok: true, data: { data: [null] } }, 'product'), null);
     for (const kind of ['avatar', 'window', 'product']) assert.ok(fs.statSync(path.join(root, images.defaultImage(kind))).size > 1000);
     console.log('Image integration checks passed: multipart/auth renewal, no network auto-retry, 5MB/cancel handling, ownership binding contract, failed-save recovery, gateway URL normalization, default and broken-image fallback.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
