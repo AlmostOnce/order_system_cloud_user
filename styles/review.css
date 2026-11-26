@@ -15,6 +15,14 @@
 .review-tag-label-selected { color: #C2410C; }
 .review-tag { margin: 0 8px 8px 0; padding: 4px 9px; border-radius: 6px; background-color: #FDF6F0; }
 .review-section-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+/* 匿名评价：只影响这一份评价的对外展示，勾选状态随提交内容一起保存。 */
+.review-anonymous { display: flex; flex-direction: row; align-items: center; margin-top: 4px; padding: 10px 12px; border-radius: 10px; background-color: #FDF6F0; }
+.review-anonymous-box { width: 20px; height: 20px; flex-shrink: 0; margin-right: 10px; border-width: 1px; border-style: solid; border-color: #D7C6B5; border-radius: 6px; background-color: #FFFFFF; align-items: center; justify-content: center; }
+.review-anonymous-box-on { border-color: #E4572E; background-color: #E4572E; }
+.review-anonymous-mark { font-size: 12px; line-height: 16px; color: #FFFFFF; }
+.review-anonymous-copy { flex: 1; min-width: 0; flex-direction: column; }
+.review-anonymous-title { font-size: 13px; line-height: 18px; color: #211C18; }
+.review-anonymous-hint { margin-top: 1px; font-size: 11px; line-height: 16px; color: #7A6C60; }
 .review-photos { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 12px; }
 .review-photo-cell { width: 88px; margin: 0 8px 10px 0; }
 .review-photo { width: 88px; height: 88px; border-radius: 10px; background-color: #FDF6F0; }
@@ -43,6 +51,7 @@
 /* #ifdef WEB */
 .review-intro, .review-author, .review-summary-copy, .review-empty { display: flex; flex-direction: column; }
 .account-page .review-stars, .account-page .review-tags, .account-page .review-photos, .account-page .review-section-row, .account-page .review-summary, .account-page .review-summary-number { flex-direction: row; }
+.account-page .review-anonymous, .account-page .review-anonymous-box { flex-direction: row; }
 .review-textarea { box-sizing: border-box;  height: 96px;  padding: 10px;  font-size: 14px;  line-height: 22px; }
 /* #endif */
 

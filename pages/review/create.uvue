@@ -29,6 +29,14 @@
                         <view class="review-tags">
                             <button v-for="tag in tagOptions" :key="tag" class="review-tag-button review-tag-label button-text button-text-44" :class="section.tags.includes(tag) ? 'review-tag-selected' : ''" :disabled="submitting || section.pending" @click="toggleTag(index, tag)">{{ tag }}</button>
                         </view>
+                        <!-- 匿名只影响该份评价的对外展示：头像回落默认图、昵称由服务端脱敏，不改变评分与正文。 -->
+                        <view class="review-anonymous" @click="toggleAnonymous(index)">
+                            <view class="review-anonymous-box" :class="section.anonymous ? 'review-anonymous-box-on' : ''"><text v-if="section.anonymous" class="review-anonymous-mark">✓</text></view>
+                            <view class="review-anonymous-copy">
+                                <text class="review-anonymous-title">匿名评价</text>
+                                <text class="review-anonymous-hint">头像显示默认图片，昵称只保留首字</text>
+                            </view>
+                        </view>
                         <view class="review-photos"><view v-for="(photo, photoIndex) in section.photos" :key="photo.fileKey" class="review-photo-cell"><image class="review-photo" :src="photoSource(photo.url)" mode="aspectFill" @click="previewPhoto(index, photoIndex)"></image>
                                 <button v-if="!section.pending" class="review-photo-remove review-remove-label button-text button-text-44" :disabled="submitting || imageBusy" @click="removePhoto(index, photoIndex)">移除</button>
                             </view>
@@ -68,22 +76,24 @@ import { PendingReview, commentPendingKey, newCommentKey, readPendingReview } fr
 import { uploadImage } from '../../api/files.uts'
 import { chooseLocalImage } from '../../common/image-picker.uts'
 import { imageSource } from '../../common/images.uts'
-import { jsonNumber, jsonString } from '../../common/json.uts'
+import { jsonNumber, jsonString, jsonBoolean } from '../../common/json.uts'
 
 type ReviewPhoto = { fileKey: string, url: string }
-type ReviewSection = { productId: number, name: string, selected: boolean, score: number, content: string, photos: Array<ReviewPhoto>, tags: Array<string>, pending: boolean, key: string, saved: Review | null }
+type ReviewSection = { productId: number, name: string, selected: boolean, score: number, content: string, photos: Array<ReviewPhoto>, tags: Array<string>, anonymous: boolean, pending: boolean, key: string, saved: Review | null }
 const initialSections: Array<ReviewSection> = []
 const state = reactive({ statusBarHeight: 0, orderId: 0, focusProductId: 0, userUuid: '', sections: initialSections, ready: false, loading: false, submitting: false, imageBusy: false, errorText: '', successText: '', refreshing: false, currentRefreshTime: '', tagOptions: ['味道好','分量足','出餐快','包装好','值得推荐'], scores: [1,2,3,4,5], scoreLabels: ['不满意','有待改进','还不错','很满意','非常满意'] })
 const { statusBarHeight, sections, ready, loading, submitting, imageBusy, errorText, successText, refreshing, currentRefreshTime, tagOptions, scores, scoreLabels } = toRefs(state)
 const hasUnreviewed = computed((): boolean => state.sections.some((section: ReviewSection): boolean => section.saved == null))
 function makeSection(productId: number, name: string, saved: Review | null): ReviewSection {
-    const section: ReviewSection = { productId: productId, name: name, selected: saved == null && productId == state.focusProductId, score: 0, content: '', photos: [], tags: [], pending: false, key: '', saved: saved }
+    const section: ReviewSection = { productId: productId, name: name, selected: saved == null && productId == state.focusProductId, score: 0, content: '', photos: [], tags: [], anonymous: false, pending: false, key: '', saved: saved }
     const storageKey = commentPendingKey(state.userUuid, state.orderId, productId)
     if (saved != null) { uni.removeStorageSync(storageKey); return section }
     const draft = readPendingReview(storageKey, state.orderId, productId)
     if (draft != null) {
         section.pending = true; section.selected = true; section.key = draft.key
         section.score = jsonNumber(draft.body, 'score') ?? 0; section.content = jsonString(draft.body, 'content') ?? ''; section.tags = strings(draft.body, 'tags') ?? []
+        // 待确认草稿沿用勾选状态，重试时不会把匿名评价悄悄改成实名。
+        section.anonymous = jsonBoolean(draft.body, 'anonymous') ?? false
         const keys = strings(draft.body, 'imageFileKeys') ?? []
         for (let i = 0; i < keys.length; i++) section.photos.push({ fileKey: keys[i], url: '/api/files/' + keys[i] + '/content' })
     }
@@ -124,6 +134,12 @@ function toggleTag(index: number, tag: string) {
     if (found >= 0) s.tags.splice(found, 1)
     else if (s.tags.length < 5) s.tags.push(tag)
 }
+/** 切换当前评价的匿名展示；提交中、图片处理中或已发布的评价不允许再改。 */
+function toggleAnonymous(index: number) {
+    const s = state.sections[index]
+    if (!state.ready || state.submitting || state.imageBusy || s.saved != null || s.pending) return
+    s.anonymous = !s.anonymous
+}
 function photoSource(url: string): string { return imageSource(url, 'product') }
 function previewPhoto(index: number, photoIndex: number) { const urls = state.sections[index].photos.map((p: ReviewPhoto): string => photoSource(p.url)); if (photoIndex >= 0 && photoIndex < urls.length) uni.previewImage({current: urls[photoIndex], urls: urls}) }
 function previewSaved(index: number, photoIndex: number) { const saved = state.sections[index].saved; if (saved == null) return; const urls = saved.images.map((url: string): string => photoSource(url)); if (photoIndex >= 0 && photoIndex < urls.length) uni.previewImage({current: urls[photoIndex], urls: urls}) }
@@ -159,7 +175,8 @@ async function submit(): Promise<void> {
             const s = selected[i]
             if (s.pending) continue
             const keys = s.photos.map((photo: ReviewPhoto): string => photo.fileKey)
-            const body: UTSJSONObject = s.productId > 0 ? { orderId: state.orderId, productId: s.productId, score: s.score, content: s.content.trim(), imageFileKeys: keys, tags: s.tags } : { orderId: state.orderId, score: s.score, content: s.content.trim(), imageFileKeys: keys, tags: s.tags }
+            // anonymous 随内容一起写入待确认草稿，服务端也把它纳入幂等摘要，重试不会改变展示方式。
+            const body: UTSJSONObject = s.productId > 0 ? { orderId: state.orderId, productId: s.productId, score: s.score, content: s.content.trim(), imageFileKeys: keys, tags: s.tags, anonymous: s.anonymous } : { orderId: state.orderId, score: s.score, content: s.content.trim(), imageFileKeys: keys, tags: s.tags, anonymous: s.anonymous }
             const draft: PendingReview = { key: newCommentKey(), body: body }
             try { uni.setStorageSync(commentPendingKey(state.userUuid, state.orderId, s.productId), JSON.stringify(draft)) }
             catch (_error) { toast('无法保存提交记录，请检查设备存储空间'); return }
