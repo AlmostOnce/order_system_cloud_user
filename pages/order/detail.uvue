@@ -22,6 +22,10 @@
                 <text class="pickup-code-label">取餐码</text>
                 <text v-if="pickupCode.length > 0" class="pickup-code-number">{{ pickupCode }}</text>
                 <text v-else class="account-note">{{ pickupLoading ? '正在获取取餐码…' : '取餐码暂不可用' }}</text>
+                <!-- 静态二维码内容就是上面的六位取餐码，窗口扫码枪扫出后与手工输入等价。 -->
+                <image v-if="pickupQr.length > 0" class="pickup-code-qr" :src="pickupQr" mode="aspectFit"></image>
+                <text v-else-if="pickupQrLoading" class="pickup-code-note">正在生成二维码…</text>
+                <text v-else-if="pickupQrError.length > 0" class="pickup-code-note">{{ pickupQrError }}</text>
                 <text class="pickup-code-note">{{ order!.status == '待取货' ? '到窗口向商家出示，核销成功后完成订单' : '制作完成后凭码取餐，请勿提前泄露' }}</text>
                     <text v-if="pickupError.length >0" class="account-error">
 {{ pickupError }}</text>
@@ -74,7 +78,7 @@ import { orderPaymentDeadline, orderPaymentTimeLabel } from '../../common/order-
 import { Review, fetchOrderReviews, parseOrderReviews, commentPayload } from '../../api/comments.uts'
 import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
-import { OrderLine, CustomerOrder, fetchOrder, fetchPickupCode, fetchOrderPayment, payOrder, cancelOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts';
+import { OrderLine, CustomerOrder, fetchOrder, fetchPickupCode, fetchPickupQr, fetchOrderPayment, payOrder, cancelOrder, cleanupOrderCart, orderPayload, parseOrder } from '../../api/order.uts';
 import { addToCart } from '../../api/cart.uts';
 import { fetchMyBalance, walletPayload } from '../../api/wallet.uts';
 import { HttpResult } from '../../common/http.uts';
@@ -85,14 +89,15 @@ import { backToAccount, accountDate } from '../../common/account.uts';
 
 let pickupPageVisible = false
 let pickupVersion = 0
+let pickupQrVersion = 0
 let orderLoadVersion = 0
 let stopLiveOrders: (() => void) | null = null
 function stopOrderUpdates() {
     if (stopLiveOrders != null) { stopLiveOrders!(); stopLiveOrders = null }
 }
-const state = reactive({ reordering: false, reorderMessage: '', contacting: false, paymentDeadlineKnown: false, paymentExpired: false, remainingPaymentText: '--:--', reviewStatusReady: false, orderReviewed: false, orderReviewComplete: false, pickupCode: '', pickupLoading: false, pickupError: '', refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
+const state = reactive({ reordering: false, reorderMessage: '', contacting: false, paymentDeadlineKnown: false, paymentExpired: false, remainingPaymentText: '--:--', reviewStatusReady: false, orderReviewed: false, orderReviewComplete: false, pickupCode: '', pickupLoading: false, pickupError: '', pickupQr: '', pickupQrLoading: false, pickupQrError: '', refreshing: false, currentRefreshTime: '', balanceLoading: false, cleanupLoading: false, statusBarHeight: 0, orderId: 0, userUuid: '', order: null as CustomerOrder | null, loading: false, paying: false, cancelling: false, cancelConfirm: false, errorText: '', balanceReady: false, balanceText: '--', payPasswordSet: false, payPassword: '', paymentExpanded: false, paymentReady: false, paymentSuccess: false, paymentUncertain: false, cleanupMessage: '' })
 
-const { reordering, reorderMessage, contacting, paymentDeadlineKnown, paymentExpired, remainingPaymentText, reviewStatusReady, orderReviewed, orderReviewComplete, pickupCode, pickupLoading, pickupError, refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
+const { reordering, reorderMessage, contacting, paymentDeadlineKnown, paymentExpired, remainingPaymentText, reviewStatusReady, orderReviewed, orderReviewComplete, pickupCode, pickupLoading, pickupError, pickupQr, pickupQrLoading, pickupQrError, refreshing, currentRefreshTime, balanceLoading, cleanupLoading, statusBarHeight, orderId, userUuid, order, loading, paying, cancelling, cancelConfirm, errorText, balanceReady, balanceText, payPasswordSet, payPassword, paymentExpanded, paymentReady, paymentSuccess, paymentUncertain, cleanupMessage } = toRefs(state)
 /** 已批准退款的份数不再履约，全部获批时隐藏旧取餐码，最终权限仍由后端核销条件保证。 */
 const canPickup = computed((): boolean => state.order != null && ['已支付', '制作中', '待取货'].includes(state.order!.status) && state.order!.items.some((item: OrderLine): boolean => item.fulfillableQuantity > 0))
 /**
@@ -343,7 +348,7 @@ function refresh(): Promise<void> {
             uni.removeStorageSync(paymentPendingKey(state.userUuid, state.orderId));
             state.loading = false;
             state.paymentReady = true;
-            return Promise.all([loadPickupCode(), loadReviewStatus()]).then(() => {});
+            return Promise.all([loadPickupCode(), loadPickupQr(), loadReviewStatus()]).then(() => {});
         }
         // 未发起过支付时只读取订单与余额，不查询尚不存在的支付单。
         if (!state.paymentUncertain && !state.paymentSuccess) {
@@ -382,6 +387,30 @@ function loadPickupCode(): Promise<void> {
         if (!result.ok || !/^[0-9]{6}$/.test(code)) { state.pickupError = result.message.length > 0 ? result.message : '取餐码获取失败，请下拉重试'; return; }
         state.pickupCode = code;
     }).finally(() => { if (version == pickupVersion) state.pickupLoading = false; });
+}
+
+function loadPickupQr(): Promise<void> {
+    // 二维码内容与数字取餐码一致，加载成功后不必随实时状态刷新重复请求，避免轮询放大流量；
+    // 首次请求未完成时直接复用进行中的任务，防止实时刷新与下拉刷新并发重复取图。
+    if (!pickupPageVisible || !canPickup.value || state.pickupQr.length > 0 || state.pickupQrLoading) return Promise.resolve();
+    const id = state.orderId;
+    const owner = state.userUuid;
+    const version = ++pickupQrVersion;
+    state.pickupQrLoading = true;
+    return fetchPickupQr(id).then((result: HttpResult) => {
+        // 与取餐码相同的失效条件：离页、换单或换账号后丢弃旧响应，防止把上一单的二维码渲染到当前订单。
+        if (!pickupPageVisible || version != pickupQrVersion || state.orderId != id || currentUser()?.userUuid != owner) return;
+        const data = orderPayload(result);
+        const base64 = data == null ? '' : (jsonString(data, 'imageBase64') ?? '');
+        if (!result.ok || base64.length == 0) {
+            // 二维码失败不影响数字取餐码展示，仅提示可继续用数字码取餐。
+            state.pickupQrError = '二维码加载失败，可出示数字取餐码';
+            return;
+        }
+        // uni-app x 各端 image 组件均支持 Data URL，避免把临时图片写入本地文件系统。
+        state.pickupQr = 'data:image/png;base64,' + base64;
+        state.pickupQrError = '';
+    }).finally(() => { if (version == pickupQrVersion) state.pickupQrLoading = false; });
 }
 
 function loadBalance(): Promise<void> {
@@ -507,6 +536,8 @@ onPageHide(() => {
     orderLoadVersion++; state.loading = false; state.balanceLoading = false;
     stopPaymentClock();
     pickupPageVisible = false; pickupVersion++; state.pickupCode = ""; state.pickupLoading = false;
+    // 二维码随取餐码一起失效；重新进入页面后按当前订单重新获取。
+    pickupQrVersion++; state.pickupQr = ""; state.pickupQrLoading = false; state.pickupQrError = "";
     if (state.paymentExpanded) cancelPaymentPassword();
     state.paymentExpanded = false;
     state.payPassword = '';
@@ -518,6 +549,7 @@ onUnload(() => {
     orderLoadVersion++; state.loading = false; state.balanceLoading = false;
     stopPaymentClock();
     pickupPageVisible = false; pickupVersion++; state.pickupCode = ""; state.pickupLoading = false;
+    pickupQrVersion++; state.pickupQr = ""; state.pickupQrLoading = false; state.pickupQrError = "";
     if (state.paymentExpanded) cancelPaymentPassword();
     state.paymentExpanded = false;
     state.payPassword = '';
@@ -530,5 +562,7 @@ onUnload(() => {
     .pickup-code-card { align-items: center; }
     .pickup-code-label { color: #7A6C60; font-size: 13px; line-height: 20px; }
     .pickup-code-number { color: #C2410C; font-size: 38px; line-height: 54px; letter-spacing: 7px; font-weight: bold; margin-top: 10px; }
+    /* 二维码按 168px 展示，源图 320px，保证高密度屏幕边缘清晰且扫码枪容易识读。 */
+    .pickup-code-qr { width: 168px; height: 168px; margin-top: 12px; border-radius: 12px; background-color: #FFFFFF; }
     .pickup-code-note { color: #8B7B6F; font-size: 12px; line-height: 20px; margin-top: 10px; text-align: center; }
 </style>

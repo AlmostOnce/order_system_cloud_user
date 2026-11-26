@@ -133,6 +133,8 @@ export function parseOrderPage(result: HttpResult): OrderPage | null {
 export function fetchOrder(id: number): Promise<HttpResult> { return httpGet('/orders/' + id, true) }
 /** 仅订单所属顾客可读取，取餐码不随普通订单查询返回。 */
 export function fetchPickupCode(id: number): Promise<HttpResult> { return httpGet('/orders/' + id + '/pickup-code', true) }
+/** 取餐码对应的静态二维码，内容仍是六位取餐码，窗口扫码枪扫出后可走现有核销流程。 */
+export function fetchPickupQr(id: number): Promise<HttpResult> { return httpGet('/orders/' + id + '/pickup-qrcode', true) }
 export function verifyOrderPickup(pickupCode: string): Promise<HttpResult> {
     const body: UTSJSONObject = { pickupCode: pickupCode }
     return httpPost('/orders/pickup/verify', body, true)
