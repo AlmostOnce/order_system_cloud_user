@@ -40,6 +40,14 @@
                         </view>
                     </view>
                 </view>
+                <!-- 待评价提醒只在确实存在缺失评价时出现；数量由评论服务统计，点击进入已完成订单继续评价。 -->
+                <view v-if="roleCode == 'CUSTOMER' && pendingReviewCount > 0" class="pending-review-banner" @click="openCompletedOrders">
+                    <view class="pending-review-banner-body">
+                        <text class="pending-review-banner-title">{{ pendingReviewCount > 99 ? '99+' : pendingReviewCount }} 笔订单待评价</text>
+                        <text class="pending-review-banner-note">完成后可继续评价店铺与菜品</text>
+                    </view>
+                    <text class="pending-review-banner-action">去评价</text>
+                </view>
                 <!-- 服务入口改为三列宫格：图标在上、标题在下，填充横向空间且不增加说明文案。 -->
                 <view v-if="roleCode == 'CUSTOMER'" class="entry-group service-group">
                     <view class="service-grid">
@@ -154,6 +162,7 @@ import RefreshHeader from '../../components/refresh-header/refresh-header.uvue';
 import { finishPullRefresh, refreshTimeLabel } from '../../common/refresh.uts';
 import { logout as doLogout, isLoggedIn, currentUser } from '../../store/auth.uts';
 import { fetchMyProfile, fetchMyBalance, walletPayload } from '../../api/wallet.uts';
+import { fetchPendingReviewCount, parsePendingReviewCount, commentPayload } from '../../api/comments.uts';
 import { HttpResult } from '../../common/http.uts';
 import { jsonString, jsonNumber, jsonBoolean } from '../../common/json.uts';
 import { accountRoleLabel } from '../../common/account.uts';
@@ -162,9 +171,9 @@ import { startNotificationSession, refreshNotificationCount } from '../../store/
 
 const state = reactive({ refreshing: false, currentRefreshTime: '', profileLoading: false, statusBarHeight: 0, username: '校园用户', roleName: '', roleCode: '', userUuid: '',
     email: '', avatarUrl: '', profileError: '', balanceLoading: false, balanceReady: false,
-    balanceText: '--', balanceError: '', payPasswordSet: false, signOutConfirm: false, signingOut: false })
+    balanceText: '--', balanceError: '', payPasswordSet: false, pendingReviewCount: 0, signOutConfirm: false, signingOut: false })
 
-const { refreshing, currentRefreshTime, profileLoading, statusBarHeight, username, roleName, roleCode, userUuid, email, avatarUrl, profileError, balanceLoading, balanceReady, balanceText, balanceError, payPasswordSet, signOutConfirm, signingOut } = toRefs(state)
+const { refreshing, currentRefreshTime, profileLoading, statusBarHeight, username, roleName, roleCode, userUuid, email, avatarUrl, profileError, balanceLoading, balanceReady, balanceText, balanceError, payPasswordSet, pendingReviewCount, signOutConfirm, signingOut } = toRefs(state)
 
 function refreshPage() {
     if (state.refreshing || state.profileLoading || state.balanceLoading || state.signingOut)
@@ -176,6 +185,7 @@ function refreshPage() {
     if (state.roleCode == 'CUSTOMER')
         tasks.push(loadBalance());
     if (state.roleCode == 'CUSTOMER') tasks.push(loadUnreadCount());
+    if (state.roleCode == 'CUSTOMER') tasks.push(loadPendingReviewCount());
     Promise.all(tasks).then(() => {
         finishPullRefresh(refreshStartedAt, state.profileError.length == 0 && (state.roleCode != 'CUSTOMER' || state.balanceError.length == 0), (time: string) => {
             if (time.length > 0)
@@ -256,6 +266,26 @@ function openAbout() {
 function loadUnreadCount(): Promise<void> {
     startNotificationSession();
     return refreshNotificationCount();
+}
+
+/**
+ * 读取待评价订单数。
+ *
+ * 数量来自评论服务：服务端先用订单服务提供的最近已完成订单，再与店铺/菜品评价比对。
+ * 只用于个人中心提醒，失败时把数量归零并隐藏提醒，不阻塞资料、余额和消息角标；
+ * 响应写回前复核账号，避免退出或切换账号后旧响应点亮新账号的提醒。
+ */
+function loadPendingReviewCount(): Promise<void> {
+    if (state.roleCode != 'CUSTOMER') return Promise.resolve();
+    const owner = state.userUuid;
+    return fetchPendingReviewCount().then((result: HttpResult) => {
+        if (state.roleCode != 'CUSTOMER' || state.userUuid != owner) return;
+        const data = commentPayload(result);
+        const count = data == null ? null : parsePendingReviewCount(data);
+        state.pendingReviewCount = count == null ? 0 : count;
+    }).catch(() => {
+        if (state.userUuid == owner) state.pendingReviewCount = 0;
+    });
 }
 
 function openOrders() {
@@ -380,6 +410,7 @@ onPageShow(() => {
     if (state.roleCode == 'CUSTOMER')
         loadBalance();
     if (state.roleCode == 'CUSTOMER') loadUnreadCount();
+    if (state.roleCode == 'CUSTOMER') loadPendingReviewCount();
 })
 </script>
 
@@ -406,6 +437,12 @@ onPageShow(() => {
 	.service-cell { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: center; padding: 12px 0 10px 0; border-radius: 12px; }
 	.service-icon { display: flex; width: 44px; height: 44px; border-radius: 14px; background-color: #FDF0E8; align-items: center; justify-content: center; }
 	.service-label { margin-top: 8px; font-size: 12px; line-height: 18px; color: #211C18; text-align: center; }
+	/* 待评价提醒：只在存在待评价订单时出现，浅橙底与订单中心区分但保持同一色系。 */
+	.pending-review-banner { display: flex; flex-direction: row; align-items: center; margin-bottom: 14px; padding: 12px 14px; border-radius: 16px; background-color: #FFF0E6; }
+	.pending-review-banner-body { flex: 1; min-width: 0; }
+	.pending-review-banner-title { font-size: 14px; line-height: 20px; font-weight: bold; color: #C2410C; }
+	.pending-review-banner-note { margin-top: 2px; font-size: 11px; line-height: 16px; color: #8D7B6E; }
+	.pending-review-banner-action { flex-shrink: 0; margin-left: 10px; font-size: 12px; line-height: 18px; font-weight: bold; color: #C2410C; }
 	/* 行尾直接展示真实数据或状态，替代原先的解释性副标题。 */
 	.entry-value { margin-left: 8px; font-size: 13px; line-height: 20px; font-weight: bold; color: #C2410C; }
 	.entry-badge { margin-left: 8px; padding: 2px 8px; border-radius: 7px; font-size: 11px; line-height: 17px; }
@@ -432,6 +469,7 @@ onPageShow(() => {
 	.mine-footer { margin-top: 14px; font-size: 11px; line-height: 18px; text-align: center; color: #A2968B; }
 
 	/* #ifdef WEB */
+	.account-page .pending-review-banner { flex-direction: row; }
 	.account-page .signout-button { flex-direction: row; cursor: pointer;  min-height: 48px;  padding: 10px 16px; }
 	.signout-button:focus-visible { outline: 2px solid #C2410C; outline-offset: 3px; }
 	.account-page .profile-card { flex-direction: row;  padding: 14px 12px;  margin: 0 0 12px 0; }
