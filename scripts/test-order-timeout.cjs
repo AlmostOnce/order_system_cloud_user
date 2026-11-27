@@ -39,10 +39,11 @@ const listFactory=loadSetup(listSource.match(/<script[^>]*>([\s\S]*?)<\/script>/
 (async()=>{
  try {
   const list=listFactory.create();list.$hooks.onPageShow();await new Promise(r=>setImmediate(r));
-  assert.equal(list.paymentTime(list.orders[0]),'15:00');assert.equal(typeof callback,'function');
-  now+=120000;callback();assert.equal(list.paymentTime(list.orders[0]),'13:00');
-  await list.load();assert.equal(list.paymentTime(list.orders[0]),'13:00','refresh must not restart fifteen minutes');
-  now+=780000;callback();assert.match(list.paymentTime(list.orders[0]),/已超时/);
+  assert.equal(list.paymentText(0),'15:00');assert.equal(typeof callback,'function');
+  now+=120000;callback();assert.equal(list.paymentText(0),'13:00');
+  await list.load();assert.equal(list.paymentText(0),'13:00','refresh must not restart fifteen minutes');
+  now+=780000;callback();assert.match(list.paymentText(0),/已超时/);
+  assert.equal(list.paymentText(1),'--:--','rows without cached countdown fall back to placeholder');
   assert.equal(list.orders[0].status,'待支付','timer must not fabricate cancellation');
   const before=clears;list.$hooks.onPageHide();assert.ok(clears>before,'hidden list stops ticking');list.$hooks.onUnload();
   console.log('Pending list passed: per-order creation deadline, one shared clock, ticking, refresh continuity, expiry text and lifecycle cleanup.');

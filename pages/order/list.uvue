@@ -18,9 +18,9 @@
                 <view v-if="pendingWindowId > 0" class="account-card vapor-account-secondary--account-card"><text class="account-heading">有一笔提交结果待确认</text><text class="account-note">继续确认原订单，避免重复下单。</text>
                     <button class="account-primary vapor-account-secondary--account-primary account-primary-text button-text button-text-50" @click="resume">继续确认</button>
                 </view>
-                <view v-for="item in visibleOrders" :key="item.orderId" class="order-list-card" @click="openOrder(item.orderId)">
+                <view v-for="(item, index) in visibleOrders" :key="item.orderId" class="order-list-card" @click="openOrder(item.orderId)">
                 <view class="order-list-top"><text class="order-line-name">{{ item.windowName.length > 0 ? item.windowName : '店铺名称暂不可用' }}</text><text class="order-list-status">{{ item.status }}</text></view>
-                <view v-if="item.status == '待支付'" class="order-list-countdown"><text class="order-list-countdown-label">剩余支付时间</text><text class="order-list-countdown-value">{{ paymentTime(item) }}</text></view>
+                <view v-if="item.status == '待支付'" class="order-list-countdown"><text class="order-list-countdown-label">剩余支付时间</text><text class="order-list-countdown-value">{{ paymentText(index) }}</text></view>
                 <text class="account-muted order-list-date">{{ formatDate(item.createdAt) }}</text>
                 <text class="account-muted">订单号 {{ item.orderNo }}</text>
                 <!-- 列表显示服务端应付快照，避免把优惠前的商品金额误认为支付金额。 -->
@@ -61,12 +61,14 @@ type OrderFilterTab = {
 };
 
 const initialOrders: Array<CustomerOrder> = [];
+// 倒计时文本与订单列表一一对应，由定时器每秒统一生成，模板只按下标读取。
+const initialPaymentTexts: Array<string> = [];
 const initialFilterTabs: Array<OrderFilterTab> = [{ code: 'all', label: '全部' }, { code: 'pending', label: '待支付' }, { code: 'active', label: '进行中' }, { code: 'completed', label: '已完成' }, { code: 'cancelled', label: '已取消' }];
 let stopLiveOrders: (() => void) | null = null
 function stopOrderUpdates() {
     if (stopLiveOrders != null) { stopLiveOrders!(); stopLiveOrders = null }
 }
-const state = reactive({ clockNow: Date.now(), receivedAt: Date.now(), serverClockOffset: 0, userUuid: '', nextCursor: '', hasMore: false, loadingMore: false, refreshing: false, currentRefreshTime: '', selectedStatus: 'all', filterTabs: initialFilterTabs, statusBarHeight: 0, orders: initialOrders, loading: false, errorText: '', pendingWindowId: 0 })
+const state = reactive({ clockNow: Date.now(), receivedAt: Date.now(), serverClockOffset: 0, paymentTexts: initialPaymentTexts, userUuid: '', nextCursor: '', hasMore: false, loadingMore: false, refreshing: false, currentRefreshTime: '', selectedStatus: 'all', filterTabs: initialFilterTabs, statusBarHeight: 0, orders: initialOrders, loading: false, errorText: '', pendingWindowId: 0 })
 
 const { loadingMore, hasMore, refreshing, currentRefreshTime, selectedStatus, filterTabs, statusBarHeight, orders, loading, errorText, pendingWindowId } = toRefs(state)
 
@@ -88,6 +90,8 @@ const visibleOrders = computed((): Array<CustomerOrder> => state.orders)
 let countdownTimer = 0
 let listVisible = false
 let loadVersion = 0
+// 支付期限缓存：期限只由订单创建时间决定，列表变化时整体重建，倒计时不再逐单解析时间。
+let paymentDeadlines: Array<number> = []
 // 倒计时归零后的静默刷新标记与失败冷却，避免每秒重复请求。
 let expiredRefreshScheduled = false
 let expiredRefreshCooldownUntil = 0
@@ -95,11 +99,39 @@ let expiredRefreshCooldownUntil = 0
 let atListTop = true
 let awaitingLiveRefresh = false
 function stopCountdown() { if (countdownTimer > 0) { clearInterval(countdownTimer); countdownTimer = 0 } expiredRefreshScheduled = false }
+/** 订单列表变化后重建支付期限缓存；非待支付订单不参与倒计时，统一记为 0。 */
+function rebuildPaymentDeadlines(): void {
+    const deadlines: Array<number> = []
+    for (let i = 0; i < state.orders.length; i++) {
+        const item = state.orders[i]
+        deadlines.push(item.status == '待支付' ? orderPaymentDeadline(item.createdAt) : 0)
+    }
+    paymentDeadlines = deadlines
+}
+/** 每秒只遍历一次列表生成倒计时文本；模板按下标读取，不再在渲染里做时间计算。 */
+function refreshPaymentTexts(): void {
+    const now = state.clockNow + state.serverClockOffset
+    const texts: Array<string> = []
+    for (let i = 0; i < state.orders.length; i++) {
+        const deadline = i < paymentDeadlines.length ? paymentDeadlines[i] : 0
+        if (deadline <= 0 || state.orders[i].status != '待支付') { texts.push(''); continue }
+        const seconds = Math.max(0, Math.ceil((deadline - now) / 1000))
+        texts.push(seconds == 0 ? '已超时，等待系统确认' : orderPaymentTimeLabel(seconds))
+    }
+    state.paymentTexts = texts
+}
+/** 模板读取倒计时文本；文本尚未生成时给占位符，避免行内再次解析时间。 */
+function paymentText(index: number): string {
+    const text = index < state.paymentTexts.length ? state.paymentTexts[index] : ''
+    return text.length > 0 ? text : '--:--'
+}
 function startCountdown() {
     stopCountdown(); state.clockNow = Date.now()
+    rebuildPaymentDeadlines(); refreshPaymentTexts()
     if (listVisible && state.orders.some((item: CustomerOrder): boolean => item.status == '待支付')) {
         countdownTimer = setInterval(() => {
             state.clockNow = Date.now()
+            refreshPaymentTexts()
             // 有订单倒计时归零时主动刷新一次，避免停留在“待支付/已超时”的旧状态。
             checkExpiredPayments()
         }, 1000)
@@ -113,9 +145,8 @@ function checkExpiredPayments(): void {
     const now = state.clockNow + state.serverClockOffset
     let expired = false
     for (let i = 0; i < state.orders.length; i++) {
-        const item = state.orders[i]
-        if (item.status != '待支付') continue
-        const deadline = orderPaymentDeadline(item.createdAt)
+        if (state.orders[i].status != '待支付') continue
+        const deadline = i < paymentDeadlines.length ? paymentDeadlines[i] : 0
         if (deadline > 0 && deadline <= now) { expired = true; break }
     }
     if (!expired) return
@@ -127,14 +158,6 @@ function checkExpiredPayments(): void {
         expiredRefreshScheduled = false
         expiredRefreshCooldownUntil = Date.now() + 15000
     })
-}
-function paymentTime(item: CustomerOrder): string {
-    const deadline = orderPaymentDeadline(item.createdAt)
-    if (deadline <= 0) return '--:--'
-    // 用当前服务端时钟偏移统一计时，追加新页不能把旧页订单的倒计时重新起算。
-    const now = state.clockNow + state.serverClockOffset
-    const seconds = Math.max(0, Math.ceil((deadline - now) / 1000))
-    return seconds == 0 ? '已超时，等待系统确认' : orderPaymentTimeLabel(seconds)
 }
 
 function refreshPage() {
@@ -161,6 +184,8 @@ function selectFilter(value: string) {
     loadVersion++
     state.selectedStatus = status
     state.orders = []; state.nextCursor = ''; state.hasMore = false
+    // 旧列表清空时必须同步清空倒计时缓存，避免切换筛选首帧读到上一种状态的文本。
+    paymentDeadlines = []; state.paymentTexts = []
     state.loading = false; state.loadingMore = false; state.errorText = ''
     stopCountdown(); atListTop = true; awaitingLiveRefresh = false
     if (listVisible) load()
@@ -295,6 +320,8 @@ onPageShow(() => {
     // 账号变化先清除旧列表，即使新账号请求失败也不能继续展示上一位顾客的订单。
     if (state.userUuid != user.userUuid) {
         loadVersion++; state.userUuid = user.userUuid; state.orders = []
+        // 换账号时连倒计时缓存一起清空，旧账号的支付期限不能残留到新列表。
+        paymentDeadlines = []; state.paymentTexts = []
         state.nextCursor = ''; state.hasMore = false; state.loading = false; state.loadingMore = false; state.serverClockOffset = 0
     }
     const draft = readCheckout(user.userUuid);
