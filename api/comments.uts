@@ -268,7 +268,6 @@ export function fetchComments(productId: number, cursor: string, score: number =
     const base = productId > 0 ? '/comments/products/' + productId : '/comments/me'
     return httpGet(base + '?limit=20' + (cursor.length > 0 ? '&cursor=' + encodeURIComponent(cursor) : '') + (score == 1 || score == 5 ? '&score=' + score : '') + (hasImages ? '&hasImages=true' : ''), true)
 }
-export function fetchProductRating(productId: number): Promise<HttpResult> { return httpGet('/comments/products/' + productId + '/rating', true) }
 export function createComment(body: UTSJSONObject, key: string): Promise<HttpResult> { return httpPost('/comments', body, true, key) }
 export function createWindowReview(body: UTSJSONObject, key: string): Promise<HttpResult> { return httpPost('/comments/window-reviews', body, true, key) }
 

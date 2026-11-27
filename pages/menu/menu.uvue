@@ -1278,15 +1278,6 @@ function specificationSheetStyle(): string {
 	return 'height:' + sheet + 'px';
 }
 
-function productGlyph(product: MenuProduct): string {
-    // 有名称时取首字。
-    if (product.productName.length > 0) {
-        return product.productName.substring(0, 1);
-    }
-    // 名称缺失时用「菜」兜底，保证占位区不空白。
-    return '菜';
-}
-
 function formatPrice(value: number): string {
     // 后端价格是 BigDecimal 序列化出的数字，展示时统一保留两位小数。
     return value.toFixed(2);

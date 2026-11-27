@@ -324,10 +324,6 @@ function openWallet() {
     uni.navigateTo({ url: '/pages/wallet/recharge' });
 }
 
-function openAllRecords() {
-    uni.navigateTo({ url: '/pages/wallet/records' });
-}
-
 function openRechargeRecords() {
     uni.navigateTo({ url: '/pages/wallet/records?type=RECHARGE' });
 }
