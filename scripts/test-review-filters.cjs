@@ -21,6 +21,9 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     assert.equal(vm.scoreFilter, 0, '默认查看全部');
     assert.ok(source.includes('const scoreTabs: Array<number> = [0, 5, 1]'));
     assert.ok(!source.includes('好评 · 五星') && !source.includes('差评 · 一星')); 
+    // 卡片标签必须按区间显示：二至四星不能沿用旧的"非五星即差评"，否则 4 星会与星级图标矛盾。
+    assert.ok(!source.includes("review.score == 5 ? '好评' : '差评'"), '卡片不能把二至四星标成差评');
+    assert.ok(source.includes("review.score >= 5 ? '好评' : (review.score <= 1 ? '差评' : '中评')"), '卡片按区间显示好评/中评/差评');
     const old = vm.loadReviews(true);
     vm.selectScore(5);
     assert.deepEqual(calls.at(-1), { id: 7, cursor: '', score: 5, hasImages: false });

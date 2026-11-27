@@ -83,7 +83,8 @@
                         <text class="review-edit-note">图片与发布时的订单归属不会改变，图片暂不支持修改。</text>
                     </view>
                     <view v-else>
-                        <view class="review-feed-rating"><review-stars :score="review.score"></review-stars><text class="review-feed-rating-label">{{ review.score == 5 ? '好评' : '差评' }}</text></view>
+                        <!-- 卡片标签必须与筛选口径一致：五星=好评、一星=差评，二至四星只说"中评"，不能把 4 星误标为差评。 -->
+                        <view class="review-feed-rating"><review-stars :score="review.score"></review-stars><text class="review-feed-rating-label">{{ review.score >= 5 ? '好评' : (review.score <= 1 ? '差评' : '中评') }}</text></view>
                         <text v-if="review.content.length > 0" class="review-feed-body">{{ review.content }}</text>
                         <view v-if="review.tags.length > 0" class="review-tags"><view v-for="tag in review.tags" :key="tag" class="review-tag"><text class="review-tag-label">{{ tag }}</text></view></view>
                     </view>
